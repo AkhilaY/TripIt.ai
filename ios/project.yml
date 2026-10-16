@@ -37,6 +37,7 @@ targets:
     dependencies:
       - target: TripItShare
         embed: true
+    scheme: {}
 
   TripItShare:
     type: app-extension

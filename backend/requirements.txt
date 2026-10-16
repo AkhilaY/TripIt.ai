@@ -1,0 +1,6 @@
+anthropic==1.15.0
+fastapi==0.143.3
+uvicorn[standard]==0.54.0
+pydantic-settings==2.16.0
+yt-dlp==2026.8.19
+faster-whisper==1.2.1

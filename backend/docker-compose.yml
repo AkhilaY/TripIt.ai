@@ -1,0 +1,10 @@
+services:
+  api:
+    build: .
+    env_file: .env
+    ports:
+      - "8080:8080"
+    # Uncomment to give yt-dlp an Instagram session:
+    # volumes:
+    #   - ./cookies.txt:/secrets/cookies.txt:ro
+    restart: unless-stopped

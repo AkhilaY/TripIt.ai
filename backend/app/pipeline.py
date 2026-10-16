@@ -1,0 +1,73 @@
+import asyncio
+import logging
+import tempfile
+from pathlib import Path
+from typing import Optional
+
+from .config import Settings
+from .jobs import JobStore
+from .llm import ClaudeError, ClaudeService
+from .media import DownloadedReel, download_reel, extract_audio, extract_frames, platform_for
+from .models import JobStatus, ReelMetadata
+from .transcribe import transcribe
+
+log = logging.getLogger(__name__)
+
+
+class Pipeline:
+    def __init__(self, settings: Settings, store: JobStore, claude: ClaudeService):
+        self.settings = settings
+        self.store = store
+        self.claude = claude
+        self._semaphore = asyncio.Semaphore(settings.max_concurrent_jobs)
+
+    async def run(self, job_id: str, url: str, shared_text: Optional[str]) -> None:
+        async with self._semaphore:
+            try:
+                await self._run(job_id, url, shared_text)
+            except ClaudeError as e:
+                self.store.update(job_id, status=JobStatus.failed, message=str(e))
+            except Exception:
+                log.exception("Job %s failed", job_id)
+                self.store.update(job_id, status=JobStatus.failed, message="Something went wrong processing this reel")
+
+    async def _run(self, job_id: str, url: str, shared_text: Optional[str]) -> None:
+        warnings: list[str] = []
+        with tempfile.TemporaryDirectory(prefix="tripit-") as tmp:
+            workdir = Path(tmp)
+
+            self.store.update(job_id, status=JobStatus.downloading, message="Downloading reel")
+            try:
+                reel = await asyncio.to_thread(download_reel, url, workdir, self.settings)
+            except Exception as e:
+                log.warning("Download failed for %s: %s", url, e)
+                if not shared_text:
+                    raise ClaudeError(
+                        "Couldn't download this reel. It may be private, or Instagram may need cookies set on the server."
+                    ) from e
+                warnings.append("Couldn't download the video; used the shared text only.")
+                reel = DownloadedReel(metadata=ReelMetadata(platform=platform_for(url), url=url))
+            self.store.update(job_id, reel=reel.metadata)
+
+            transcript = None
+            frames: list[tuple[float, Path]] = [(0.0, p) for p in reel.image_paths[: self.settings.max_frames]]
+            if reel.video_path:
+                video = reel.video_path
+                self.store.update(job_id, status=JobStatus.transcribing, message="Listening to the audio")
+                audio = await asyncio.to_thread(extract_audio, video, workdir)
+                if audio:
+                    try:
+                        transcript = await asyncio.to_thread(transcribe, audio, self.settings)
+                    except Exception:
+                        log.exception("Transcription failed")
+                        warnings.append("Couldn't transcribe the audio.")
+                video_frames = await asyncio.to_thread(extract_frames, video, workdir, self.settings)
+                frames = (frames + video_frames)[: self.settings.max_frames]
+            elif not reel.image_paths:
+                warnings.append("Only the caption was available; places mentioned in the video may be missing.")
+
+            self.store.update(job_id, status=JobStatus.analyzing, message="Finding places")
+            result = await self.claude.extract_places(reel.metadata, shared_text, transcript, frames)
+
+        message = f"Found {len(result.places)} place{'s' if len(result.places) != 1 else ''}"
+        self.store.update(job_id, status=JobStatus.done, message=message, result=result, warnings=warnings)

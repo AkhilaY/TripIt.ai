@@ -34,7 +34,7 @@ final class Trip {
     var allPlaces: [Place] { (places ?? []).sorted { $0.createdAt < $1.createdAt } }
     var hasItinerary: Bool { dayCount > 0 }
 
-    func places(onDay day: Int) -> [Place] {
+    func stops(onDay day: Int) -> [Place] {
         allPlaces.filter { $0.dayNumber == day }.sorted { $0.dayOrder < $1.dayOrder }
     }
 

@@ -1,0 +1,38 @@
+# Fly.io config. Change `app` to something unique, then see README → "Deploy to Fly.io".
+app = "tripit-change-me"
+primary_region = "iad"
+
+[env]
+  PORT = "8080"
+  DATABASE_PATH = "/data/tripit.db"
+
+# Trips and places live in SQLite on this volume. Create it once with:
+#   fly volumes create tripit_data --size 1 --region iad
+[[mounts]]
+  source = "tripit_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  # Stop the machine when nobody is using it, to keep the bill low. It starts again on the next
+  # request (a few seconds), and any import that was interrupted resumes automatically.
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 50
+
+  [[http_service.checks]]
+    grace_period = "20s"
+    interval = "30s"
+    method = "GET"
+    path = "/health"
+    timeout = "5s"
+
+[[vm]]
+  memory = "1gb"
+  cpu_kind = "shared"
+  cpus = 1

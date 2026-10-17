@@ -4,7 +4,7 @@ services:
     env_file: .env
     ports:
       - "8080:8080"
-    # Uncomment to give yt-dlp an Instagram session:
-    # volumes:
-    #   - ./cookies.txt:/secrets/cookies.txt:ro
+    volumes:
+      - ./data:/data              # trips and places (SQLite)
+      # - ./cookies.txt:/secrets/cookies.txt:ro   # Instagram session for yt-dlp
     restart: unless-stopped

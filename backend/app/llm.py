@@ -114,6 +114,9 @@ class ClaudeService:
             raise ClaudeError(f"Claude API error ({e.status_code})") from e
         except anthropic.APIConnectionError as e:
             raise ClaudeError("Couldn't reach Claude") from e
+        except anthropic.AnthropicError as e:  # e.g. no API key configured
+            log.error("Claude client error: %s", e)
+            raise ClaudeError("Claude isn't configured on the server") from e
 
         if response.stop_reason == "refusal":
             raise ClaudeError("Claude declined to process this post")

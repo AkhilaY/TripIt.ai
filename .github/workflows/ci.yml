@@ -27,6 +27,9 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
       - run: pip install -r requirements-dev.txt
       - run: pytest -q
+      - name: Check web app scripts parse
+        working-directory: backend/app/static/js
+        run: for f in *.js; do node --input-type=module --check < "$f" || exit 1; done
 
   ios:
     name: iOS build (simulator, unsigned)

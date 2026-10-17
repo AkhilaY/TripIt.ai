@@ -60,7 +60,7 @@ class JobStatus(str, Enum):
 
 
 class CreateJobRequest(BaseModel):
-    url: str
+    url: str = ""
     # Text the share sheet passed along (TikTok/IG often include the caption with the link).
     shared_text: Optional[str] = None
 
@@ -85,6 +85,9 @@ class Job(BaseModel):
     reel: Optional[ReelMetadata] = None
     result: Optional[ExtractionResult] = None
     warnings: list[str] = []
+    # Set once the places are saved to the library.
+    trip_id: Optional[str] = None
+    added_places: int = 0
 
 
 # ---------- Itinerary planning ----------
@@ -134,3 +137,100 @@ class PlanResult(BaseModel):
         description="Places that didn't fit, e.g. too many for the number of days."
     )
     notes: Optional[str] = None
+
+
+# ---------- Library (what the web app shows) ----------
+
+
+class Place(BaseModel):
+    id: str
+    trip_id: str
+    reel_id: Optional[str] = None
+    name: str
+    category: PlaceCategory
+    summary: str = ""
+    recommended_items: list[str] = []
+    price_hint: Optional[str] = None
+    tips: Optional[str] = None
+    user_notes: str = ""
+    confidence: str = "high"
+    visited: bool = False
+    neighborhood: Optional[str] = None
+    address: Optional[str] = None
+    city: str = ""
+    country: str = ""
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    maps_url: Optional[str] = None
+    resolved_name: Optional[str] = None
+    day_number: Optional[int] = None
+    day_order: int = 0
+    time_of_day: Optional[TimeOfDay] = None
+    day_note: Optional[str] = None
+    created_at: datetime
+
+
+class Reel(BaseModel):
+    id: str
+    url: str
+    platform: str
+    title: str
+    summary: str = ""
+    caption: Optional[str] = None
+    creator: Optional[str] = None
+    thumbnail_url: Optional[str] = None
+    trip_id: Optional[str] = None
+    imported_at: datetime
+    place_count: int = 0
+
+
+class Trip(BaseModel):
+    id: str
+    name: str
+    city: str
+    country: str = ""
+    created_at: datetime
+    start_date: Optional[date] = None
+    day_count: int = 0
+    day_titles: list[str] = []
+    plan_notes: Optional[str] = None
+    planned_by: Optional[str] = None
+    place_count: int = 0
+    mapped_count: int = 0
+    categories: list[PlaceCategory] = []
+
+
+class TripDetail(Trip):
+    places: list[Place] = []
+    reels: list[Reel] = []
+
+
+class TripUpdate(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=1, max_length=120)
+    start_date: Optional[date] = None
+
+
+class PlaceUpdate(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=1, max_length=200)
+    category: Optional[PlaceCategory] = None
+    visited: Optional[bool] = None
+    user_notes: Optional[str] = Field(default=None, max_length=5000)
+    # Use 0 to unschedule.
+    day_number: Optional[int] = Field(default=None, ge=0, le=21)
+    time_of_day: Optional[TimeOfDay] = None
+    clear_time_of_day: bool = False
+
+
+class PlanTripRequest(BaseModel):
+    days: int = Field(ge=1, le=21)
+    start_date: Optional[date] = None
+    preferences: Optional[str] = Field(default=None, max_length=1000)
+
+
+class ReorderRequest(BaseModel):
+    place_ids: list[str]
+
+
+class LocateRequest(BaseModel):
+    # Optional better search text, e.g. "Joe's Pizza Carmine St".
+    query: Optional[str] = Field(default=None, max_length=300)

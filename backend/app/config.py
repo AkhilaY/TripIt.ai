@@ -29,7 +29,15 @@ class Settings(BaseSettings):
 
     # Jobs
     max_concurrent_jobs: int = 2
-    job_ttl_hours: int = 24
+
+    # Storage: one SQLite file. Put it on a persistent volume in production.
+    database_path: str = "data/tripit.db"
+
+    # Geocoding: "auto" uses Google Places when a key is set, otherwise OpenStreetMap (Nominatim).
+    geocoder: str = "auto"
+    google_maps_api_key: str = ""
+    # Nominatim asks for a contact address in its usage policy (optional).
+    nominatim_email: str = ""
 
 
 @lru_cache

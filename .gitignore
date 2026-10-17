@@ -4,6 +4,10 @@ __pycache__/
 .venv/
 .pytest_cache/
 .env
+backend/data/
+*.db
+*.db-wal
+*.db-shm
 cookies.txt
 
 # Xcode

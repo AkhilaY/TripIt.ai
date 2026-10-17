@@ -15,5 +15,7 @@ RUN python -c "from faster_whisper import WhisperModel; WhisperModel('${WHISPER_
 COPY app ./app
 
 ENV PORT=8080
+ENV DATABASE_PATH=/data/tripit.db
+VOLUME /data
 EXPOSE 8080
 CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT}"]

@@ -6,6 +6,7 @@ from typing import Optional
 
 from .config import Settings
 from .jobs import JobStore
+from .library import Library
 from .llm import ClaudeError, ClaudeService
 from .media import DownloadedReel, download_reel, extract_audio, extract_frames, platform_for
 from .models import JobStatus, ReelMetadata
@@ -15,10 +16,11 @@ log = logging.getLogger(__name__)
 
 
 class Pipeline:
-    def __init__(self, settings: Settings, store: JobStore, claude: ClaudeService):
+    def __init__(self, settings: Settings, store: JobStore, claude: ClaudeService, library: Library):
         self.settings = settings
         self.store = store
         self.claude = claude
+        self.library = library
         self._semaphore = asyncio.Semaphore(settings.max_concurrent_jobs)
 
     async def run(self, job_id: str, url: str, shared_text: Optional[str]) -> None:
@@ -69,5 +71,17 @@ class Pipeline:
             self.store.update(job_id, status=JobStatus.analyzing, message="Finding places")
             result = await self.claude.extract_places(reel.metadata, shared_text, transcript, frames)
 
-        message = f"Found {len(result.places)} place{'s' if len(result.places) != 1 else ''}"
-        self.store.update(job_id, status=JobStatus.done, message=message, result=result, warnings=warnings)
+        # Status stays "analyzing" while pinning so older clients that only know the original statuses work.
+        self.store.update(job_id, result=result, message="Pinning places on the map")
+        trip_id, reel_id, added = await self.library.save_extraction(
+            reel.metadata, result, progress=lambda msg: self.store.update(job_id, message=msg)
+        )
+
+        found = len(result.places)
+        message = f"Found {found} place{'s' if found != 1 else ''}"
+        if found and added < found:
+            message += f" ({found - added} already saved)"
+        self.store.update(
+            job_id, status=JobStatus.done, message=message, warnings=warnings,
+            trip_id=trip_id, reel_id=reel_id, added_places=added,
+        )

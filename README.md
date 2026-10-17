@@ -52,18 +52,25 @@ Open the app, enter your `APP_API_KEY`, then paste a reel link with **+**.
 
 ## 2. Deploy to Fly.io
 
-Your phone needs to reach the server over HTTPS. [Fly.io](https://fly.io) works from Windows, macOS or Linux. Install `flyctl`, then:
+Your phone needs to reach the server over HTTPS. The repo deploys itself to [Fly.io](https://fly.io) from GitHub Actions, so everything happens in the browser, even from a phone.
 
-```bash
-cd backend
-# Edit fly.toml: set `app` to something unique, e.g. tripit-yourname
-fly launch --no-deploy --copy-config        # creates the app from fly.toml
-fly volumes create tripit_data --size 1 --region iad   # where your trips are stored (same region as fly.toml)
-fly secrets set ANTHROPIC_API_KEY=sk-ant-... APP_API_KEY=$(openssl rand -hex 32)
-fly deploy
-```
+1. **Create a Fly.io account** at fly.io and add a payment card (needed even for small apps).
+2. **Create a Fly token:** in the Fly dashboard go to **Tokens → Create token**. Choose an **Organization** token for your *personal* org, which can create apps. Copy it.
+3. **Add GitHub secrets:** in this repo, open **Settings → Secrets and variables → Actions**. On the **Secrets** tab, add:
+   - `FLY_API_TOKEN`: the token from step 2
+   - `ANTHROPIC_API_KEY`: from console.anthropic.com
+   - `APP_API_KEY`: any long random string (e.g. 32+ characters from a password generator). You'll type it into the app and the Shortcut, so save it in your password manager.
+   - Optional: `GOOGLE_MAPS_API_KEY`, `NOMINATIM_EMAIL`, `YTDLP_COOKIES` (the full contents of an Instagram cookies.txt)
+4. **Add GitHub variables:** on the **Variables** tab, add:
+   - `FLY_APP_NAME`: a unique name, e.g. `tripit-yourname`. This becomes `https://tripit-yourname.fly.dev`.
+   - Optional: `FLY_REGION`, the [region](https://fly.io/docs/reference/regions/) nearest you (default `iad`, US East). Set it before the first deploy, because the storage volume can't move later.
+5. **Deploy:** open **Actions → Deploy to Fly.io → Run workflow**. The first run creates the app and a 1 GB volume for your trips, sets the secrets and deploys, which takes about 5–10 minutes. The run summary shows your app's address.
 
-Your app is at `https://<app>.fly.dev`. With the default settings the machine stops when idle and starts on the next request, so a personal setup costs a few dollars a month. Run `fly secrets list` to see which secrets are set; Fly won't show the key values, so save `APP_API_KEY` somewhere when you create it.
+After that, every push that changes `backend/` redeploys automatically. Updated secrets apply on the next deploy.
+
+The machine stops when idle and starts on the next request (a few seconds), so a personal setup costs a few dollars a month. An import interrupted by a stop resumes automatically.
+
+Prefer the command line? Install `flyctl`, set `app` in `backend/fly.toml`, then from `backend/` run `fly apps create <name>`, `fly volumes create tripit_data --size 1 --region iad`, `fly secrets set ANTHROPIC_API_KEY=… APP_API_KEY=…` and `fly deploy --ha=false`.
 
 Other hosts work too, as long as they run the Docker image with a **persistent disk** mounted at `/data`. Free tiers that wipe the disk on restart, like Render's free plan, will lose your trips.
 
@@ -93,7 +100,7 @@ On Android, install the app from Chrome's menu (**Install app**). TripIt then ap
 
 ### Instagram
 
-Instagram blocks most anonymous downloads. Export cookies for instagram.com from a logged-in browser (a "cookies.txt" extension, Netscape format), mount the file into the container and set `YTDLP_COOKIES_FILE`. Use a secondary account. TikTok and YouTube Shorts usually work without cookies.
+Instagram blocks most anonymous downloads. Export cookies for instagram.com from a logged-in browser (a "cookies.txt" extension, Netscape format), then either paste its contents into the `YTDLP_COOKIES` secret (Fly.io) or mount the file and set `YTDLP_COOKIES_FILE` (Docker). Use a secondary account. TikTok and YouTube Shorts usually work without cookies.
 
 > Downloading videos may conflict with TikTok's and Instagram's terms of service. TripIt is meant for personal use on your own server.
 
@@ -109,7 +116,7 @@ Instagram blocks most anonymous downloads. Export cookies for instagram.com from
 | `CLAUDE_MODEL` | `claude-opus-5-5` | |
 | `CLAUDE_EFFORT` | `medium` | `low` is cheaper and faster |
 | `WHISPER_MODEL` | `base` | `small` is more accurate but slower on CPU |
-| `YTDLP_COOKIES_FILE` | – | Needed for most Instagram reels |
+| `YTDLP_COOKIES_FILE` / `YTDLP_COOKIES` | – | Needed for most Instagram reels: a path to cookies.txt, or its contents |
 
 ### Costs
 

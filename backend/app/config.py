@@ -26,6 +26,8 @@ class Settings(BaseSettings):
     frame_width: int = 768
     # Optional Netscape-format cookies file; Instagram often needs a logged-in session.
     ytdlp_cookies_file: str = ""
+    # Or paste the cookies.txt contents here (handy as a Fly.io / GitHub secret).
+    ytdlp_cookies: str = ""
 
     # Jobs
     max_concurrent_jobs: int = 2

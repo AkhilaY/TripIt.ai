@@ -1,8 +1,10 @@
 """Downloading reels and turning them into things Claude can read: caption, audio, frames."""
 
 import logging
+import os
 import re
 import subprocess
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
@@ -70,8 +72,9 @@ def download_reel(url: str, workdir: Path, settings: Settings) -> DownloadedReel
         "socket_timeout": 30,
         "match_filter": yt_dlp.utils.match_filter_func(f"duration <=? {settings.max_video_seconds}"),
     }
-    if settings.ytdlp_cookies_file:
-        opts["cookiefile"] = settings.ytdlp_cookies_file
+    cookie_file = settings.ytdlp_cookies_file or _cookies_from_env(settings.ytdlp_cookies)
+    if cookie_file:
+        opts["cookiefile"] = cookie_file
 
     with yt_dlp.YoutubeDL(opts) as ydl:
         try:
@@ -89,6 +92,21 @@ def download_reel(url: str, workdir: Path, settings: Settings) -> DownloadedReel
         elif suffix in (".jpg", ".jpeg", ".png", ".webp"):
             reel.image_paths.append(path)
     return reel
+
+
+def _cookies_from_env(contents: str) -> Optional[str]:
+    """Writes cookies pasted into YTDLP_COOKIES to a private temp file, once."""
+    global _cookie_path
+    if not contents.strip():
+        return None
+    if _cookie_path is None or not Path(_cookie_path).exists():
+        fd, _cookie_path = tempfile.mkstemp(prefix="tripit-cookies-", suffix=".txt")
+        with os.fdopen(fd, "w") as f:
+            f.write(contents.replace("\\n", "\n").strip() + "\n")
+    return _cookie_path
+
+
+_cookie_path: Optional[str] = None
 
 
 def _metadata(info: dict, url: str, platform: str) -> ReelMetadata:

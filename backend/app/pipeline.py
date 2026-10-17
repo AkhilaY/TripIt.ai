@@ -8,11 +8,24 @@ from .config import Settings
 from .jobs import JobStore
 from .library import Library
 from .llm import ClaudeError, ClaudeService
-from .media import DownloadedReel, download_reel, extract_audio, extract_frames, platform_for
+from .media import (
+    DownloadedReel,
+    DownloadFailed,
+    clean_error,
+    download_reel,
+    extract_audio,
+    extract_frames,
+    fetch_oembed,
+    platform_for,
+)
 from .models import JobStatus, ReelMetadata
 from .transcribe import transcribe
 
 log = logging.getLogger(__name__)
+
+
+class JobFailed(Exception):
+    """A failure with a message meant for the person who shared the reel."""
 
 
 class Pipeline:
@@ -27,11 +40,19 @@ class Pipeline:
         async with self._semaphore:
             try:
                 await self._run(job_id, url, shared_text)
-            except ClaudeError as e:
+            except (ClaudeError, JobFailed) as e:
                 self.store.update(job_id, status=JobStatus.failed, message=str(e))
             except Exception:
                 log.exception("Job %s failed", job_id)
                 self.store.update(job_id, status=JobStatus.failed, message="Something went wrong processing this reel")
+
+    def _download_error(self, url: str, reason: str) -> str:
+        message = f"Couldn't download this reel: {reason}."
+        if platform_for(url) == "instagram" and not (self.settings.ytdlp_cookies or self.settings.ytdlp_cookies_file):
+            message += " Instagram needs a logged-in session: add the YTDLP_COOKIES secret and redeploy."
+        elif "private" in reason.lower() or "login" in reason.lower():
+            message += " The reel may be private or need a login."
+        return message
 
     async def _run(self, job_id: str, url: str, shared_text: Optional[str]) -> None:
         warnings: list[str] = []
@@ -42,13 +63,15 @@ class Pipeline:
             try:
                 reel = await asyncio.to_thread(download_reel, url, workdir, self.settings)
             except Exception as e:
-                log.warning("Download failed for %s: %s", url, e)
-                if not shared_text:
-                    raise ClaudeError(
-                        "Couldn't download this reel. It may be private, or Instagram may need cookies set on the server."
-                    ) from e
-                warnings.append("Couldn't download the video; used the shared text only.")
-                reel = DownloadedReel(metadata=ReelMetadata(platform=platform_for(url), url=url))
+                reason = e.reason if isinstance(e, DownloadFailed) else clean_error(str(e))
+                log.warning("Download failed for %s: %s", url, reason)
+                # Fall back to the caption from the platform's embed API, or text shared with the link.
+                metadata = await asyncio.to_thread(fetch_oembed, url)
+                if metadata is None and not shared_text:
+                    raise JobFailed(self._download_error(url, reason)) from e
+                warnings.append(f"Couldn't download the video ({reason}), so only the caption was used. "
+                                "Places named only in the video may be missing.")
+                reel = DownloadedReel(metadata=metadata or ReelMetadata(platform=platform_for(url), url=url))
             self.store.update(job_id, reel=reel.metadata)
 
             transcript = None

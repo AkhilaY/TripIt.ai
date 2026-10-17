@@ -7,6 +7,8 @@ RUN apt-get update \
 WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
+# TikTok and Instagram change often; always build with the newest yt-dlp.
+RUN pip install --no-cache-dir -U "yt-dlp[default,curl-cffi]"
 
 # Pre-download the Whisper model so the first job isn't slow.
 ARG WHISPER_MODEL=base

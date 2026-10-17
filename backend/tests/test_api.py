@@ -406,3 +406,43 @@ async def test_nominatim_geocoder_skips_far_results():
     assert match.latitude == pytest.approx(40.7305)
     assert match.address == "7 Carmine Street, Manhattan"
     assert calls[0] == "New York, USA"
+
+
+def test_download_failure_falls_back_to_tiktok_caption(client, monkeypatch):
+    from app.media import DownloadFailed
+
+    def blocked(*a):
+        raise DownloadFailed("Your IP address is blocked from accessing this post")
+
+    monkeypatch.setattr(pipeline_module, "download_reel", blocked)
+    monkeypatch.setattr(pipeline_module, "fetch_oembed", lambda url: ReelMetadata(
+        platform="tiktok", url=url, caption="Best pizza in NYC: Joe's, Prince St, Lucali", uploader="slicehunter"))
+    r = client.post("/v1/jobs", json={"url": "https://www.tiktok.com/@a/video/42"}, headers=H)
+    job = wait_for(client, r.json()["id"])
+    assert job["status"] == "done", job
+    assert "IP address is blocked" in job["warnings"][0]
+    prompt = client.messages.calls[-1]["messages"][0]["content"][-1]["text"]
+    assert "Best pizza in NYC" in prompt
+
+
+def test_download_failure_explains_reason(client, monkeypatch):
+    from app.media import DownloadFailed
+
+    def blocked(*a):
+        raise DownloadFailed("Requested content is not available, rate-limit reached or login required")
+
+    monkeypatch.setattr(pipeline_module, "download_reel", blocked)
+    monkeypatch.setattr(pipeline_module, "fetch_oembed", lambda url: None)
+    r = client.post("/v1/jobs", json={"url": "https://www.instagram.com/reel/zzz/"}, headers=H)
+    job = wait_for(client, r.json()["id"])
+    assert job["status"] == "failed"
+    assert "login required" in job["message"]
+    assert "YTDLP_COOKIES" in job["message"]
+
+
+def test_clean_error():
+    from app.media import clean_error
+
+    raw = "\x1b[0;31mERROR:\x1b[0m [TikTok] 7420000000000000000: Your IP address is blocked from accessing this post; please report this issue on https://github.com/yt-dlp/yt-dlp/issues"
+    assert clean_error(raw) == "Your IP address is blocked from accessing this post"
+    assert clean_error("") == "unknown error"

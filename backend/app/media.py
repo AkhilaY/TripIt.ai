@@ -81,7 +81,11 @@ def download_reel(url: str, workdir: Path, settings: Settings) -> DownloadedReel
             info = ydl.extract_info(url, download=True)
         except yt_dlp.utils.DownloadError as e:
             log.warning("Media download failed, retrying for metadata only: %s", e)
-            info = ydl.extract_info(url, download=False)
+            try:
+                info = ydl.extract_info(url, download=False)
+            except yt_dlp.utils.DownloadError as e2:
+                log.warning("Metadata fetch failed too: %s", e2)
+                raise DownloadFailed(clean_error(str(e2))) from e2
             return DownloadedReel(metadata=_metadata(info, url, platform))
 
     reel = DownloadedReel(metadata=_metadata(info, url, platform))
@@ -92,6 +96,59 @@ def download_reel(url: str, workdir: Path, settings: Settings) -> DownloadedReel
         elif suffix in (".jpg", ".jpeg", ".png", ".webp"):
             reel.image_paths.append(path)
     return reel
+
+
+class DownloadFailed(Exception):
+    def __init__(self, reason: str):
+        super().__init__(reason)
+        self.reason = reason
+
+
+_ANSI = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def clean_error(message: str) -> str:
+    """Turns a yt-dlp error into one short line people can act on."""
+    line = _ANSI.sub("", message).strip().splitlines()[0] if message.strip() else "unknown error"
+    line = re.sub(r"^ERROR:\s*", "", line)
+    line = re.sub(r"^\[[^\]]+\]\s*[\w-]*:\s*", "", line)  # "[TikTok] 7420…: " prefix
+    line = line.split("; please report this issue")[0].rstrip(". ")
+    return line[:180] or "unknown error"
+
+
+OEMBED = {
+    "tiktok": "https://www.tiktok.com/oembed",
+    "youtube": "https://www.youtube.com/oembed",
+}
+
+
+def fetch_oembed(url: str) -> Optional[ReelMetadata]:
+    """Caption and creator from the platform's public embed API. Works when video downloads are blocked.
+    Instagram's embed API needs a Meta app token, so it isn't covered."""
+    import httpx
+
+    platform = platform_for(url)
+    endpoint = OEMBED.get(platform)
+    if not endpoint:
+        return None
+    try:
+        response = httpx.get(endpoint, params={"url": url, "format": "json"}, timeout=15, follow_redirects=True)
+        response.raise_for_status()
+        data = response.json()
+    except (httpx.HTTPError, ValueError) as e:
+        log.info("oEmbed lookup failed for %s: %s", url, e)
+        return None
+    caption = (data.get("title") or "").strip()
+    if not caption:
+        return None
+    return ReelMetadata(
+        platform=platform,
+        url=url,
+        title=caption[:120],
+        caption=caption,
+        uploader=data.get("author_unique_id") or data.get("author_name"),
+        thumbnail_url=data.get("thumbnail_url"),
+    )
 
 
 def _cookies_from_env(contents: str) -> Optional[str]:

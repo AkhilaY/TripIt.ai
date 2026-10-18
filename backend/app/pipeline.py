@@ -69,13 +69,15 @@ class Pipeline:
                 metadata = await asyncio.to_thread(fetch_oembed, url)
                 if metadata is None and not shared_text:
                     raise JobFailed(self._download_error(url, reason)) from e
-                warnings.append(f"Couldn't download the video ({reason}), so only the caption was used. "
-                                "Places named only in the video may be missing.")
+                warnings.append(f"Couldn't download the post ({reason}), so only the caption was used. "
+                                "Places shown only in the video or slides may be missing.")
                 reel = DownloadedReel(metadata=metadata or ReelMetadata(platform=platform_for(url), url=url))
             self.store.update(job_id, reel=reel.metadata)
 
             transcript = None
-            frames: list[tuple[float, Path]] = [(0.0, p) for p in reel.image_paths[: self.settings.max_frames]]
+            frames: list[tuple[str, Path]] = [
+                (f"Slide {i}", p) for i, p in enumerate(reel.image_paths[: self.settings.max_frames], start=1)
+            ]
             if reel.video_path:
                 video = reel.video_path
                 self.store.update(job_id, status=JobStatus.transcribing, message="Listening to the audio")
@@ -87,7 +89,7 @@ class Pipeline:
                         log.exception("Transcription failed")
                         warnings.append("Couldn't transcribe the audio.")
                 video_frames = await asyncio.to_thread(extract_frames, video, workdir, self.settings)
-                frames = (frames + video_frames)[: self.settings.max_frames]
+                frames = (frames + [(f"Frame at {s:.0f}s", p) for s, p in video_frames])[: self.settings.max_frames]
             elif not reel.image_paths:
                 warnings.append("Only the caption was available; places mentioned in the video may be missing.")
 

@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse
 
+from . import tiktok
 from .config import Settings
 from .models import ReelMetadata
 
@@ -62,6 +63,10 @@ def download_reel(url: str, workdir: Path, settings: Settings) -> DownloadedReel
     import yt_dlp
 
     platform = platform_for(url)
+    if platform == "tiktok":
+        url = tiktok.resolve(url)
+        if tiktok.is_photo_post(url):
+            return _tiktok_photo_post(url, workdir, settings)
     opts = {
         "outtmpl": str(workdir / "%(id)s.%(ext)s"),
         "format": "best[height<=720]/best",
@@ -85,6 +90,8 @@ def download_reel(url: str, workdir: Path, settings: Settings) -> DownloadedReel
                 info = ydl.extract_info(url, download=False)
             except yt_dlp.utils.DownloadError as e2:
                 log.warning("Metadata fetch failed too: %s", e2)
+                if platform == "tiktok" and "Unsupported URL" in str(e2):
+                    return _tiktok_photo_post(url, workdir, settings)
                 raise DownloadFailed(clean_error(str(e2))) from e2
             return DownloadedReel(metadata=_metadata(info, url, platform))
 
@@ -96,6 +103,14 @@ def download_reel(url: str, workdir: Path, settings: Settings) -> DownloadedReel
         elif suffix in (".jpg", ".jpeg", ".png", ".webp"):
             reel.image_paths.append(path)
     return reel
+
+
+def _tiktok_photo_post(url: str, workdir: Path, settings: Settings) -> DownloadedReel:
+    got = tiktok.download_photo_post(url, workdir, settings.frame_width)
+    if not got or not (got[1] or got[0].caption):
+        raise DownloadFailed("TikTok didn't send this photo post to the server")
+    metadata, slides = got
+    return DownloadedReel(metadata=metadata, image_paths=slides)
 
 
 class DownloadFailed(Exception):
@@ -131,14 +146,23 @@ def fetch_oembed(url: str) -> Optional[ReelMetadata]:
     endpoint = OEMBED.get(platform)
     if not endpoint:
         return None
-    try:
-        response = httpx.get(endpoint, params={"url": url, "format": "json"}, timeout=15, follow_redirects=True)
-        response.raise_for_status()
-        data = response.json()
-    except (httpx.HTTPError, ValueError) as e:
-        log.info("oEmbed lookup failed for %s: %s", url, e)
-        return None
-    caption = (data.get("title") or "").strip()
+    candidates = [url]
+    if platform == "tiktok":
+        # oEmbed wants the full post URL; photo posts are sometimes only accepted as /video/ URLs.
+        full = tiktok.resolve(url)
+        candidates = list(dict.fromkeys([full, full.replace("/photo/", "/video/"), url]))
+    data, caption = {}, ""
+    for candidate in candidates:
+        try:
+            response = httpx.get(endpoint, params={"url": candidate, "format": "json"}, timeout=15, follow_redirects=True)
+            response.raise_for_status()
+            data = response.json()
+        except (httpx.HTTPError, ValueError) as e:
+            log.info("oEmbed lookup failed for %s: %s", candidate, e)
+            continue
+        caption = (data.get("title") or "").strip()
+        if caption:
+            break
     if not caption:
         return None
     return ReelMetadata(

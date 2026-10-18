@@ -446,3 +446,65 @@ def test_clean_error():
     raw = "\x1b[0;31mERROR:\x1b[0m [TikTok] 7420000000000000000: Your IP address is blocked from accessing this post; please report this issue on https://github.com/yt-dlp/yt-dlp/issues"
     assert clean_error(raw) == "Your IP address is blocked from accessing this post"
     assert clean_error("") == "unknown error"
+
+
+TIKTOK_PAGE = """<html><head></head><body>
+<script id="__UNIVERSAL_DATA_FOR_REHYDRATION__" type="application/json">{"__DEFAULT_SCOPE__":{"webapp.video-detail":{"itemInfo":{"itemStruct":{
+  "id":"7672539155838045471","desc":"5 cafes in Lisbon you can't miss #lisbon",
+  "author":{"uniqueId":"gloomyy.autumn"},
+  "imagePost":{"title":"Lisbon cafes","images":[
+    {"imageURL":{"urlList":["https://p16-sign-va.tiktokcdn.com/obj/slide1.webp"]}},
+    {"imageURL":{"urlList":["https://evil.example.com/x.jpg","https://p19-sign.tiktokcdn-us.com/obj/slide2.jpeg"]}},
+    {"imageURL":{"urlList":["http://p16.tiktokcdn.com/insecure.jpg"]}}
+  ]}}}}}}</script></body></html>"""
+
+
+def test_tiktok_photo_post_parsing():
+    from app import tiktok
+
+    item = tiktok.parse_item(TIKTOK_PAGE)
+    assert item["id"] == "7672539155838045471"
+    assert tiktok.slide_urls(item) == [
+        "https://p16-sign-va.tiktokcdn.com/obj/slide1.webp",
+        "https://p19-sign.tiktokcdn-us.com/obj/slide2.jpeg",
+    ]
+    meta = tiktok.metadata_from_item(item, "https://www.tiktok.com/@gloomyy.autumn/photo/7672539155838045471")
+    assert meta.uploader == "gloomyy.autumn" and meta.title == "Lisbon cafes" and "Lisbon" in meta.caption
+    assert tiktok.parse_item("<html>blocked</html>") is None
+
+
+def test_tiktok_url_helpers():
+    from app import tiktok
+
+    assert tiktok.is_short_link("https://www.tiktok.com/t/ZTf8CpEsG/")
+    assert tiktok.is_short_link("https://vm.tiktok.com/ZMabc/")
+    assert not tiktok.is_short_link("https://www.tiktok.com/@a/video/1")
+    assert tiktok.is_photo_post("https://www.tiktok.com/@a/photo/7672539155838045471?_r=1")
+    assert not tiktok.is_photo_post("https://www.tiktok.com/@a/video/1")
+
+
+def test_download_reel_routes_photo_posts(monkeypatch, tmp_path):
+    from app import media, tiktok
+
+    monkeypatch.setattr(tiktok, "resolve", lambda url: "https://www.tiktok.com/@a/photo/123")
+    slide = tmp_path / "slide_01.jpg"
+    slide.write_bytes(b"\xff\xd8\xff")
+    monkeypatch.setattr(tiktok, "download_photo_post", lambda url, workdir, width: (
+        ReelMetadata(platform="tiktok", url=url, caption="Lisbon cafes"), [slide]))
+    reel = media.download_reel("https://www.tiktok.com/t/ZTf8CpEsG/", tmp_path, Settings())
+    assert reel.image_paths == [slide] and reel.metadata.url.endswith("/photo/123")
+
+    monkeypatch.setattr(tiktok, "download_photo_post", lambda url, workdir, width: None)
+    with pytest.raises(media.DownloadFailed, match="photo post"):
+        media.download_reel("https://www.tiktok.com/t/ZTf8CpEsG/", tmp_path, Settings())
+
+
+def test_slides_are_labelled_for_claude(client, monkeypatch, tmp_path):
+    slide = tmp_path / "slide_01.jpg"
+    slide.write_bytes(b"\xff\xd8\xff")
+    monkeypatch.setattr(pipeline_module, "download_reel", lambda url, workdir, s: DownloadedReel(
+        metadata=ReelMetadata(platform="tiktok", url=url, caption="Lisbon cafes"), image_paths=[slide]))
+    r = client.post("/v1/jobs", json={"url": "https://www.tiktok.com/@a/photo/99"}, headers=H)
+    assert wait_for(client, r.json()["id"])["status"] == "done"
+    labels = [b["text"] for b in client.messages.calls[-1]["messages"][0]["content"] if b["type"] == "text"]
+    assert "Slide 1:" in labels

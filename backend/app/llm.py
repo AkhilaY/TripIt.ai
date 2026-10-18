@@ -18,9 +18,9 @@ T = TypeVar("T", bound=BaseModel)
 
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
 
-EXTRACT_SYSTEM = """You turn short travel videos (TikTok, Instagram Reels, YouTube Shorts) into a structured list of places.
+EXTRACT_SYSTEM = """You turn short travel posts (TikTok videos and photo slideshows, Instagram Reels and carousels, YouTube Shorts) into a structured list of places.
 
-You get the post caption, a timestamped speech transcript, and frames sampled from the video. Creators usually name each place in the voiceover or as on-screen text over the clip, so read the frames carefully.
+You get the post caption, a timestamped speech transcript when there is speech, and images: frames sampled from a video, or the slides of a photo post. Creators usually name each place in the voiceover or as text written over the frames or slides, so read the images carefully.
 
 Rules:
 - Include only real, specific places a person could visit or search for in a maps app: restaurants, bars, cafes, shops, landmarks, parks, hotels, tours. Skip generic advice ("try a bagel") unless it names a specific place.
@@ -53,11 +53,12 @@ class ClaudeService:
         reel: ReelMetadata,
         shared_text: Optional[str],
         transcript: Optional[str],
-        frames: list[tuple[float, Path]],
+        frames: list[tuple[str, Path]],
     ) -> ExtractionResult:
+        """frames: (label, image) pairs, e.g. ("Frame at 12s", …) or ("Slide 3", …)."""
         content: list[dict] = []
-        for seconds, path in frames:
-            content.append({"type": "text", "text": f"Frame at {seconds:.0f}s:"})
+        for label, path in frames:
+            content.append({"type": "text", "text": f"{label}:"})
             content.append(_image_block(path))
 
         text_parts = [
@@ -70,7 +71,7 @@ class ClaudeService:
             text_parts.append(f"Text shared with the link:\n{shared_text}")
         text_parts.append(f"Speech transcript:\n{transcript or '(no speech detected)'}")
         if not frames:
-            text_parts.append("(No video frames were available for this post.)")
+            text_parts.append("(No video frames or images were available for this post.)")
         text_parts.append("Extract every place recommended in this post.")
         content.append({"type": "text", "text": "\n\n".join(text_parts)})
 

@@ -209,3 +209,8 @@ button.row:active, a.row:active { background: var(--fill); }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+
+/* Google Maps pins and popups */
+.gpin { position: absolute; width: 30px; height: 38px; }
+.gpopup { color: #1C1C1E; font-family: var(--font); font-size: 15px; line-height: 1.35; padding: 2px 4px; }
+.gpopup a.popup-link { color: #E2513E; font-weight: 600; text-decoration: none; display: block; margin-top: 4px; }

@@ -109,11 +109,11 @@ async def health() -> dict:
 
 
 @app.get("/v1/config", dependencies=[Auth])
-async def config(request: Request) -> dict:
+async def config(request: Request, settings: Annotated[Settings, Depends(get_settings)]) -> dict:
     """Also used by the web app to check the API key."""
     geocoder = request.app.state.library.geocoder
     name = "google" if isinstance(geocoder, GooglePlacesGeocoder) else "none" if isinstance(geocoder, NoGeocoder) else "openstreetmap"
-    return {"ok": True, "geocoder": name}
+    return {"ok": True, "geocoder": name, "google_maps_key": settings.google_maps_browser_key or None}
 
 
 # ---------- Imports (jobs) ----------

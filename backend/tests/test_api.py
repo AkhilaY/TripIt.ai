@@ -508,3 +508,12 @@ def test_slides_are_labelled_for_claude(client, monkeypatch, tmp_path):
     assert wait_for(client, r.json()["id"])["status"] == "done"
     labels = [b["text"] for b in client.messages.calls[-1]["messages"][0]["content"] if b["type"] == "text"]
     assert "Slide 1:" in labels
+
+
+def test_config_exposes_only_the_browser_maps_key(client):
+    settings = Settings(app_api_key="secret", anthropic_api_key="x", google_maps_api_key="server-only",
+                        google_maps_browser_key="browser-key")
+    app.dependency_overrides[get_settings] = lambda: settings
+    body = client.get("/v1/config", headers=H).json()
+    assert body["google_maps_key"] == "browser-key"
+    assert "server-only" not in str(body)

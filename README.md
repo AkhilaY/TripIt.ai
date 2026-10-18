@@ -111,12 +111,29 @@ Instagram blocks most anonymous downloads. Export cookies for instagram.com from
 | `ANTHROPIC_API_KEY` | – | Required |
 | `APP_API_KEY` | – | Shared secret for the web app and Shortcut. Leave empty only on your own computer |
 | `GOOGLE_MAPS_API_KEY` | – | Optional. Better matches for restaurants and shops; enable "Places API (New)" |
+| `GOOGLE_MAPS_BROWSER_KEY` | – | Optional. Shows Google Maps inside the app instead of OpenStreetMap (see below) |
 | `NOMINATIM_EMAIL` | – | Contact email for OpenStreetMap's geocoder (requested by its usage policy) |
 | `DATABASE_PATH` | `data/tripit.db` (`/data/tripit.db` in Docker) | SQLite file |
 | `CLAUDE_MODEL` | `claude-opus-5-5` | |
 | `CLAUDE_EFFORT` | `medium` | `low` is cheaper and faster |
 | `WHISPER_MODEL` | `base` | `small` is more accurate but slower on CPU |
 | `YTDLP_COOKIES_FILE` / `YTDLP_COOKIES` | – | Needed for most Instagram reels: a path to cookies.txt, or its contents |
+
+### Google Maps inside the app (optional)
+
+Without a key, the app's maps use free OpenStreetMap tiles. To use Google Maps instead:
+
+1. In [Google Cloud Console](https://console.cloud.google.com), create a project and add a billing account. Personal use should stay within Google's free monthly allowance for map loads.
+2. Go to **APIs & Services → Library**, find **Maps JavaScript API** and click **Enable**.
+3. Go to **APIs & Services → Credentials → Create credentials → API key**. Open the new key and set:
+   - **Application restrictions:** Websites → add `https://my-tripit.fly.dev/*` (your app's address).
+   - **API restrictions:** Restrict key → **Maps JavaScript API**.
+   This key is visible to browsers, so these restrictions are what keep others from using it.
+4. Add it as the GitHub secret `GOOGLE_MAPS_BROWSER_KEY` and redeploy.
+
+If Google rejects the key, the app falls back to OpenStreetMap and shows a message. **Settings → Maps in the app** shows which one is active.
+
+For better map search on restaurants and shops too, enable **Places API (New)** and put a *second* key (no website restriction, API-restricted to Places API (New)) in `GOOGLE_MAPS_API_KEY`. That one stays on the server.
 
 ### Costs
 

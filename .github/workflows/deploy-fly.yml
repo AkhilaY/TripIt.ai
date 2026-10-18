@@ -79,6 +79,7 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           APP_API_KEY: ${{ secrets.APP_API_KEY }}
           GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
+          GOOGLE_MAPS_BROWSER_KEY: ${{ secrets.GOOGLE_MAPS_BROWSER_KEY }}
           NOMINATIM_EMAIL: ${{ secrets.NOMINATIM_EMAIL }}
           YTDLP_COOKIES: ${{ secrets.YTDLP_COOKIES }}
         run: |
@@ -86,6 +87,7 @@ jobs:
             printf 'ANTHROPIC_API_KEY=%s\n' "$ANTHROPIC_API_KEY"
             printf 'APP_API_KEY=%s\n' "$APP_API_KEY"
             [ -z "$GOOGLE_MAPS_API_KEY" ] || printf 'GOOGLE_MAPS_API_KEY=%s\n' "$GOOGLE_MAPS_API_KEY"
+            [ -z "$GOOGLE_MAPS_BROWSER_KEY" ] || printf 'GOOGLE_MAPS_BROWSER_KEY=%s\n' "$GOOGLE_MAPS_BROWSER_KEY"
             [ -z "$NOMINATIM_EMAIL" ] || printf 'NOMINATIM_EMAIL=%s\n' "$NOMINATIM_EMAIL"
             # cookies.txt is multi-line; store it on one line with \n escapes (the server undoes this).
             [ -z "$YTDLP_COOKIES" ] || printf 'YTDLP_COOKIES=%s\n' "$(printf '%s' "$YTDLP_COOKIES" | awk '{printf "%s\\n", $0}')"

@@ -38,6 +38,9 @@ class Settings(BaseSettings):
     # Geocoding: "auto" uses Google Places when a key is set, otherwise OpenStreetMap (Nominatim).
     geocoder: str = "auto"
     google_maps_api_key: str = ""
+    # Separate key for showing Google Maps in the web app. It is sent to browsers, so restrict it in
+    # Google Cloud to the Maps JavaScript API and to your app's address (e.g. https://my-tripit.fly.dev/*).
+    google_maps_browser_key: str = ""
     # Nominatim asks for a contact address in its usage policy (optional).
     nominatim_email: str = ""
 

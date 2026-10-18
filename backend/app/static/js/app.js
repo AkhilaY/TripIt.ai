@@ -1,6 +1,6 @@
 import { api, ApiError, getKey, setKey } from './api.js';
 import { ICON, hydrateIcons } from './icons.js';
-import { destroyMaps, renderMap } from './map.js';
+import { configureMaps, destroyMaps, mapProvider, renderMap } from './map.js';
 
 // ---------- Constants & helpers ----------
 
@@ -336,7 +336,7 @@ const VIEWS = {
   },
 
   async settings() {
-    if (!S.config) S.config = await api('/v1/config');
+    if (!S.config) { S.config = await api('/v1/config'); configureMaps({ googleMapsKey: S.config.google_maps_key }); }
     const origin = location.origin;
     const key = getKey();
     const geocoder = { google: 'Google Places', openstreetmap: 'OpenStreetMap (free)', none: 'Off' }[S.config.geocoder] || S.config.geocoder;
@@ -368,6 +368,7 @@ const VIEWS = {
       <div class="section"><div class="section-h">Server</div><div class="group">
         <div class="row"><span class="main"><span class="s">Address</span><span class="t">${esc(origin)}</span></span></div>
         <div class="row"><span class="main"><span class="t">Finding places on the map</span></span><span class="val">${esc(geocoder)}</span></div>
+        <div class="row"><span class="main"><span class="t">Maps in the app</span></span><span class="val">${mapProvider() === 'google' ? 'Google Maps' : 'OpenStreetMap'}</span></div>
         ${key ? '<button class="row destructive" data-act="signout">Sign out on this device</button>' : ''}
       </div></div>`;
   },
@@ -802,6 +803,7 @@ document.addEventListener('submit', async (ev) => {
     setKey(key);
     try {
       S.config = await api('/v1/config');
+      configureMaps({ googleMapsKey: S.config.google_maps_key });
       await start();
     } catch (e) {
       setKey('');
@@ -835,10 +837,16 @@ async function start() {
   else render();
 }
 
+document.addEventListener('tripit:maps-fallback', () => {
+  toast('Google Maps rejected the API key, so OpenStreetMap is shown. Check the key’s website restrictions.', true);
+  render();
+});
+
 hydrateIcons(document.getElementById('tabbar'));
 (async () => {
   try {
     S.config = await api('/v1/config');
+    configureMaps({ googleMapsKey: S.config.google_maps_key });
   } catch (e) {
     if (e.status === 401) { location.hash = '#/setup'; render(); return; }
   }

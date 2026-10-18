@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.env
+backend/data/
+*.db
+*.db-wal
+*.db-shm
+cookies.txt
+
+# Xcode
+ios/TripIt.xcodeproj/
+xcuserdata/
+DerivedData/
+*.xcworkspace/xcuserdata/
+.DS_Store
+ios/Config/Secrets.xcconfig

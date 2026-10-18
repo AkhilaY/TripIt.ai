@@ -1,0 +1,116 @@
+name: Deploy to Fly.io
+
+# Creates the Fly app and its storage volume on first run, syncs secrets from GitHub, then deploys.
+# Setup (all in the browser): see "Deploy to Fly.io" in the README.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, "feature/**"]
+    paths:
+      - "backend/**"
+      - ".github/workflows/deploy-fly.yml"
+
+concurrency:
+  group: deploy-fly
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy backend + web app
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      APP: ${{ vars.FLY_APP_NAME }}
+      REGION: ${{ vars.FLY_REGION || 'iad' }}
+      ORG: ${{ vars.FLY_ORG || 'personal' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check setup
+        id: check
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          APP_API_KEY: ${{ secrets.APP_API_KEY }}
+        run: |
+          missing=""
+          [ -n "$FLY_API_TOKEN" ] || missing="$missing secret:FLY_API_TOKEN"
+          [ -n "$ANTHROPIC_API_KEY" ] || missing="$missing secret:ANTHROPIC_API_KEY"
+          [ -n "$APP_API_KEY" ] || missing="$missing secret:APP_API_KEY"
+          [ -n "$APP" ] || missing="$missing variable:FLY_APP_NAME"
+          if [ -n "$missing" ]; then
+            echo "::notice::Skipping deploy, not set up yet. Add in Settings → Secrets and variables → Actions:$missing"
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install flyctl
+        if: steps.check.outputs.ready == 'true'
+        run: |
+          curl -fsSL https://fly.io/install.sh | sh
+          echo "$HOME/.fly/bin" >> "$GITHUB_PATH"
+
+      - name: Create app (first run only)
+        if: steps.check.outputs.ready == 'true'
+        run: |
+          if flyctl status --app "$APP" >/dev/null 2>&1; then
+            echo "App $APP exists"
+          else
+            flyctl apps create "$APP" --org "$ORG"
+          fi
+
+      - name: Create storage volume (first run only)
+        if: steps.check.outputs.ready == 'true'
+        run: |
+          count=$(flyctl volumes list --app "$APP" --json | jq 'length')
+          if [ "$count" = "0" ]; then
+            flyctl volumes create tripit_data --size 1 --region "$REGION" --app "$APP" --yes
+          else
+            echo "Volume exists"
+          fi
+
+      - name: Sync secrets
+        if: steps.check.outputs.ready == 'true'
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          APP_API_KEY: ${{ secrets.APP_API_KEY }}
+          GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
+          GOOGLE_MAPS_BROWSER_KEY: ${{ secrets.GOOGLE_MAPS_BROWSER_KEY }}
+          NOMINATIM_EMAIL: ${{ secrets.NOMINATIM_EMAIL }}
+          YTDLP_COOKIES: ${{ secrets.YTDLP_COOKIES }}
+        run: |
+          {
+            printf 'ANTHROPIC_API_KEY=%s\n' "$ANTHROPIC_API_KEY"
+            printf 'APP_API_KEY=%s\n' "$APP_API_KEY"
+            [ -z "$GOOGLE_MAPS_API_KEY" ] || printf 'GOOGLE_MAPS_API_KEY=%s\n' "$GOOGLE_MAPS_API_KEY"
+            [ -z "$GOOGLE_MAPS_BROWSER_KEY" ] || printf 'GOOGLE_MAPS_BROWSER_KEY=%s\n' "$GOOGLE_MAPS_BROWSER_KEY"
+            [ -z "$NOMINATIM_EMAIL" ] || printf 'NOMINATIM_EMAIL=%s\n' "$NOMINATIM_EMAIL"
+            # cookies.txt is multi-line; store it on one line with \n escapes (the server undoes this).
+            [ -z "$YTDLP_COOKIES" ] || printf 'YTDLP_COOKIES=%s\n' "$(printf '%s' "$YTDLP_COOKIES" | awk '{printf "%s\\n", $0}')"
+          } | flyctl secrets import --stage --app "$APP"
+
+      - name: Deploy
+        if: steps.check.outputs.ready == 'true'
+        run: |
+          sed -i "s/^app = .*/app = \"$APP\"/; s/^primary_region = .*/primary_region = \"$REGION\"/" fly.toml
+          flyctl deploy --remote-only --ha=false --app "$APP" --wait-timeout 10m
+
+      - name: Check it's up
+        if: steps.check.outputs.ready == 'true'
+        run: |
+          url="https://$APP.fly.dev"
+          for i in $(seq 1 20); do
+            if curl -fsS "$url/health" >/dev/null; then
+              echo "### TripIt is live at $url" >> "$GITHUB_STEP_SUMMARY"
+              echo "Open it in Safari on your iPhone, enter your APP_API_KEY, then Share → Add to Home Screen." >> "$GITHUB_STEP_SUMMARY"
+              echo "Live at $url"
+              exit 0
+            fi
+            sleep 6
+          done
+          echo "::error::Deployed, but $url/health didn't respond. Check: flyctl logs --app $APP"
+          exit 1

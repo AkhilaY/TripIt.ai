@@ -225,6 +225,7 @@ class Trip(BaseModel):
     place_count: int = 0
     mapped_count: int = 0
     categories: list[PlaceCategory] = []
+    cover_photo: Optional[PlacePhoto] = None
 
 
 class TripDetail(Trip):

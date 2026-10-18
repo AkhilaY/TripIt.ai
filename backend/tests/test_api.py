@@ -674,6 +674,10 @@ def test_reel_frames_become_place_photos(client):
     assert client.get(url.split("?")[0] + "?sig=wrong").status_code == 403
     assert client.get(f"/v1/places/{joes['id']}/photos/5?sig=x").status_code == 404
 
+    # The trip list carries a cover photo for the Trips cards.
+    listed = next(t for t in client.get("/v1/trips", headers=H).json() if t["id"] == trip["id"])
+    assert listed["cover_photo"]["source"] == "reel" and "sig=" in listed["cover_photo"]["url"]
+
     # Deleting the place removes its saved photo files.
     photo_dir = app.state.photos.dir
     assert any(photo_dir.iterdir())

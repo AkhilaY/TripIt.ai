@@ -14,6 +14,7 @@
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
   <link rel="icon" type="image/png" href="/icons/favicon.png">
+  <link rel="preload" href="/vendor/inter/inter-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/vendor/leaflet/leaflet.css">
   <link rel="stylesheet" href="/styles.css">
   <script src="/vendor/leaflet/leaflet.js" defer></script>
@@ -24,12 +25,14 @@
     <main id="view" aria-live="polite"></main>
   </div>
   <nav class="tabbar" id="tabbar" aria-label="Sections">
+    <span class="tab-lens" aria-hidden="true"></span>
     <a class="tab" href="#/" data-tab="trips"><span data-icon="trips"></span>Trips</a>
     <a class="tab" href="#/map" data-tab="map"><span data-icon="map"></span>Map</a>
     <a class="tab" href="#/imports" data-tab="imports"><span data-icon="tray"></span>Imports</a>
     <a class="tab" href="#/settings" data-tab="settings"><span data-icon="gear"></span>Settings</a>
   </nav>
   <div id="overlay"></div>
+  <div id="toasts" aria-live="polite"></div>
   <noscript>TripIt needs JavaScript turned on.</noscript>
 </body>
 </html>

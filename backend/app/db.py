@@ -196,7 +196,8 @@ class Database:
         by_trip: dict[str, list[sqlite3.Row]] = {}
         for s in stats:
             by_trip.setdefault(s["trip_id"], []).append(s)
-        return [self._trip(r, by_trip.get(r["id"], [])) for r in rows]
+        covers = self._covers()
+        return [self._trip(r, by_trip.get(r["id"], []), covers.get(r["id"])) for r in rows]
 
     def get_trip(self, trip_id: str) -> Optional[Trip]:
         rows = self._rows("SELECT * FROM trips WHERE id = ?", (trip_id,))
@@ -207,7 +208,7 @@ class Database:
             "FROM places WHERE trip_id = ? GROUP BY category",
             (trip_id,),
         )
-        return self._trip(rows[0], stats)
+        return self._trip(rows[0], stats, self._covers(trip_id).get(trip_id))
 
     def get_trip_detail(self, trip_id: str) -> Optional[TripDetail]:
         trip = self.get_trip(trip_id)
@@ -228,8 +229,29 @@ class Database:
     def delete_trip(self, trip_id: str) -> None:
         self._exec("DELETE FROM trips WHERE id = ?", (trip_id,))
 
+    def _covers(self, trip_id: Optional[str] = None) -> dict[str, dict]:
+        """One cover photo per trip: the first saved place with a photo, preferring real
+        photos over reel frames (those often carry caption text)."""
+        sql = "SELECT id, trip_id, photos FROM places WHERE photos IS NOT NULL AND photos != '[]'"
+        args: tuple = ()
+        if trip_id:
+            sql += " AND trip_id = ?"
+            args = (trip_id,)
+        best: dict[str, tuple[int, dict]] = {}
+        for row in self._rows(sql + " ORDER BY created_at", args):
+            refs = list(enumerate(json.loads(row["photos"])))
+            i, ref = next(((i, r) for i, r in refs if r["source"] != "reel"), refs[0])
+            rank = 1 if ref["source"] == "reel" else 0
+            if row["trip_id"] not in best or rank < best[row["trip_id"]][0]:
+                best[row["trip_id"]] = (rank, {
+                    "source": ref["source"],
+                    "url": self.photo_url(row["id"], i, ref["ref"]),
+                    "attribution": ref.get("attribution"),
+                })
+        return {tid: photo for tid, (_, photo) in best.items()}
+
     @staticmethod
-    def _trip(row: sqlite3.Row, stats: list[sqlite3.Row]) -> Trip:
+    def _trip(row: sqlite3.Row, stats: list[sqlite3.Row], cover: Optional[dict] = None) -> Trip:
         return Trip(
             id=row["id"],
             name=row["name"],
@@ -244,6 +266,7 @@ class Database:
             place_count=sum(s["n"] for s in stats),
             mapped_count=sum(s["mapped"] or 0 for s in stats),
             categories=sorted({s["category"] for s in stats}),
+            cover_photo=cover,
         )
 
     # ---------- Places ----------

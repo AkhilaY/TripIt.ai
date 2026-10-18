@@ -37,6 +37,7 @@ function accentColor() {
  *  route: draw a dashed line through the places in order and number the pins
  *  interactive: false for small preview maps
  *  popup(place): HTML for a pin's popup
+ *  pad: {top, bottom} extra fit padding for controls floating over the map
  */
 export function renderMap(el, places, opts = {}) {
   const located = places.filter((p) => p.latitude != null && p.longitude != null);
@@ -55,7 +56,7 @@ export function renderMap(el, places, opts = {}) {
 
 // ---------- OpenStreetMap (Leaflet) ----------
 
-function renderLeaflet(el, located, { route = false, interactive = true, popup = null, newIds = new Set(), zoom = null }) {
+function renderLeaflet(el, located, { route = false, interactive = true, popup = null, newIds = new Set(), zoom = null, pad = {} }) {
   if (!window.L) {
     el.innerHTML = '<div class="loading"><span class="s">Map couldn’t load</span></div>';
     return;
@@ -83,7 +84,7 @@ function renderLeaflet(el, located, { route = false, interactive = true, popup =
 
   if (zoom && points.length) map.setView(points[0], zoom);
   else if (points.length === 1) map.setView(points[0], 15);
-  else if (points.length) map.fitBounds(points, { padding: [40, 40], maxZoom: 16 });
+  else if (points.length) map.fitBounds(points, { paddingTopLeft: [40, pad.top || 40], paddingBottomRight: [40, pad.bottom || 40], maxZoom: 16 });
   else map.setView([20, 0], 2);
   requestAnimationFrame(() => map.invalidateSize());
 }
@@ -111,13 +112,14 @@ function loadGoogle() {
   return googleReady;
 }
 
-function renderGoogle(maps, el, located, { route = false, interactive = true, popup = null, newIds = new Set(), zoom = null }) {
+function renderGoogle(maps, el, located, { route = false, interactive = true, popup = null, newIds = new Set(), zoom = null, pad = {} }) {
   const map = new maps.Map(el, {
     center: { lat: 20, lng: 0 },
     zoom: 2,
     colorScheme: 'FOLLOW_SYSTEM',
     disableDefaultUI: true,
     zoomControl: interactive,
+    zoomControlOptions: { position: maps.ControlPosition.RIGHT_CENTER },
     gestureHandling: interactive ? 'greedy' : 'none',
     keyboardShortcuts: interactive,
     clickableIcons: false,
@@ -181,7 +183,7 @@ function renderGoogle(maps, el, located, { route = false, interactive = true, po
   } else if (located.length) {
     const bounds = new maps.LatLngBounds();
     located.forEach((p) => bounds.extend({ lat: p.latitude, lng: p.longitude }));
-    map.fitBounds(bounds, 48);
+    map.fitBounds(bounds, { top: pad.top || 48, bottom: pad.bottom || 48, left: 48, right: 48 });
     maps.event.addListenerOnce(map, 'idle', () => { if (map.getZoom() > 16) map.setZoom(16); });
   }
 

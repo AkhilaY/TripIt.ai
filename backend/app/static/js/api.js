@@ -18,6 +18,14 @@ export class ApiError extends Error {
   constructor(message, status) { super(message); this.status = status; }
 }
 
+let offline = false;
+function network(isOffline) {
+  if (isOffline === offline) return;
+  offline = isOffline;
+  window.dispatchEvent(new CustomEvent('tripit:network', { detail: { offline } }));
+}
+export const isOffline = () => offline;
+
 export async function api(path, { method = 'GET', body } = {}) {
   let res;
   try {
@@ -27,8 +35,13 @@ export async function api(path, { method = 'GET', body } = {}) {
       body: body === undefined ? undefined : JSON.stringify(body),
     });
   } catch {
-    throw new ApiError("Can't reach the TripIt server. Check your connection.", 0);
+    network(true);
+    throw new ApiError("You're offline. This needs a connection.", 0);
   }
+  // The service worker marks answers it served from the copy saved on this phone.
+  const saved = res.headers.get('X-TripIt-Offline') === '1';
+  network(saved);
+  if (saved && res.status === 503) throw new ApiError("You're offline, and this hasn't been saved on your phone yet.", 0);
   if (res.status === 204) return null;
   let data = null;
   try { data = await res.json(); } catch { /* empty or non-JSON body */ }

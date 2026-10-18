@@ -89,6 +89,19 @@ CREATE TABLE IF NOT EXISTS jobs (
 );
 CREATE INDEX IF NOT EXISTS jobs_url ON jobs(url);
 
+CREATE TABLE IF NOT EXISTS place_mentions (
+    place_id TEXT NOT NULL REFERENCES places(id) ON DELETE CASCADE,
+    reel_id TEXT NOT NULL REFERENCES reels(id) ON DELETE CASCADE,
+    PRIMARY KEY (place_id, reel_id)
+);
+
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+    endpoint TEXT PRIMARY KEY,
+    keys TEXT NOT NULL,
+    origin TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS route_cache (
     key TEXT PRIMARY KEY,
     duration_s INTEGER,
@@ -100,16 +113,23 @@ CREATE TABLE IF NOT EXISTS route_cache (
 
 # Columns added after the first release; created on existing databases at startup.
 MIGRATIONS = {
-    "places": [("opening_hours", "TEXT"), ("hours_checked_at", "TEXT"), ("photos", "TEXT"), ("photos_checked_at", "TEXT")],
+    "places": [
+        ("opening_hours", "TEXT"), ("hours_checked_at", "TEXT"), ("photos", "TEXT"), ("photos_checked_at", "TEXT"),
+        ("must_do", "INTEGER NOT NULL DEFAULT 0"), ("start_time", "TEXT"),
+    ],
+    "trips": [("share_token", "TEXT")],
 }
 
 PLACE_COLUMNS = (
     "trip_id", "reel_id", "name", "category", "summary", "recommended_items", "price_hint", "tips",
     "user_notes", "confidence", "visited", "neighborhood", "address", "city", "country", "latitude",
     "longitude", "maps_url", "resolved_name", "day_number", "day_order", "time_of_day", "day_note",
-    "opening_hours", "hours_checked_at", "photos", "photos_checked_at",
+    "opening_hours", "hours_checked_at", "photos", "photos_checked_at", "must_do", "start_time",
 )
-TRIP_COLUMNS = ("name", "city", "country", "start_date", "day_count", "day_titles", "plan_notes", "planned_by")
+TRIP_COLUMNS = ("name", "city", "country", "start_date", "day_count", "day_titles", "plan_notes", "planned_by", "share_token")
+# Places plus the reels that mention them.
+PLACE_SELECT = ("SELECT p.*, (SELECT group_concat(m.reel_id) FROM place_mentions m WHERE m.place_id = p.id) AS mention_reels "
+                "FROM places p")
 JSON_COLUMNS = {"recommended_items", "day_titles", "warnings", "opening_hours", "photos"}
 
 
@@ -158,6 +178,11 @@ class Database:
             for name, sql_type in columns:
                 if name not in existing:
                     self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {sql_type}")
+        # Places saved before mentions were tracked count their first reel.
+        self._conn.execute(
+            "INSERT OR IGNORE INTO place_mentions (place_id, reel_id) "
+            "SELECT id, reel_id FROM places WHERE reel_id IS NOT NULL AND reel_id IN (SELECT id FROM reels)"
+        )
 
     def _exec(self, sql: str, params: Iterable[Any] = ()) -> sqlite3.Cursor:
         with self._lock:
@@ -229,6 +254,10 @@ class Database:
     def delete_trip(self, trip_id: str) -> None:
         self._exec("DELETE FROM trips WHERE id = ?", (trip_id,))
 
+    def trip_by_share_token(self, token: str) -> Optional[TripDetail]:
+        rows = self._rows("SELECT id FROM trips WHERE share_token = ?", (token,)) if token else []
+        return self.get_trip_detail(rows[0]["id"]) if rows else None
+
     def _covers(self, trip_id: Optional[str] = None) -> dict[str, dict]:
         """One cover photo per trip: the first saved place with a photo, preferring real
         photos over reel frames (those often carry caption text)."""
@@ -267,6 +296,7 @@ class Database:
             mapped_count=sum(s["mapped"] or 0 for s in stats),
             categories=sorted({s["category"] for s in stats}),
             cover_photo=cover,
+            share_token=row["share_token"],
         )
 
     # ---------- Places ----------
@@ -280,17 +310,22 @@ class Database:
             f"INSERT INTO places ({', '.join(columns)}) VALUES ({', '.join('?' for _ in columns)})",
             values,
         )
+        if fields.get("reel_id"):
+            self.add_mention(place_id, fields["reel_id"])
         return self.get_place(place_id)
 
+    def add_mention(self, place_id: str, reel_id: str) -> None:
+        self._exec("INSERT OR IGNORE INTO place_mentions (place_id, reel_id) VALUES (?, ?)", (place_id, reel_id))
+
     def get_place(self, place_id: str) -> Optional[Place]:
-        rows = self._rows("SELECT * FROM places WHERE id = ?", (place_id,))
+        rows = self._rows(f"{PLACE_SELECT} WHERE p.id = ?", (place_id,))
         return self._place(rows[0]) if rows else None
 
     def list_places(self, trip_id: Optional[str] = None) -> list[Place]:
         if trip_id:
-            rows = self._rows("SELECT * FROM places WHERE trip_id = ? ORDER BY created_at, rowid", (trip_id,))
+            rows = self._rows(f"{PLACE_SELECT} WHERE p.trip_id = ? ORDER BY p.created_at, p.rowid", (trip_id,))
         else:
-            rows = self._rows("SELECT * FROM places ORDER BY created_at, rowid")
+            rows = self._rows(f"{PLACE_SELECT} ORDER BY p.created_at, p.rowid")
         return [self._place(r) for r in rows]
 
     def update_place(self, place_id: str, **changes: Any) -> None:
@@ -312,6 +347,10 @@ class Database:
         ]
         data["recommended_items"] = json.loads(data["recommended_items"])
         data["visited"] = bool(data["visited"])
+        data["must_do"] = bool(data["must_do"])
+        mentions = data.pop("mention_reels", None)
+        data["reel_ids"] = sorted(mentions.split(","), key=lambda r: r != data["reel_id"]) if mentions else []
+        data["mention_count"] = len(data["reel_ids"])
         data["opening_hours"] = json.loads(data["opening_hours"]) if data.get("opening_hours") else None
         return Place(**data)
 
@@ -347,6 +386,23 @@ class Database:
 
     def set_reel_trip(self, reel_id: str, trip_id: Optional[str]) -> None:
         self._exec("UPDATE reels SET trip_id = ? WHERE id = ?", (trip_id, reel_id))
+
+    # ---------- Push subscriptions ----------
+
+    def save_push_subscription(self, endpoint: str, keys: dict, origin: str) -> None:
+        self._exec(
+            "INSERT OR REPLACE INTO push_subscriptions (endpoint, keys, origin, created_at) VALUES (?, ?, ?, ?)",
+            (endpoint, json.dumps(keys), origin, now().isoformat()),
+        )
+
+    def push_subscriptions(self) -> list[dict]:
+        return [
+            {"endpoint": r["endpoint"], "keys": json.loads(r["keys"]), "origin": r["origin"]}
+            for r in self._rows("SELECT * FROM push_subscriptions")
+        ]
+
+    def delete_push_subscription(self, endpoint: str) -> None:
+        self._exec("DELETE FROM push_subscriptions WHERE endpoint = ?", (endpoint,))
 
     # ---------- Jobs ----------
 

@@ -12,7 +12,7 @@ from app.geocode import GeoMatch, GooglePlacesGeocoder, NominatimGeocoder
 from app.jobs import JobStore
 from app.library import Library
 from app.llm import ClaudeService, _sanitize_plan
-from app.main import app
+from app.main import app, notify_import
 from app.media import DownloadedReel, UnsupportedURLError, find_url, platform_for
 from app.models import (
     ExtractionResult,
@@ -25,6 +25,7 @@ from app.models import (
 from app.planner import offline_plan
 from app.routing import Router
 from app.photos import PhotoStore
+from app.push import Push
 
 H = {"X-API-Key": "secret"}
 
@@ -67,6 +68,23 @@ class FakeGeocoder:
 
     def __init__(self):
         self.queries = []
+        self.searches = []
+
+    async def search(self, query, near=None, limit=5):
+        self.searches.append((query, near))
+        if "nothing" in query.lower():
+            return []
+        return [GeoMatch(name="Lucali", latitude=40.6818, longitude=-74.0003, address="575 Henry St, Brooklyn",
+                         place_id="google:lucali1", category="food")]
+
+    async def details(self, place_id):
+        if place_id != "google:lucali1":
+            return None
+        from app.hours import parse_osm
+        return GeoMatch(name="Lucali", latitude=40.6818, longitude=-74.0003, address="575 Henry St, Brooklyn",
+                        maps_url="https://maps.google.com/?cid=1", place_id=place_id, category="food", city="New York",
+                        country="USA", hours=parse_osm("Mo-Su 17:00-23:00"),
+                        photos=[{"source": "google", "ref": "places/x/photos/1", "attribution": "Ana"}])
 
     async def locate(self, name, neighborhood, city, country, query=None):
         self.queries.append(query or name)
@@ -109,20 +127,31 @@ def client(monkeypatch, tmp_path):
     db.photo_url = photo_store.url
     library = Library(db, geocoder, photos=photo_store)
     store = JobStore(db)
+    push_log, push_status = [], {"code": 201}
+
+    def push_handler(request):
+        push_log.append(request)
+        return httpx.Response(push_status["code"])
+
     app.state.db = db
     app.state.store = store
     app.state.claude = claude
     app.state.library = library
-    app.state.pipeline = pipeline_module.Pipeline(settings, store, claude, library)
+    app.state.pipeline = pipeline_module.Pipeline(settings, store, claude, library, uploads_dir=tmp_path / "uploads")
+    app.state.pipeline.on_finished = lambda job: notify_import(app, job)
     app.state.router = Router(db, settings)
     app.state.photos = photo_store
+    app.state.push = Push(db, tmp_path / "vapid.pem", client=httpx.AsyncClient(transport=httpx.MockTransport(push_handler)))
 
     with TestClient(app) as c:
         c.messages = messages
         c.geocoder = geocoder
+        c.push_log = push_log
+        c.push_status = push_status
+        c.uploads = tmp_path / "uploads"
         yield c
     app.dependency_overrides.clear()
-    for attr in ("db", "store", "claude", "library", "pipeline", "router", "photos"):
+    for attr in ("db", "store", "claude", "library", "pipeline", "router", "photos", "push"):
         delattr(app.state, attr)
 
 
@@ -733,3 +762,350 @@ def test_jobs_saved_before_new_fields_still_load(client):
     detail = client.get(f"/v1/jobs/{job.id}", headers=H).json()
     assert detail["result"]["places"][0]["image_labels"] == []
     assert client.get("/v1/jobs/broken", headers=H).json()["result"] is None
+
+
+# ---------- Must-do, mentions, exact times, drag and drop ----------
+
+
+def test_mentions_must_do_and_planner_hints(client):
+    first = import_reel(client)
+    import_reel(client, "https://www.instagram.com/reel/second/")  # same three places, another creator
+    trip = client.get(f"/v1/trips/{first['trip_id']}", headers=H).json()
+    joes = next(p for p in trip["places"] if p["name"] == "Joe's Pizza")
+    assert joes["mention_count"] == 2 and len(joes["reel_ids"]) == 2 and joes["reel_ids"][0] == joes["reel_id"]
+
+    r = client.patch(f"/v1/places/{joes['id']}", json={"must_do": True, "start_time": "19:30"}, headers=H)
+    assert r.json()["must_do"] is True and r.json()["start_time"] == "19:30"
+    assert client.patch(f"/v1/places/{joes['id']}", json={"start_time": "25:00"}, headers=H).status_code == 422
+    assert client.patch(f"/v1/places/{joes['id']}", json={"clear_start_time": True}, headers=H).json()["start_time"] is None
+
+    client.post(f"/v1/trips/{first['trip_id']}/plan", json={"days": 1}, headers=H)
+    payload = client.messages.calls[-1]["messages"][0]["content"][0]["text"]
+    assert '"must_do": true' in payload and '"mentions": 2' in payload
+    assert "must_do" in client.messages.calls[-1]["system"]
+
+
+def test_move_between_days(client):
+    job = import_reel(client)
+    trip = client.post(f"/v1/trips/{job['trip_id']}/plan", json={"days": 2}, headers=H).json()
+    day1 = sorted((p for p in trip["places"] if p["day_number"] == 1), key=lambda p: p["day_order"])
+    mover = day1[-1]
+
+    trip = client.post(f"/v1/trips/{job['trip_id']}/move", json={"place_id": mover["id"], "day": 2, "index": 0}, headers=H).json()
+    day2 = sorted((p for p in trip["places"] if p["day_number"] == 2), key=lambda p: p["day_order"])
+    assert day2[0]["id"] == mover["id"]
+    for d in (1, 2):
+        orders = sorted(p["day_order"] for p in trip["places"] if p["day_number"] == d)
+        assert orders == list(range(len(orders)))
+
+    trip = client.post(f"/v1/trips/{job['trip_id']}/move", json={"place_id": mover["id"], "day": 0}, headers=H).json()
+    assert next(p for p in trip["places"] if p["id"] == mover["id"])["day_number"] is None
+    trip = client.post(f"/v1/trips/{job['trip_id']}/move", json={"place_id": mover["id"], "day": 4, "index": 0}, headers=H).json()
+    assert trip["day_count"] == 4 and len(trip["day_titles"]) == 4
+
+    other = client.post("/v1/places", json={"name": "Elsewhere", "city": "Paris"}, headers=H).json()["place"]
+    r = client.post(f"/v1/trips/{job['trip_id']}/move", json={"place_id": other["id"], "day": 1}, headers=H)
+    assert r.status_code == 404
+
+
+# ---------- Adding places without a reel ----------
+
+
+def test_search_and_add_place(client):
+    job = import_reel(client)
+    r = client.post("/v1/places/search", json={"query": "lucali brooklyn", "trip_id": job["trip_id"]}, headers=H)
+    candidates = r.json()
+    assert candidates[0]["candidate_id"] == "google:lucali1" and candidates[0]["category"] == "food"
+    assert client.geocoder.searches[-1][1] is not None  # biased toward the trip's places
+
+    # Lucali is already in the trip (from the reel), so this returns it instead of a duplicate.
+    r = client.post("/v1/places", json={"candidate_id": "google:lucali1", "trip_id": job["trip_id"]}, headers=H)
+    assert r.status_code == 200 and r.json()["created"] is False
+
+    client.delete(f"/v1/places/{r.json()['place']['id']}", headers=H)
+    r = client.post("/v1/places", json={"candidate_id": "google:lucali1"}, headers=H)
+    assert r.status_code == 201
+    place = r.json()["place"]
+    assert place["trip_id"] == job["trip_id"]  # matched the New York trip by city
+    assert place["opening_hours"]["weekly"] and place["photos"][0]["source"] == "google"
+    assert place["mention_count"] == 0
+
+    assert client.post("/v1/places", json={"candidate_id": "google:nope"}, headers=H).status_code == 422
+    assert client.post("/v1/places", json={"name": "Somewhere"}, headers=H).status_code == 422
+    r = client.post("/v1/places", json={"name": "Joe's Pizza", "trip_id": job["trip_id"]}, headers=H)
+    assert r.json()["created"] is False
+    r = client.post("/v1/places", json={"name": "Café de Flore", "city": "Paris", "category": "cafe"}, headers=H)
+    assert r.status_code == 201
+    paris = client.get(f"/v1/trips/{r.json()['place']['trip_id']}", headers=H).json()
+    assert paris["name"] == "Paris" and paris["places"][0]["category"] == "cafe"
+
+
+def test_map_link_parsing():
+    from app.maplinks import NotAMapLink, is_map_link, parse
+
+    g = parse("https://www.google.com/maps/place/Joe's+Pizza/@40.7305,-74.0021,17z/data=!3m1!4b1!4m6!3m5!1s0x0:0x0!8m2!3d40.730599!4d-74.002136")
+    assert g.name == "Joe's Pizza" and g.latitude == pytest.approx(40.730599) and g.longitude == pytest.approx(-74.002136)
+    assert parse("https://www.google.com/maps/search/?api=1&query=Lucali%20Brooklyn").name == "Lucali Brooklyn"
+    pin = parse("https://maps.google.com/?q=40.7128,-74.0060")
+    assert pin.name is None and pin.latitude == pytest.approx(40.7128)
+    a = parse("https://maps.apple.com/?q=Levain%20Bakery&ll=40.7799,-73.9805")
+    assert a.name == "Levain Bakery" and a.longitude == pytest.approx(-73.9805)
+    a2 = parse("https://maps.apple.com/place?coordinate=48.85,2.33&name=Caf%C3%A9%20de%20Flore&address=172%20Bd%20Saint-Germain")
+    assert a2.name == "Café de Flore" and a2.latitude == pytest.approx(48.85)
+    assert is_map_link("https://maps.app.goo.gl/abc123") and is_map_link("https://www.google.co.uk/maps/place/X")
+    assert not is_map_link("https://evil.example.com/maps/place/X") and not is_map_link("https://google.com.evil.io/maps")
+    with pytest.raises(NotAMapLink):
+        parse("https://www.google.com/maps/@40.7,-74.0,12z")  # just a map view, no place
+    # The pin's exact coordinates win over the map center.
+    assert parse("https://www.google.com/maps/place/A/@1.0,2.0,12z/data=!3d3.5!4d4.5").latitude == pytest.approx(3.5)
+
+
+async def test_short_map_links_only_follow_map_hosts():
+    from app.maplinks import NotAMapLink, resolve
+
+    def handler(request):
+        if request.url.host == "maps.app.goo.gl" and request.url.path == "/good":
+            return httpx.Response(302, headers={"location": "https://www.google.com/maps/place/Lucali/@40.68,-74.0,17z"})
+        return httpx.Response(302, headers={"location": "http://169.254.169.254/latest/meta-data"})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        assert (await resolve("https://maps.app.goo.gl/good", http)).startswith("https://www.google.com/maps/place/Lucali")
+        with pytest.raises(NotAMapLink):
+            await resolve("https://maps.app.goo.gl/evil", http)
+
+
+def test_add_place_from_map_link(client):
+    job = import_reel(client)
+    url = "https://www.google.com/maps/place/Lucali/@40.68,-74.0,17z/data=!3d40.6819!4d-74.0004"
+    r = client.post("/v1/places/from-link", json={"url": f"Check this out {url}", "trip_id": job["trip_id"]}, headers=H)
+    assert r.status_code == 200 and r.json()["created"] is False  # Lucali came with the reel
+
+    r = client.post("/v1/places/from-link", json={"url": "https://maps.apple.com/?q=Nothing%20Here&ll=40.75,-73.99"}, headers=H)
+    assert r.status_code == 201
+    place = r.json()["place"]
+    assert place["name"] == "Nothing Here" and place["latitude"] == pytest.approx(40.75)
+    assert place["trip_id"] == job["trip_id"]  # within 50 km of the New York trip
+    assert client.post("/v1/places/from-link", json={"url": "https://example.com/x"}, headers=H).status_code == 422
+
+
+def test_screenshot_import(client):
+    import base64 as _b64
+
+    shot = EXTRACTION.model_copy(deep=True)
+    for place in shot.places:
+        place.image_labels = ["Screenshot 1"]
+    client.messages.outputs[ExtractionResult] = shot
+    jpeg = b"\xff\xd8\xff\xe0" + b"0" * 100
+    r = client.post("/v1/jobs/screenshots", json={"images": ["data:image/jpeg;base64," + _b64.b64encode(jpeg).decode()],
+                                                  "note": "from a blog"}, headers=H)
+    assert r.status_code == 202 and r.json()["url"].startswith("upload:")
+    job = wait_for(client, r.json()["id"])
+    assert job["status"] == "done" and job["added_places"] == 3
+    call = client.messages.calls[-1]["messages"][0]["content"]
+    assert call[0]["text"] == "Screenshot 1:" and "from a blog" in call[-1]["text"]
+    trip = client.get(f"/v1/trips/{job['trip_id']}", headers=H).json()
+    assert trip["reels"][0]["platform"] == "screenshot"
+    assert trip["places"][0]["photos"][0]["attribution"] == "From your screenshot"
+    assert not any(client.uploads.iterdir())  # cleaned up after success
+
+    png = _b64.b64encode(b"\x89PNG\r\n\x1a\n").decode()
+    assert client.post("/v1/jobs/screenshots", json={"images": [png]}, headers=H).status_code == 422
+    assert client.post("/v1/jobs/screenshots", json={"images": ["not base64!!"]}, headers=H).status_code == 422
+
+
+# ---------- Push notifications ----------
+
+
+def _decrypt_push(body, ua_key, auth):
+    """The browser's side of RFC 8291, to check what the server sends."""
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+
+    salt, idlen = body[:16], body[20]
+    as_public, ciphertext = body[21:21 + idlen], body[21 + idlen:]
+    ua_public = ua_key.public_key().public_bytes(serialization.Encoding.X962, serialization.PublicFormat.UncompressedPoint)
+    shared = ua_key.exchange(ec.ECDH(), ec.EllipticCurvePublicKey.from_encoded_point(ec.SECP256R1(), as_public))
+    kdf = lambda salt_, ikm, info, n: HKDF(algorithm=hashes.SHA256(), length=n, salt=salt_, info=info).derive(ikm)
+    ikm = kdf(auth, shared, b"WebPush: info\x00" + ua_public + as_public, 32)
+    plain = AESGCM(kdf(salt, ikm, b"Content-Encoding: aes128gcm\x00", 16)).decrypt(
+        kdf(salt, ikm, b"Content-Encoding: nonce\x00", 12), ciphertext, None)
+    return plain.rstrip(b"\x00")[:-1]
+
+
+def test_push_encryption_matches_rfc8291_example():
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from app.push import b64url, encrypt, unb64url
+
+    sender = ec.derive_private_key(int.from_bytes(unb64url("yfWPiYE-n46HLnH0KqZOF1fJJU3MYrct3AELtAQ-oRw"), "big"), ec.SECP256R1())
+    body = encrypt(b"When I grow up, I want to be a watermelon",
+                   unb64url("BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4"),
+                   unb64url("BTBZMqHH6r4Tts7J_aSIgg"), sender_key=sender, salt=unb64url("DGv6ra1nlYgDCS1FRnbzlw"))
+    assert b64url(body) == ("DGv6ra1nlYgDCS1FRnbzlwAAEABBBP4z9KsN6nGRTbVYI_c7VJSPQTBtkgcy27mlmlMoZIIgDll6e3vCYLocInmYWAmS6TlzAC8"
+                            "wEqKK6PBru3jl7A_yl95bQpu6cVPTpK4Mqgkf1CXztLVBSt2Ks3oZwbuwXPXLWyouBWLVWGNWQexSgSxsj_Qulcy4a-fN")
+
+
+def test_push_subscription_and_import_notification(client):
+    import json as _json
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.hazmat.primitives.asymmetric.utils import encode_dss_signature
+    from app.push import b64url, unb64url
+
+    key = client.get("/v1/config", headers=H).json()["push_public_key"]
+    assert len(unb64url(key)) == 65
+    ua_key = ec.generate_private_key(ec.SECP256R1())
+    ua_public = b64url(ua_key.public_key().public_bytes(serialization.Encoding.X962, serialization.PublicFormat.UncompressedPoint))
+    auth = b"0123456789abcdef"
+    endpoint = "https://fcm.googleapis.com/fcm/send/abc123"
+    sub = {"endpoint": endpoint, "keys": {"p256dh": ua_public, "auth": b64url(auth)}}
+
+    bad = {**sub, "endpoint": "https://169.254.169.254/push"}
+    assert client.post("/v1/push/subscriptions", json=bad, headers=H).status_code == 422
+    assert client.post("/v1/push/subscriptions", json={**sub, "keys": {"p256dh": "x", "auth": "y"}}, headers=H).status_code == 422
+    assert client.post("/v1/push/subscriptions", json=sub, headers=H).status_code == 204
+
+    job = import_reel(client)
+    for _ in range(100):
+        if client.push_log:
+            break
+        time.sleep(0.02)
+    request = client.push_log[-1]
+    assert str(request.url) == endpoint and request.headers["content-encoding"] == "aes128gcm"
+    message = _json.loads(_decrypt_push(request.content, ua_key, auth))
+    assert message["title"] == "3 new places saved to New York"
+    assert message["url"] == f"/#/trip/{job['trip_id']}" and "@slicehunter" in message["body"]
+
+    # The VAPID token is signed by the server's key and addressed to the push service.
+    token = request.headers["authorization"].split("t=")[1].split(",")[0]
+    header, claims, sig = token.split(".")
+    assert _json.loads(unb64url(claims))["aud"] == "https://fcm.googleapis.com"
+    public = ec.EllipticCurvePublicKey.from_encoded_point(ec.SECP256R1(), unb64url(key))
+    raw = unb64url(sig)
+    public.verify(encode_dss_signature(int.from_bytes(raw[:32], "big"), int.from_bytes(raw[32:], "big")),
+                  f"{header}.{claims}".encode(), ec.ECDSA(hashes.SHA256()))
+
+    client.push_status["code"] = 410  # the browser unsubscribed: forget it
+    assert client.post("/v1/push/test", headers=H).json()["sent"] == 0
+    assert app.state.db.push_subscriptions() == []
+
+
+# ---------- Sharing & exports ----------
+
+
+def test_share_link_shows_trip_without_notes(client):
+    job = import_reel(client)
+    trip = client.get(f"/v1/trips/{job['trip_id']}", headers=H).json()
+    client.patch(f"/v1/places/{trip['places'][0]['id']}", json={"user_notes": "private!"}, headers=H)
+
+    link = client.post(f"/v1/trips/{job['trip_id']}/share", headers=H).json()
+    assert link["path"] == f"/s/{link['token']}" and len(link["token"]) >= 20
+    assert client.post(f"/v1/trips/{job['trip_id']}/share", headers=H).json()["token"] == link["token"]
+
+    public = client.get(f"/v1/shared/{link['token']}")  # no API key
+    assert public.status_code == 200
+    data = public.json()
+    assert data["name"] == "New York" and len(data["places"]) == 3
+    assert "user_notes" not in data["places"][0] and "share_token" not in data
+    page = client.get(link["path"])
+    assert page.status_code == 200 and 'property="og:title" content="New York · TripIt"' in page.text
+    assert "3 saved places" in page.text
+
+    assert client.delete(f"/v1/trips/{job['trip_id']}/share", headers=H).status_code == 204
+    assert client.get(f"/v1/shared/{link['token']}").status_code == 404
+    assert client.get(link["path"]).status_code == 404
+
+
+def test_calendar_and_my_maps_exports(client):
+    job = import_reel(client)
+    trip_id = job["trip_id"]
+    r = client.post(f"/v1/trips/{trip_id}/export-link?format=ics", headers=H)
+    assert r.status_code == 422 and "start date" in r.json()["detail"]
+
+    plan = client.post(f"/v1/trips/{trip_id}/plan", json={"days": 2, "start_date": "2026-11-06"}, headers=H).json()
+    first = next(p for p in plan["places"] if p["day_number"] == 1)
+    client.patch(f"/v1/places/{first['id']}", json={"start_time": "19:30"}, headers=H)
+
+    url = client.post(f"/v1/trips/{trip_id}/export-link?format=ics", headers=H).json()["url"]
+    cal = client.get(url)  # the signature authorizes it
+    assert cal.status_code == 200 and cal.headers["content-type"].startswith("text/calendar")
+    text = cal.text
+    assert text.count("BEGIN:VEVENT") == 3 and "DTSTART:20261106T193000" in text
+    assert all(len(line.encode()) <= 75 for line in text.split("\r\n"))
+    assert client.get(url.replace("sig=", "sig=x")).status_code == 403
+
+    url = client.post(f"/v1/trips/{trip_id}/export-link?format=kml", headers=H).json()["url"]
+    kml_text = client.get(url).text
+    assert kml_text.count("<Placemark>") == 2 and "<Folder><name>Day 1" in kml_text  # Lucali has no pin
+    assert client.post(f"/v1/trips/{trip_id}/export-link?format=pdf", headers=H).status_code == 422
+
+    token = client.post(f"/v1/trips/{trip_id}/share", headers=H).json()["token"]
+    assert client.get(f"/s/{token}/trip.ics").status_code == 200
+    assert client.get(f"/s/{token}/trip.kml").status_code == 200
+    assert client.get("/s/wrong/trip.ics").status_code == 404
+
+
+def test_service_worker_is_versioned(client):
+    r = client.get("/sw.js")
+    assert r.status_code == 200 and r.headers["content-type"].startswith("application/javascript")
+    assert "__VERSION__" not in r.text and "tripit-shell-" in r.text
+    assert r.headers["cache-control"] == "no-cache"
+
+
+def test_old_databases_get_mentions_and_new_columns(tmp_path):
+    path = str(tmp_path / "t.db")
+    db = Database(path)
+    trip = db.create_trip("Rome", "Rome", "Italy")
+    reel = db.add_reel(ReelMetadata(platform="tiktok", url="https://tiktok.com/x"), "t", "s")
+    place = db.add_place(trip_id=trip.id, reel_id=reel.id, name="Pantheon", category="attraction")
+    db._exec("DELETE FROM place_mentions")  # as if saved before mentions existed
+    reopened = Database(path)
+    p = reopened.get_place(place.id)
+    assert p.mention_count == 1 and p.must_do is False and reopened.get_trip(trip.id).share_token is None
+
+
+async def test_place_search_parsing_google_and_osm():
+    from app.geocode import google_category, osm_category
+
+    def google(request):
+        if request.url.path.endswith(":searchText"):
+            body = __import__("json").loads(request.content)
+            assert body["locationBias"]["circle"]["center"]["latitude"] == 40.7
+            assert request.headers["x-goog-fieldmask"] == GooglePlacesGeocoder.SEARCH_FIELDS
+            return httpx.Response(200, json={"places": [{"id": "ChIJabc", "displayName": {"text": "Lucali"},
+                                                         "formattedAddress": "575 Henry St", "location": {"latitude": 40.68, "longitude": -74.0},
+                                                         "types": ["pizza_restaurant", "restaurant"]}]})
+        assert request.url.path == "/v1/places/ChIJabc"
+        return httpx.Response(200, json={"id": "ChIJabc", "displayName": {"text": "Lucali"}, "location": {"latitude": 40.68, "longitude": -74.0},
+                                         "types": ["restaurant"], "addressComponents": [
+                                             {"longText": "Brooklyn", "types": ["sublocality"]},
+                                             {"longText": "New York", "types": ["locality", "political"]},
+                                             {"longText": "United States", "types": ["country"]}]})
+
+    g = GooglePlacesGeocoder("k", client=httpx.AsyncClient(transport=httpx.MockTransport(google)))
+    found = await g.search("lucali", near=(40.7, -74.0))
+    assert found[0].place_id == "google:ChIJabc" and found[0].category == "food"
+    detail = await g.details("google:ChIJabc")
+    assert detail.city == "New York" and detail.country == "United States"
+    assert await g.details("google:../../etc") is None and await g.details("osm:N1") is None
+
+    def osm(request):
+        if request.url.path == "/lookup":
+            assert request.url.params["osm_ids"] == "N123"
+            return httpx.Response(200, json=[{"lat": "48.85", "lon": "2.33", "name": "Café de Flore", "osm_type": "node", "osm_id": 123,
+                                              "category": "amenity", "type": "cafe", "address": {"city": "Paris", "country": "France"},
+                                              "extratags": {"opening_hours": "Mo-Su 07:30-01:30"}}])
+        return httpx.Response(200, json=[{"lat": "48.85", "lon": "2.33", "name": "Café de Flore", "osm_type": "node", "osm_id": 123,
+                                          "category": "amenity", "type": "cafe", "address": {"city": "Paris", "country": "France"}}])
+
+    n = NominatimGeocoder(client=httpx.AsyncClient(transport=httpx.MockTransport(osm)))
+    n.MIN_INTERVAL = 0
+    results = await n.search("cafe de flore")
+    assert results[0].place_id == "osm:N123" and results[0].category == "cafe" and results[0].city == "Paris"
+    detail = await n.details("osm:N123")
+    assert detail.hours.weekly and detail.country == "France"
+    assert await n.details("osm:X1") is None
+
+    assert google_category(["ice_cream_shop", "store"]) == "dessert" and google_category(["unknown"]) == "other"
+    assert osm_category("shop", "shoes") == "shopping" and osm_category("tourism", "hotel") == "stay"

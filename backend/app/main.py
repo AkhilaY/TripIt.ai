@@ -1,24 +1,40 @@
 import asyncio
+import base64
+import binascii
+import hashlib
+import hmac
+import html
 import logging
 import mimetypes
+import re
 import secrets
+import time
 from contextlib import asynccontextmanager
+from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Optional
+from urllib.parse import quote
 
 import httpx
-from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from .config import Settings, get_settings
 from .db import Database
+from .exports import ExportError, ics, kml, schedule
 from .geocode import GooglePlacesGeocoder, NoGeocoder, make_geocoder
 from .jobs import JobStore
 from .library import Library
 from .llm import ClaudeError, ClaudeService
+from .maplinks import NotAMapLink, is_map_link
+from .maplinks import parse as parse_map_link
+from .maplinks import resolve as resolve_map_link
 from .media import UnsupportedURLError, find_url, platform_for
 from .models import (
+    AddFromLinkRequest,
+    AddPlaceRequest,
+    AddPlaceResult,
     CreateJobRequest,
     DayLegs,
     RoutesFromRequest,
@@ -26,19 +42,26 @@ from .models import (
     Job,
     JobStatus,
     LocateRequest,
+    MoveRequest,
     Place,
     PlaceUpdate,
     PlanRequest,
     PlanResult,
+    PlaceCandidate,
     PlanTripRequest,
+    PushSubscriptionRequest,
     Reel,
     ReorderRequest,
+    ScreenshotJobRequest,
+    SearchPlacesRequest,
+    ShareLink,
     Trip,
     TripDetail,
     TripUpdate,
 )
 from .photos import PhotoStore
 from .pipeline import Pipeline
+from .push import Push
 from .routing import Router
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -58,7 +81,30 @@ def build_services(app: FastAPI, settings: Settings) -> None:
     app.state.library = Library(db, make_geocoder(settings), photos=photos)
     app.state.pipeline = Pipeline(settings, app.state.store, app.state.claude, app.state.library)
     app.state.router = Router(db, settings)
+    app.state.push = Push(db, Path(settings.database_path).parent / "vapid_private.pem", settings.push_contact)
+    app.state.pipeline.on_finished = lambda job: notify_import(app, job)
 
+
+async def notify_import(app: FastAPI, job: Optional[Job]) -> None:
+    """Push notification when an import finishes, since sharing from TikTok happens in the background."""
+    if job is None or not getattr(app.state, "push", None):
+        return
+    trip = app.state.db.get_trip(job.trip_id) if job.trip_id else None
+    if job.status == JobStatus.done:
+        n = job.added_places
+        if trip and n:
+            title = f"{n} new place{'s' if n != 1 else ''} saved to {trip.name}"
+        elif trip:
+            title = f"Already saved in {trip.name}"
+        else:
+            title = "No places found in that reel"
+        body = (job.result.title if job.result and job.result.title else job.message) or ""
+        if job.reel and job.reel.uploader:
+            body = f"{body} · @{job.reel.uploader}" if body else f"@{job.reel.uploader}"
+        url = f"/#/trip/{trip.id}" if trip else "/#/imports"
+    else:
+        title, body, url = "Couldn't import a reel", job.message or "Tap to see what happened", "/#/imports"
+    await app.state.push.send_all({"title": title, "body": body, "url": url, "tag": job.id})
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -128,6 +174,7 @@ async def config(request: Request, settings: Annotated[Settings, Depends(get_set
         "geocoder": name,
         "routing": request.app.state.router.provider,
         "google_maps_key": settings.google_maps_browser_key or None,
+        "push_public_key": request.app.state.push.public_key if getattr(request.app.state, "push", None) else None,
     }
 
 
@@ -147,6 +194,28 @@ async def create_job(body: CreateJobRequest, request: Request) -> Job:
     job, created = await request.app.state.store.create(url, shared_text)
     if created:
         start_job(request.app, job.id, url, shared_text)
+    return job
+
+
+@app.post("/v1/jobs/screenshots", response_model=Job, status_code=202, dependencies=[Auth])
+async def create_screenshot_job(body: ScreenshotJobRequest, request: Request) -> Job:
+    """Finds places in screenshots (of a post, map or article) instead of a reel link."""
+    images = []
+    for item in body.images:
+        data = item.split(",", 1)[1] if item.startswith("data:") else item
+        try:
+            raw = base64.b64decode(data, validate=True)
+        except (binascii.Error, ValueError):
+            raise HTTPException(status_code=422, detail="One of the images couldn't be read")
+        if len(raw) > 6 * 1024 * 1024:
+            raise HTTPException(status_code=422, detail="Each image must be under 6 MB")
+        if not raw.startswith(b"\xff\xd8\xff"):
+            raise HTTPException(status_code=422, detail="Images must be JPEGs")
+        images.append(raw)
+    url = request.app.state.pipeline.save_upload(images)
+    note = (body.note or "").strip() or None
+    job, _ = await request.app.state.store.create(url, note)
+    start_job(request.app, job.id, url, note)
     return job
 
 
@@ -233,6 +302,17 @@ async def reorder_day(trip_id: str, day: int, body: ReorderRequest, request: Req
     return _trip_or_404(request, trip_id)
 
 
+@app.post("/v1/trips/{trip_id}/move", response_model=TripDetail, dependencies=[Auth])
+async def move_in_itinerary(trip_id: str, body: MoveRequest, request: Request) -> TripDetail:
+    """Drag and drop: puts a place at a position in a day (day 0 = not scheduled)."""
+    _trip_or_404(request, trip_id)
+    place = _place_or_404(request, body.place_id)
+    if place.trip_id != trip_id:
+        raise HTTPException(status_code=404, detail="Place not found in this trip")
+    _library(request).move_to(place, body.day or None, body.index)
+    return _trip_or_404(request, trip_id)
+
+
 @app.post("/v1/trips/{trip_id}/refresh-details", response_model=TripDetail, dependencies=[Auth])
 async def refresh_details(trip_id: str, request: Request) -> TripDetail:
     """Looks up opening hours (and missing pins) for places that haven't been checked yet."""
@@ -260,6 +340,169 @@ async def routes_from(body: RoutesFromRequest, request: Request) -> RoutesFromRe
     return RoutesFromResponse(provider=router.provider, legs=legs)
 
 
+# ---------- Sharing & exports ----------
+
+
+def _origin(request: Request) -> str:
+    proto = request.headers.get("x-forwarded-proto", request.url.scheme).split(",")[0].strip()
+    host = request.headers.get("x-forwarded-host") or request.headers.get("host") or request.url.netloc
+    return f"{proto}://{host}"
+
+
+@app.post("/v1/trips/{trip_id}/share", response_model=ShareLink, dependencies=[Auth])
+async def share_trip(trip_id: str, request: Request) -> ShareLink:
+    """Creates (or returns) a public read-only link to the trip."""
+    trip = _trip_or_404(request, trip_id)
+    token = trip.share_token or secrets.token_urlsafe(16)
+    if not trip.share_token:
+        _db(request).update_trip(trip_id, share_token=token)
+    return ShareLink(token=token, path=f"/s/{token}")
+
+
+@app.delete("/v1/trips/{trip_id}/share", status_code=204, dependencies=[Auth])
+async def unshare_trip(trip_id: str, request: Request) -> Response:
+    _trip_or_404(request, trip_id)
+    _db(request).update_trip(trip_id, share_token=None)
+    return Response(status_code=204)
+
+
+def _shared_or_404(request: Request, token: str) -> TripDetail:
+    trip = _db(request).trip_by_share_token(token)
+    if trip is None:
+        raise HTTPException(status_code=404, detail="This trip link isn't available")
+    return trip
+
+
+def _public_trip(trip: TripDetail, settings: Settings) -> dict:
+    """What a shared link shows: everything but your own notes."""
+    data = trip.model_dump(mode="json", exclude={"share_token"})
+    for p in data["places"]:
+        for key in ("user_notes", "hours_checked_at", "photos_checked_at"):
+            p.pop(key, None)
+    data["reels"] = [
+        {k: r[k] for k in ("id", "url", "platform", "title", "creator")}
+        for r in data["reels"] if r["url"].startswith("http")
+    ]
+    data["google_maps_key"] = settings.google_maps_browser_key or None
+    return data
+
+
+@app.get("/v1/shared/{token}", include_in_schema=False)
+async def shared_trip(token: str, request: Request, settings: Annotated[Settings, Depends(get_settings)]) -> dict:
+    return _public_trip(_shared_or_404(request, token), settings)
+
+
+@app.get("/s/{token}", include_in_schema=False)
+async def shared_page(token: str, request: Request) -> HTMLResponse:
+    trip = _db(request).trip_by_share_token(token)
+    if trip is None:
+        return HTMLResponse(NOT_SHARED_PAGE, status_code=404)
+    origin = _origin(request)
+    days = f" · {trip.day_count}-day plan" if trip.day_count else ""
+    values = {
+        "title": f"{trip.name} · TripIt",
+        "description": f"{len(trip.places)} saved place{'s' if len(trip.places) != 1 else ''}{days}. Open for the map and itinerary.",
+        "image": f"{origin}{trip.cover_photo.url}&w=1200" if trip.cover_photo else f"{origin}/icons/icon-512.png",
+        "url": f"{origin}/s/{token}",
+    }
+    page = (STATIC_DIR / "shared.html").read_text()
+    for key, value in values.items():
+        page = page.replace("{{" + key + "}}", html.escape(value, quote=True))
+    return HTMLResponse(page, headers={"Cache-Control": "no-cache", "X-Robots-Tag": "noindex"})
+
+
+NOT_SHARED_PAGE = """<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TripIt</title><style>body{font:17px -apple-system,system-ui,sans-serif;display:grid;place-items:center;min-height:90vh;margin:0;
+text-align:center;color:#3c3c43;background:#f2f2f7}h1{font-size:22px;color:#000}</style>
+<div><h1>This trip link isn't available</h1><p>It may have been turned off by the person who shared it.</p></div>"""
+
+
+def _export_response(trip: TripDetail, fmt: str) -> Response:
+    ascii_name = re.sub(r"[^A-Za-z0-9 _-]", "", trip.name).strip() or "trip"
+    disposition = "inline" if fmt == "ics" else "attachment"
+    headers = {"Content-Disposition": f'{disposition}; filename="{ascii_name}.{fmt}"; filename*=UTF-8\'\'{quote(trip.name)}.{fmt}'}
+    if fmt == "ics":
+        try:
+            return Response(ics(trip), media_type="text/calendar; charset=utf-8", headers=headers)
+        except ExportError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+    return Response(kml(trip), media_type="application/vnd.google-earth.kml+xml", headers=headers)
+
+
+def _export_sig(settings: Settings, trip_id: str, fmt: str, exp: int) -> str:
+    return hmac.new(settings.app_api_key.encode(), f"export:{trip_id}:{fmt}:{exp}".encode(), hashlib.sha256).hexdigest()[:32]
+
+
+@app.post("/v1/trips/{trip_id}/export-link", dependencies=[Auth])
+async def export_link(
+    trip_id: str, request: Request, settings: Annotated[Settings, Depends(get_settings)],
+    format: str = Query(pattern="^(ics|kml)$"),
+) -> dict:
+    """A short-lived download link (the browser opens it directly, so it can't send the API key)."""
+    trip = _trip_or_404(request, trip_id)
+    if format == "ics":
+        try:
+            schedule(trip)
+        except ExportError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+    elif not any(p.latitude is not None for p in trip.places):
+        raise HTTPException(status_code=422, detail="None of this trip's places are on the map yet")
+    exp = int(time.time()) + 3600
+    return {"url": f"/v1/trips/{trip_id}/export.{format}?exp={exp}&sig={_export_sig(settings, trip_id, format, exp)}"}
+
+
+@app.get("/v1/trips/{trip_id}/export.{fmt}", include_in_schema=False)
+async def export_file(
+    trip_id: str, fmt: str, request: Request, settings: Annotated[Settings, Depends(get_settings)], exp: int = 0, sig: str = "",
+) -> Response:
+    if fmt not in ("ics", "kml"):
+        raise HTTPException(status_code=404, detail="Not found")
+    if exp < time.time() or not hmac.compare_digest(_export_sig(settings, trip_id, fmt, exp), sig):
+        raise HTTPException(status_code=403, detail="This export link expired. Export again from the app.")
+    return _export_response(_trip_or_404(request, trip_id), fmt)
+
+
+@app.get("/s/{token}/trip.{fmt}", include_in_schema=False)
+async def shared_export(token: str, fmt: str, request: Request) -> Response:
+    if fmt not in ("ics", "kml"):
+        raise HTTPException(status_code=404, detail="Not found")
+    return _export_response(_shared_or_404(request, token), fmt)
+
+
+# ---------- Notifications ----------
+
+
+def _push(request: Request) -> Push:
+    return request.app.state.push
+
+
+@app.get("/v1/push/key", dependencies=[Auth])
+async def push_key(request: Request) -> dict:
+    return {"public_key": _push(request).public_key}
+
+
+@app.post("/v1/push/subscriptions", status_code=204, dependencies=[Auth])
+async def push_subscribe(body: PushSubscriptionRequest, request: Request) -> Response:
+    try:
+        _push(request).subscribe(body.endpoint, body.keys.get("p256dh", ""), body.keys.get("auth", ""), _origin(request))
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    return Response(status_code=204)
+
+
+@app.delete("/v1/push/subscriptions", status_code=204, dependencies=[Auth])
+async def push_unsubscribe(body: PushSubscriptionRequest, request: Request) -> Response:
+    _db(request).delete_push_subscription(body.endpoint)
+    return Response(status_code=204)
+
+
+@app.post("/v1/push/test", dependencies=[Auth])
+async def push_test(request: Request) -> dict:
+    sent = await _push(request).send_all({"title": "Notifications are on", "body": "TripIt will tell you when a reel's places are saved.",
+                                          "url": "/#/settings", "tag": "test"})
+    return {"sent": sent}
+
+
 # ---------- Places & reels ----------
 
 
@@ -268,16 +511,70 @@ async def list_places(request: Request) -> list[Place]:
     return _db(request).list_places()
 
 
+@app.post("/v1/places/search", response_model=list[PlaceCandidate], dependencies=[Auth])
+async def search_places(body: SearchPlacesRequest, request: Request) -> list[PlaceCandidate]:
+    library = _library(request)
+    matches = await library.geocoder.search(body.query.strip(), near=library.trip_center(body.trip_id), limit=6)
+    return [
+        PlaceCandidate(candidate_id=m.place_id, name=m.name, address=m.address, category=m.category or "other",
+                       latitude=m.latitude, longitude=m.longitude)
+        for m in matches if m.place_id
+    ]
+
+
+@app.post("/v1/places", response_model=AddPlaceResult, status_code=201, dependencies=[Auth])
+async def add_place(body: AddPlaceRequest, request: Request, response: Response) -> AddPlaceResult:
+    """Adds a place without a reel: a search result, or just a name."""
+    library = _library(request)
+    if body.trip_id and not _db(request).get_trip(body.trip_id):
+        raise HTTPException(status_code=404, detail="Trip not found")
+    if body.candidate_id:
+        match = await library.geocoder.details(body.candidate_id)
+        if match is None:
+            raise HTTPException(status_code=422, detail="Couldn't load that place. Try searching again.")
+        place, created = await library.add_match(match, body.trip_id)
+    elif body.name:
+        if not body.trip_id and not body.city:
+            raise HTTPException(status_code=422, detail="Choose a trip or a city for this place")
+        place, created = await library.add_by_name(body.name.strip(), body.trip_id, city=body.city, category=body.category.value)
+    else:
+        raise HTTPException(status_code=422, detail="Search for a place or enter its name")
+    if not created:
+        response.status_code = 200
+    return AddPlaceResult(place=place, created=created)
+
+
+@app.post("/v1/places/from-link", response_model=AddPlaceResult, status_code=201, dependencies=[Auth])
+async def add_place_from_link(body: AddFromLinkRequest, request: Request, response: Response) -> AddPlaceResult:
+    """Adds the place from a Google Maps or Apple Maps link."""
+    if body.trip_id and not _db(request).get_trip(body.trip_id):
+        raise HTTPException(status_code=404, detail="Trip not found")
+    url = find_url(body.url) or body.url.strip()
+    if not is_map_link(url):
+        raise HTTPException(status_code=422, detail="Paste a Google Maps or Apple Maps link")
+    try:
+        link = parse_map_link(await resolve_map_link(url))
+    except NotAMapLink as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    place, created = await _library(request).add_from_link(link, body.trip_id)
+    if not created:
+        response.status_code = 200
+    return AddPlaceResult(place=place, created=created)
+
+
 @app.patch("/v1/places/{place_id}", response_model=Place, dependencies=[Auth])
 async def update_place(place_id: str, body: PlaceUpdate, request: Request) -> Place:
     place = _place_or_404(request, place_id)
     db, library = _db(request), _library(request)
     fields = body.model_fields_set
-    simple = {k: getattr(body, k) for k in ("name", "category", "visited", "user_notes") if k in fields and getattr(body, k) is not None}
+    simple = {k: getattr(body, k) for k in ("name", "category", "visited", "user_notes", "must_do", "start_time")
+              if k in fields and getattr(body, k) is not None}
     if simple:
         db.update_place(place_id, **simple)
     if "day_number" in fields and body.day_number is not None:
         library.move_place(place, body.day_number or None)
+    if body.clear_start_time:
+        db.update_place(place_id, start_time=None)
     if body.clear_time_of_day:
         db.update_place(place_id, time_of_day=None)
     elif body.time_of_day is not None:
@@ -349,6 +646,23 @@ async def plan_itinerary(body: PlanRequest, request: Request) -> PlanResult:
 
 
 # ---------- Web app ----------
+
+
+@lru_cache
+def _static_version() -> str:
+    """Changes whenever any web app file changes, so the service worker refreshes its cached copy."""
+    digest = hashlib.sha256()
+    for path in sorted(STATIC_DIR.rglob("*")):
+        if path.is_file():
+            digest.update(str(path.relative_to(STATIC_DIR)).encode())
+            digest.update(path.read_bytes())
+    return digest.hexdigest()[:12]
+
+
+@app.get("/sw.js", include_in_schema=False)
+async def service_worker() -> Response:
+    body = (STATIC_DIR / "sw.js").read_text().replace("__VERSION__", _static_version())
+    return Response(body, media_type="application/javascript", headers={"Cache-Control": "no-cache"})
 
 
 @app.get("/share", include_in_schema=False)

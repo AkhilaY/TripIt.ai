@@ -1,7 +1,10 @@
-import { api, ApiError, getKey, setKey } from './api.js';
+import { api, ApiError, getKey, isOffline, setKey } from './api.js';
+import { enableDrag } from './drag.js';
 import { ICON, hydrateIcons } from './icons.js';
-import { dayHours, mondayIndex, openStatus, slotConflict } from './hours.js';
+import { dayHours, mondayIndex, nextChange, openStatus, slotConflict } from './hours.js';
+import { toJpegDataUrl } from './images.js';
 import { configureMaps, destroyMaps, mapProvider, renderMap } from './map.js';
+import { clearOfflineData, disablePush, enablePush, pushState, registerServiceWorker } from './pwa.js';
 
 // ---------- Constants & helpers ----------
 
@@ -19,6 +22,24 @@ const cvar = (cat) => `--pc: var(--c-${cat})`;
 const safeUrl = (u) => (/^https?:\/\//i.test(u || '') ? u : null);
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 const $ = (sel, root = document) => root.querySelector(sel);
+
+/** "19:30" → "7:30 PM" */
+function fmtClock(hhmm) {
+  const [h, m] = hhmm.split(':').map(Number);
+  return `${h % 12 || 12}${m ? `:${String(m).padStart(2, '0')}` : ''} ${h < 12 ? 'AM' : 'PM'}`;
+}
+const isoDate = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+/** The trip happening today (by this phone's date), and which day of it: {trip, day} or null. */
+function activeTrip(trips) {
+  const today = new Date(`${isoDate(new Date())}T12:00:00`);
+  for (const t of trips || []) {
+    if (!t.start_date || !t.day_count) continue;
+    const day = Math.round((today - new Date(`${t.start_date}T12:00:00`)) / 86400000) + 1;
+    if (day >= 1 && day <= t.day_count) return { trip: t, day };
+  }
+  return null;
+}
 
 function timeAgo(iso) {
   const s = (Date.now() - new Date(iso).getTime()) / 1000;
@@ -68,6 +89,8 @@ const S = {
   legs: {},             // `${tripId}:${day}:${ids}` -> DayLegs
   here: null,           // {at, provider, times: {placeId: {walk, transit, drive, bike}}}
   scroll: {},
+  offline: false,       // showing the copy saved on this phone
+  lastNext: {},         // tripId -> place id shown as "Up next" (to animate when it changes)
 };
 
 const view = $('#view');
@@ -131,13 +154,14 @@ function route() {
   if (!parts.length) return { name: 'trips', params };
   if (parts[0] === 'trip' && parts[1]) return { name: 'trip', id: parts[1], mode: parts[2] || 'places', params };
   if (parts[0] === 'place' && parts[1]) return { name: 'place', id: parts[1], params };
+  if (parts[0] === 'today' && parts[1]) return { name: 'today', id: parts[1], params };
   if (['map', 'imports', 'settings', 'setup', 'add'].includes(parts[0])) return { name: parts[0], params };
   return { name: 'trips', params };
 }
 
-const TAB_FOR = { trips: 'trips', trip: 'trips', place: 'trips', map: 'map', imports: 'imports', settings: 'settings', add: 'trips' };
+const TAB_FOR = { trips: 'trips', trip: 'trips', place: 'trips', today: 'trips', map: 'map', imports: 'imports', settings: 'settings', add: 'trips' };
 const TAB_INDEX = { trips: 0, map: 1, imports: 2, settings: 3 };
-const DEPTH = { trip: 1, place: 2 };
+const DEPTH = { trip: 1, today: 1, place: 2 };
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
 let renderToken = 0;
 let lastKey = '';
@@ -225,6 +249,11 @@ async function paint(r, token, key, quiet) {
       const done = after();
       if (done && done.catch) done.catch(() => {});
     } catch (e) { console.warn(e); }
+    if (S.focusHandle) {
+      const handle = view.querySelector(`[data-drag-id="${S.focusHandle}"] .handle`);
+      S.focusHandle = null;
+      if (handle) handle.focus({ preventScroll: true });
+    }
   };
 
   lastKey = key;
@@ -257,7 +286,12 @@ function go(hash) {
   else location.hash = hash;
 }
 
-window.addEventListener('hashchange', () => { S.navigations++; S.editDay = false; render(); });
+window.addEventListener('hashchange', () => {
+  S.navigations++;
+  S.editDay = false;
+  if (S.sheet) closeSheet(); // e.g. the back gesture while a sheet is up
+  render();
+});
 
 // Nav bar state: the bar's backdrop fades in once content scrolls under it, and the small title appears
 // once the large title (or the place's name) has scrolled away.
@@ -307,17 +341,19 @@ const photoUrl = (photo, width) => `${photo.url}${photo.url.includes('?') ? '&' 
 
 function platformOf(reelOrUrl) {
   const s = String(reelOrUrl || '').toLowerCase();
+  if (s.startsWith('upload:') || s === 'screenshot') return 'screenshot';
   if (s.includes('tiktok')) return 'tiktok';
   if (s.includes('instagram')) return 'instagram';
   if (s.includes('youtu')) return 'youtube';
   return 'link';
 }
-const PLATFORM_NAMES = { tiktok: 'TikTok', instagram: 'Instagram', youtube: 'YouTube' };
+const PLATFORM_NAMES = { tiktok: 'TikTok', instagram: 'Instagram', youtube: 'YouTube', screenshot: 'Screenshots' };
 const platformName = (p) => PLATFORM_NAMES[String(p || '').toLowerCase()] || cap(p);
 function platformTile(platform, cls = '') {
   if (platform === 'tiktok') return `<span class="tile tt ${cls}">${ICON.note}</span>`;
   if (platform === 'instagram') return `<span class="tile ig ${cls}">${ICON.camera}</span>`;
   if (platform === 'youtube') return `<span class="tile ${cls}" style="--pc:#FF0033">${ICON.play}</span>`;
+  if (platform === 'screenshot') return tile('pink', 'photo', cls);
   return tile('gray', 'link', cls);
 }
 
@@ -328,6 +364,10 @@ function thumb(p, size = 56) {
     ? `<img src="${esc(photoUrl(photo, 240))}" alt="" loading="lazy" decoding="async" onerror="this.remove()">` : ''}</span>`;
 }
 const isNew = (p) => (S.newIds.has(p.id) ? '<span class="chip-new">NEW</span>' : '');
+const starMark = (p) => (p.must_do ? `<span class="star-inline" title="Must-do" aria-label="Must-do">${ICON.star}</span>` : '');
+const hotChip = (p) => (p.mention_count >= 2 ? `<span class="hot" title="Recommended in ${p.mention_count} saved reels">${ICON.flame}${p.mention_count} reels</span>` : '');
+/** Must-dos first, then places more reels recommend; otherwise keeps the saved order. */
+const byPriority = (a, b) => (b.must_do - a.must_do) || ((b.mention_count || 0) - (a.mention_count || 0));
 
 function segControl(key, items) {
   const i = Math.max(0, items.findIndex((x) => x.on));
@@ -338,8 +378,8 @@ function segControl(key, items) {
 function placeRow(p) {
   return `<a class="row" href="#/place/${p.id}">
     ${thumb(p, 56)}
-    <span class="main"><span class="t ${p.visited ? 'strike' : ''}">${esc(p.name)}${isNew(p)}${p.latitude == null ? ' <span class="flag" title="Not on the map yet">●</span>' : ''}</span>
-    <span class="s">${esc([p.neighborhood, p.city].filter(Boolean).join(' · '))}</span>
+    <span class="main"><span class="t ${p.visited ? 'strike' : ''}">${esc(p.name)}${starMark(p)}${isNew(p)}${p.latitude == null ? ' <span class="flag" title="Not on the map yet">●</span>' : ''}</span>
+    <span class="s">${esc([p.neighborhood, p.city].filter(Boolean).join(' · '))}${hotChip(p)}</span>
     ${p.recommended_items.length ? `<span class="s clip">Try: ${esc(p.recommended_items.join(', '))}</span>` : ''}
     ${hoursLine(p)}${hereChip(p)}</span>
     ${ICON.chev}</a>`;
@@ -349,7 +389,7 @@ function jobRow(job) {
   const active = ACTIVE.has(job.status);
   const title = active ? (job.message || 'Waiting to process…') : job.status === 'failed' ? (job.message || 'Import failed') : (job.message || 'Done');
   const inner = `${platformTile(platformOf(job.url))}<span class="main"><span class="t" style="font-size:16px${job.status === 'failed' ? ';color:var(--warn)' : ''}">${esc(title)}</span>
-    <span class="s clip">${esc(job.url.replace(/^https?:\/\/(www\.)?/, ''))} · ${timeAgo(job.created_at)}</span>
+    <span class="s clip">${esc(job.url.startsWith('upload:') ? 'Screenshots' : job.url.replace(/^https?:\/\/(www\.)?/, ''))} · ${timeAgo(job.created_at)}</span>
     ${(job.warnings || []).map((w) => `<span class="s" style="color:var(--warn)">${esc(w)}</span>`).join('')}</span>`;
   if (active) return `<div class="row">${inner}<span class="spinner"></span></div>`;
   if (job.status === 'done' && job.trip_id) return `<a class="row" href="#/trip/${job.trip_id}">${inner}${ICON.chev}</a>`;
@@ -504,6 +544,92 @@ function dayIndexFor(trip, day) {
   return mondayIndex(d);
 }
 
+// ---------- Today ----------
+
+/** "Closes in 35 min" / "Opens in 1 h" style status for right now, or the hours that day. */
+function liveStatus(p, isToday, dayIdx) {
+  if (!isToday) {
+    const h = dayIdx != null ? dayHours(p.opening_hours, dayIdx) : null;
+    return h ? `<span class="s">${ICON.clock.replace('<svg', '<svg class="inline-ic"')}${esc(h)}</span>` : '';
+  }
+  const change = nextChange(p.opening_hours);
+  const st = openStatus(p.opening_hours);
+  if (!change || !st) return '';
+  if (change.open && change.minutes <= 90) return `<span class="status hours-closing">Closes in ${fmtDuration(change.minutes * 60)}</span>`;
+  if (!change.open && change.minutes <= 120) return `<span class="status hours-closing">Opens in ${fmtDuration(change.minutes * 60)}</span>`;
+  return `<span class="status hours-${st.state}">${esc(st.label)}</span>`;
+}
+
+function startsIn(p, isToday) {
+  if (!p.start_time) return p.time_of_day ? cap(p.time_of_day) : '';
+  if (!isToday) return fmtClock(p.start_time);
+  const [h, m] = p.start_time.split(':').map(Number);
+  const now = new Date();
+  const mins = h * 60 + m - (now.getHours() * 60 + now.getMinutes());
+  return mins > 0 && mins <= 180 ? `${fmtClock(p.start_time)} · in ${fmtDuration(mins * 60)}` : fmtClock(p.start_time);
+}
+
+function todayCard({ trip: t, day }) {
+  const detail = S.trip[t.id];
+  const list = detail ? stops(detail, day) : [];
+  const next = list.find((p) => !p.visited);
+  const done = list.filter((p) => p.visited).length;
+  let inner;
+  if (!detail) inner = '<span class="s">Loading today’s plan…</span>';
+  else if (!list.length) inner = '<span class="s">Nothing planned today. Open the itinerary to add stops.</span>';
+  else if (!next) inner = `<span class="today-next">${tile('green', 'done', 'md')}<span class="main"><span class="t b">All done for today</span><span class="s">${plural(done, 'stop')} visited</span></span>${ICON.chev}</span>`;
+  else {
+    inner = `<span class="today-next">${thumb(next, 52)}<span class="main"><span class="s">Up next${startsIn(next, true) ? ` · ${esc(startsIn(next, true))}` : ''}</span>
+      <span class="t b">${esc(next.name)}</span>${liveStatus(next, true)}</span>${ICON.chev}</span>`;
+  }
+  return `<a class="todaycard" href="#/today/${t.id}">
+    <span class="today-top"><span class="today-label">${ICON.sun}Today · Day ${day} of ${t.day_count}</span><span class="today-city">${esc(t.name)}</span></span>
+    ${list.length ? `<span class="progress" aria-label="${done} of ${list.length} stops done"><i style="width:${Math.round((done / list.length) * 100)}%"></i></span>` : ''}
+    ${inner}</a>`;
+}
+
+function nextCard(trip, p, n, total, isToday, dayIdx) {
+  const photo = p.photos && p.photos[0];
+  const changed = S.lastNext[trip.id] && S.lastNext[trip.id] !== p.id;
+  S.lastNext[trip.id] = p.id;
+  return `<div class="nextcard${changed ? ' enter' : ''}" style="${cvar(p.category)}">
+    ${photo ? `<a class="next-photo" href="#/place/${p.id}"><img src="${esc(photoUrl(photo, 1000))}" alt="" decoding="async" onerror="this.parentElement.remove()"></a>` : ''}
+    <div class="next-body">
+      <div class="next-label">${isToday ? 'Up next' : 'First up'} · stop ${n} of ${total}</div>
+      <h2><a href="#/place/${p.id}">${esc(p.name)}</a>${starMark(p)}</h2>
+      <div class="s">${esc([startsIn(p, isToday), CATS[p.category], p.neighborhood].filter(Boolean).join(' · '))}</div>
+      ${liveStatus(p, isToday, dayIdx)}
+      ${p.day_note ? `<div class="daynote">${esc(p.day_note)}</div>` : ''}
+      <div class="next-travel" id="next-travel"></div>
+      <div class="next-actions">
+        <button class="btn" data-act="todaydir" data-id="${p.id}">${ICON.route}Directions</button>
+        <button class="btn tint" data-act="done" data-id="${p.id}">${ICON.done}Done</button>
+      </div>
+    </div></div>`;
+}
+
+/** Fills "12 min walk from Devoción" (or from your location) under the Up next card. */
+async function fillNextTravel(trip, day, next, prev) {
+  const el = document.getElementById('next-travel');
+  if (!el) return;
+  const mode = currentMode();
+  const fromYou = pickTime(hereTimes(next.id), mode);
+  if (fromYou) {
+    el.innerHTML = `${tile(fromYou.mode, fromYou.mode)}<span>${fromYou.time.estimated ? '≈ ' : ''}${fmtDuration(fromYou.time.duration_s)} from you</span>`;
+    return;
+  }
+  if (!prev || !located(prev) || !located(next)) return;
+  const key = legsKey(trip, day);
+  try {
+    const data = S.legs[key] || (S.legs[key] = await api(`/v1/trips/${trip.id}/days/${day}/legs`));
+    const leg = data.legs.find((l) => l.from_place_id === prev.id && l.to_place_id === next.id);
+    const picked = pickTime(leg && leg.times, mode);
+    if (picked && document.getElementById('next-travel') === el) {
+      el.innerHTML = `${tile(picked.mode, picked.mode)}<span>${picked.time.estimated ? '≈ ' : ''}${fmtDuration(picked.time.duration_s)} from ${esc(prev.name)}</span>`;
+    }
+  } catch { /* travel time is a nice-to-have */ }
+}
+
 // ---------- Views ----------
 
 const addButton = `<button class="gbtn tint" data-act="add" aria-label="Add a reel">${ICON.plus}</button>`;
@@ -518,8 +644,10 @@ const VIEWS = {
         `<button class="btn" data-act="add">${ICON.link}Paste a link</button><a class="linkbtn" href="#/settings">Set up the share button</a>`)
       : `${inflightJobs.length ? `<div class="section"><div class="group tiles">${inflightJobs.map(jobRow).join('')}</div></div>` : ''}
          ${trips.length ? `<div class="cards">${trips.map(tripCard).join('')}</div>` : ''}`;
+    const active = activeTrip(trips);
+    if (active && !S.trip[active.trip.id]) loadTrip(active.trip.id).then(() => render({ quiet: true })).catch(() => {});
     return {
-      html: `${navbar('Trips', { right: addButton })}<h1 class="largetitle" data-anchor>Trips</h1>${body}`,
+      html: `${navbar('Trips', { right: addButton })}<h1 class="largetitle" data-anchor>Trips</h1>${active ? todayCard(active) : ''}${body}`,
       // Warm the cache so opening a trip is instant.
       after: () => setTimeout(() => trips.slice(0, 8).forEach((t) => { if (!S.trip[t.id]) loadTrip(t.id).catch(() => {}); }), 400),
     };
@@ -538,7 +666,8 @@ const VIEWS = {
     const cats = [...new Set(trip.places.map((p) => p.category))].sort((a, b) => CAT_ORDER.indexOf(a) - CAT_ORDER.indexOf(b));
     const head = `${navbar(trip.name, { back: '#/', backLabel: 'Trips', right })}
       <h1 class="largetitle" data-anchor>${esc(trip.name)}</h1>
-      <div class="subtitle"><span>${esc(meta)}</span><span class="tiles-inline" aria-hidden="true">${cats.slice(0, 6).map((c) => catTile(c, 'sm')).join('')}</span></div>${seg}`;
+      <div class="subtitle"><span>${esc(meta)}</span><span class="tiles-inline" aria-hidden="true">${cats.slice(0, 6).map((c) => catTile(c, 'sm')).join('')}</span>
+        ${trip.share_token ? `<button class="chip-shared" data-act="sharetrip" data-id="${trip.id}">${ICON.link}Shared</button>` : ''}</div>${seg}`;
 
     if (mode === 'places') return head + placesList(trip);
     if (mode === 'itinerary') return { html: head + itinerary(trip), after: () => loadLegs(trip) };
@@ -557,12 +686,55 @@ const VIEWS = {
     };
   },
 
+  async today(r) {
+    const trip = await cachedTrip(r.id);
+    const active = activeTrip([trip]);
+    const head = (title) => navbar(title, { back: '#/', backLabel: 'Trips',
+      right: `<a class="gbtn" href="#/trip/${trip.id}/itinerary" aria-label="Full itinerary">${ICON.calendar}</a>` });
+    if (!trip.day_count) {
+      return `${head(trip.name)}<h1 class="largetitle" data-anchor>${esc(trip.name)}</h1>
+        ${emptyState('indigo', 'calendar', 'No itinerary yet', 'Plan the trip first, then this page walks you through each day.',
+          `<button class="btn" data-act="plan" data-id="${trip.id}">${ICON.sparkle}Plan my trip</button>`)}`;
+    }
+    const day = Math.min(Math.max(1, Number(r.params.get('day')) || (active ? active.day : 1)), trip.day_count);
+    const isToday = !!active && active.day === day;
+    const dayIdx = dayIndexFor(trip, day);
+    const list = stops(trip, day);
+    const next = list.find((p) => !p.visited);
+    const done = list.filter((p) => p.visited);
+    const later = list.filter((p) => !p.visited && p !== next);
+    const prev = next ? [...list.slice(0, list.indexOf(next))].reverse().find(located) : null;
+    const title = isToday ? 'Today' : `Day ${day}`;
+    const pills = trip.day_count > 1 ? `<div class="daypills" role="tablist">${Array.from({ length: trip.day_count }, (_, i) => i + 1).map((d) =>
+      `<a class="daypill${d === day ? ' on' : ''}" href="#/today/${trip.id}?day=${d}" data-replace role="tab" aria-selected="${d === day}">${active && active.day === d ? 'Today' : `Day ${d}`}</a>`).join('')}</div>` : '';
+    const row = (p) => {
+      const inner = `<span class="stopnum" style="${cvar(p.category)}">${list.indexOf(p) + 1}</span>${thumb(p, 48)}
+        <span class="main"><span class="t ${p.visited ? 'strike' : ''}">${esc(p.name)}${starMark(p)}</span>
+        <span class="s">${esc([startsIn(p, isToday), CATS[p.category]].filter(Boolean).join(' · '))}</span></span>`;
+      return p.visited
+        ? `<div class="row"><a class="rowlink" href="#/place/${p.id}">${inner}</a><button class="linkbtn" data-act="undone" data-id="${p.id}" aria-label="Mark ${esc(p.name)} not visited">Undo</button></div>`
+        : `<a class="row" href="#/place/${p.id}">${inner}${ICON.chev}</a>`;
+    };
+    const html = `${head(title)}<h1 class="largetitle" data-anchor>${title}</h1>
+      <div class="subtitle"><span>${esc([dayDate(trip.start_date, day), trip.name, trip.day_titles[day - 1]].filter(Boolean).join(' · '))}</span></div>
+      ${pills}
+      <div class="section"><div class="progress big" aria-label="${done.length} of ${list.length} stops done"><i style="width:${list.length ? Math.round((done.length / list.length) * 100) : 0}%"></i></div>
+        <div class="section-f">${done.length} of ${plural(list.length, 'stop')} done</div></div>
+      ${!list.length ? emptyState('gray', 'calendar', 'Nothing planned', 'Open a place and move it to this day.')
+        : next ? `<div class="section">${nextCard(trip, next, list.indexOf(next) + 1, list.length, isToday, dayIdx)}</div>`
+        : `<div class="section"><div class="group donecard">${tile('green', 'done', 'lg')}<div><h3>Day complete</h3><p class="s">You visited all ${plural(list.length, 'stop')}.${day < trip.day_count ? ` Day ${day + 1} is next.` : ''}</p></div></div></div>`}
+      ${later.length ? `<div class="section"><h2 class="section-title">Later${isToday ? ' today' : ''}<span class="count">${later.length}</span></h2><div class="group thumbs">${later.map(row).join('')}</div></div>` : ''}
+      ${done.length ? `<div class="section"><h2 class="section-title">Done<span class="count">${done.length}</span></h2><div class="group thumbs">${done.map(row).join('')}</div></div>` : ''}`;
+    return { html, after: () => { if (next) fillNextTravel(trip, day, next, prev); } };
+  },
+
   async place(r) {
     const trip = await findPlace(r.id);
     const p = tripPlace(trip, r.id);
     if (!p) throw new ApiError('This place was deleted.', 404);
     const links = mapsLinks(p, trip);
-    const reel = trip.reels.find((x) => x.id === p.reel_id);
+    const reelIds = p.reel_ids && p.reel_ids.length ? p.reel_ids : [p.reel_id].filter(Boolean);
+    const reels = reelIds.map((id) => trip.reels.find((x) => x.id === id)).filter(Boolean);
     const isLocated = located(p);
     const photos = p.photos || [];
     const pages = photos.map((ph, i) => `<button class="gimg" data-act="viewphoto" data-id="${p.id}" data-index="${i}" aria-label="Open photo ${i + 1} of ${photos.length}">
@@ -585,14 +757,21 @@ const VIEWS = {
         <select class="select" id="tod-select" data-act="settod" data-id="${p.id}">
           <option value="">Any time</option>
           ${TODS.map((x) => `<option value="${x}" ${p.time_of_day === x ? 'selected' : ''}>${cap(x)}</option>`).join('')}
-        </select></div>` : '';
+        </select></div>
+      <div class="row">${tile('orange', 'calendarPlus')}<label class="main" for="time-input"><span class="t">Exact time</span>
+          <span class="s">For a reservation or a tour</span></label>
+        <input class="datefield" type="time" id="time-input" data-act="settime" data-id="${p.id}" value="${esc(p.start_time || '')}">
+        ${p.start_time ? `<button class="linkbtn" data-act="cleartime" data-id="${p.id}" aria-label="Clear exact time">Clear</button>` : ''}</div>` : '';
 
-    const html = `${navbar(p.name, { back: `#/trip/${trip.id}`, backLabel: trip.name })}
+    const star = `<button class="gbtn star${p.must_do ? ' on' : ''}" data-act="star" data-id="${p.id}" aria-pressed="${p.must_do}" aria-label="Must-do">${p.must_do ? ICON.star : ICON.starO}</button>`;
+    const html = `${navbar(p.name, { back: `#/trip/${trip.id}`, backLabel: trip.name, right: star })}
       ${hero}
       <div class="ph" style="${cvar(p.category)}">
         <span class="cat">${catTile(p.category, 'sm')}${CATS[p.category]}</span>
         <h1 data-anchor>${esc(p.name)}${isNew(p)}</h1>
         <span class="loc">${esc([p.neighborhood, p.city].filter(Boolean).join(' · '))}</span>
+        ${p.must_do ? `<span class="mustline">${ICON.star}Must-do: the planner always fits it in</span>` : ''}
+        ${p.mention_count >= 2 ? `<span class="hotline">${ICON.flame}Recommended in ${p.mention_count} of your saved reels</span>` : ''}
         ${st ? `<span class="status hours-${st.state}">${esc(st.label)}</span>` : ''}
         ${p.resolved_name ? `<span class="s">On maps as ${esc(p.resolved_name)}</span>` : ''}
         ${p.confidence === 'low' ? '<span class="flag">The name was hard to make out in the reel; double-check it.</span>' : ''}
@@ -636,12 +815,12 @@ const VIEWS = {
         <textarea class="notes" id="notes" data-act="notes" data-id="${p.id}" placeholder="Add a note" rows="3" aria-label="My notes">${esc(p.user_notes)}</textarea>
       </div></div></div>
 
-      ${reel ? `<div class="section"><div class="section-h">Saved from</div><div class="group tiles">
+      ${reels.length ? `<div class="section"><div class="section-h">Saved from</div><div class="group tiles">${reels.map((reel) => `
         ${safeUrl(reel.url) ? `<a class="row" href="${esc(reel.url)}" target="_blank" rel="noopener">` : '<div class="row">'}
         ${platformTile(platformOf(reel.platform || reel.url))}
         <span class="main"><span class="t">${esc(reel.title)}</span>
         <span class="s">${esc([platformName(reel.platform), reel.creator ? `@${reel.creator}` : ''].filter(Boolean).join(' · '))}</span></span>
-        ${safeUrl(reel.url) ? `${ICON.chev}</a>` : '</div>'}</div></div>` : ''}
+        ${safeUrl(reel.url) ? `${ICON.chev}</a>` : '</div>'}`).join('')}</div></div>` : ''}
 
       <div class="section"><div class="group"><button class="row destructive" data-act="askdeleteplace" data-id="${p.id}" data-trip="${trip.id}">Delete place</button></div></div>`;
     return {
@@ -679,7 +858,26 @@ const VIEWS = {
     const key = getKey();
     const geocoder = { google: 'Google Places', openstreetmap: 'OpenStreetMap', none: 'Off' }[S.config.geocoder] || S.config.geocoder;
     const copyLine = (value, label) => `<div class="copyline"><code>${esc(value)}</code><button class="copybtn" data-act="copy" data-value="${esc(value)}" aria-label="Copy ${label}">Copy</button></div>`;
+    const push = await pushState();
+    const pushNote = {
+      install: 'On iPhone, notifications work once TripIt is on your Home Screen (see below). Open it from there, then turn this on.',
+      denied: 'Notifications are blocked for TripIt. Turn them on in Settings → Notifications → TripIt.',
+      unsupported: 'This browser can’t show notifications from TripIt.',
+      off: 'Get a notification when a reel you shared has been turned into places, or if it couldn’t be read.',
+      on: 'You’ll get a notification when each shared reel’s places are saved.',
+    }[push];
     return `${navbar('Settings')}<h1 class="largetitle" data-anchor>Settings</h1>
+
+      <div class="section"><div class="section-h">Notifications</div><div class="group tiles">
+        <label class="row" for="push-toggle">${tile('red', 'bell')}<span class="main"><span class="t">Import notifications</span></span>
+          <input class="switch" type="checkbox" id="push-toggle" data-act="pushtoggle" ${push === 'on' ? 'checked' : ''} ${['on', 'off'].includes(push) ? '' : 'disabled'}></label>
+        ${push === 'on' ? `<button class="row" data-act="pushtest">${tile('gray', 'bell')}<span class="main"><span class="t link">Send a test notification</span></span></button>` : ''}
+      </div><div class="section-f">${pushNote}</div></div>
+
+      <div class="section"><div class="section-h">Offline</div><div class="group tiles">
+        <div class="row">${tile('teal', 'offline')}<span class="main"><span class="t">Works without signal</span>
+          <span class="s">Trips you open are kept on this phone, with their photos and the map areas you’ve viewed. Today’s trip is saved automatically.</span></span></div>
+      </div><div class="section-f">To save a whole trip before you go, open it and choose ••• → Save for offline.</div></div>
 
       <div class="section"><div class="section-h">Share from TikTok &amp; Instagram</div><div class="group">
         <div class="row">${tile('indigo', 'share', 'md')}<span class="main"><span class="t b">iPhone share button</span><span class="s">A one-time shortcut in the Shortcuts app</span></span></div>
@@ -732,7 +930,7 @@ const VIEWS = {
 };
 
 function photoCaption(ph) {
-  if (ph.source === 'reel') return 'From the reel';
+  if (ph.source === 'reel') return ph.attribution || 'From the reel';
   if (ph.source === 'google') return ph.attribution ? `Google · ${ph.attribution}` : 'Google';
   return ph.attribution || 'Wikimedia Commons';
 }
@@ -773,7 +971,7 @@ function gettingThere(p) {
 function placesList(trip) {
   if (!trip.places.length) return emptyState('gray', 'pinslash', 'No places', 'Places you save from reels appear here.');
   return CAT_ORDER.filter((c) => trip.places.some((p) => p.category === c)).map((c) => {
-    const list = trip.places.filter((p) => p.category === c);
+    const list = trip.places.filter((p) => p.category === c).sort(byPriority);
     return `<div class="section"><h2 class="section-title">${catTile(c)}${CATS[c]}<span class="count">${list.length}</span></h2>
       <div class="group thumbs">${list.map(placeRow).join('')}</div></div>`;
   }).join('')
@@ -792,9 +990,12 @@ function itinerary(trip) {
   const by = trip.planned_by === 'claude'
     ? `<span class="planned-by">${ICON.sparkle}Planned with Claude</span>`
     : trip.planned_by === 'offline' ? '<span class="planned-by">Quick plan grouped by location</span>' : '<span></span>';
-  let html = `<div class="planbar">${by}
+  const active = activeTrip([trip]);
+  let html = `${active ? `<a class="todaylink" href="#/today/${trip.id}">${ICON.sun}<span>Day ${active.day} is today. Open the day view</span>${ICON.chev}</a>` : ''}
+    <div class="planbar">${by}
     <span><button class="linkbtn" data-act="plan" data-id="${trip.id}">Re-plan</button>
-    <button class="linkbtn" data-act="editday" style="margin-left:10px">${S.editDay ? 'Done' : 'Edit'}</button></span></div>`;
+    <button class="linkbtn" data-act="editday" style="margin-left:10px">${S.editDay ? 'Done' : 'Edit'}</button></span></div>
+    ${S.editDay ? '<div class="section"><div class="section-f" style="padding-top:0">Drag the handles to reorder stops or move them between days.</div></div>' : ''}`;
   if (trip.plan_notes) html += `<div class="section"><div class="group"><div class="notecard">${esc(trip.plan_notes)}</div></div></div>`;
   const mode = currentMode();
   html += `<div class="travelbar">${segControl(`modes:${trip.id}`, MODES.map(([m, label]) => ({
@@ -809,13 +1010,13 @@ function itinerary(trip) {
     const locatedList = list.filter(located);
     html += `<div class="section"><div class="dayhead"><div>${date ? `<div class="date">${date}</div>` : ''}<div class="d">Day ${d}</div>
       <div class="dt">${esc(trip.day_titles[d - 1] || `Day ${d}`)}</div></div><span class="daytravel" data-day="${d}"></span></div>
-      <div class="group">${list.map((p, i) => {
-        const conflict = slotConflict(p.opening_hours, dayIdx, p.time_of_day);
+      <div class="group${S.editDay ? ' droplist' : ''}" data-day="${d}">${list.map((p, i) => {
+        const conflict = slotConflict(p.opening_hours, dayIdx, p.time_of_day, p.start_time);
         const todays = dayIdx != null ? dayHours(p.opening_hours, dayIdx) : null;
         const inner = `<span class="stopnum" style="${cvar(p.category)}">${i + 1}</span>
           ${thumb(p, 52)}
-          <span class="main"><span class="t ${p.visited ? 'strike' : ''}">${esc(p.name)}${isNew(p)}</span>
-          <span class="s">${esc([cap(p.time_of_day || ''), CATS[p.category], p.neighborhood].filter(Boolean).join(' · '))}</span>
+          <span class="main"><span class="t ${p.visited ? 'strike' : ''}">${esc(p.name)}${starMark(p)}${isNew(p)}</span>
+          <span class="s">${esc([p.start_time ? fmtClock(p.start_time) : cap(p.time_of_day || ''), CATS[p.category], p.neighborhood].filter(Boolean).join(' · '))}</span>
           ${todays && !conflict ? `<span class="s">${ICON.clock.replace('<svg', '<svg class="inline-ic"')}${esc(todays)}</span>` : ''}
           ${conflict ? `<span class="warnline">${ICON.warn}${esc(conflict)}${todays && todays !== 'Closed' ? ` (${esc(todays)})` : ''}</span>` : ''}
           ${p.day_note ? `<span class="daynote">${esc(p.day_note)}</span>` : ''}
@@ -823,21 +1024,43 @@ function itinerary(trip) {
         const next = locatedList[locatedList.indexOf(p) + 1];
         const legRow = located(p) && next && !S.editDay
           ? `<div class="leg" data-day="${d}" data-from="${p.id}" data-to="${next.id}"><span class="spinner" style="width:14px;height:14px"></span></div>` : '';
-        return (S.editDay
-          ? `<div class="row">${inner}<span class="movers">
-              <button class="mover" data-act="move" data-trip="${trip.id}" data-day="${d}" data-id="${p.id}" data-dir="-1" aria-label="Move ${esc(p.name)} up" ${i === 0 ? 'disabled' : ''}>${ICON.up}</button>
-              <button class="mover" data-act="move" data-trip="${trip.id}" data-day="${d}" data-id="${p.id}" data-dir="1" aria-label="Move ${esc(p.name)} down" ${i === list.length - 1 ? 'disabled' : ''}>${ICON.down}</button></span></div>`
-          : `<a class="row" href="#/place/${p.id}">${inner}${ICON.chev}</a>`) + legRow;
-      }).join('') || '<div class="row"><span class="s">Nothing planned. Move places here from their page.</span></div>'}</div></div>`;
+        return (S.editDay ? dragRow(p, inner) : `<a class="row" href="#/place/${p.id}">${inner}${ICON.chev}</a>`) + legRow;
+      }).join('') || `<div class="row dropempty"><span class="s">${S.editDay ? 'Drop a place here' : 'Nothing planned. Move places here from their page.'}</span></div>`}</div></div>`;
   }
   html += '<div class="section" id="travel-note" hidden><div class="section-f">Travel times are estimates from distance. Real routes and transit times need a Google key with the Routes API (see the README).</div></div>';
   if (!trip.start_date && trip.places.some((p) => p.opening_hours && p.opening_hours.weekly)) {
     html += '<div class="section"><div class="section-f">Set a start date when you re-plan to check each stop is open on the day it’s scheduled.</div></div>';
   }
-  const un = trip.places.filter((p) => p.day_number == null);
-  if (un.length) html += `<div class="section"><h2 class="section-title">Not scheduled<span class="count">${un.length}</span></h2><div class="group thumbs">${un.map(placeRow).join('')}</div></div>`;
-  html += '<div class="section"><div class="section-f">Open a place to move it to another day or change its time.</div></div>';
+  const un = trip.places.filter((p) => p.day_number == null).sort(byPriority);
+  if (S.editDay) {
+    html += `<div class="section"><h2 class="section-title">Not scheduled<span class="count">${un.length}</span></h2>
+      <div class="group droplist" data-day="0">${un.map((p) => dragRow(p, `${thumb(p, 52)}<span class="main"><span class="t">${esc(p.name)}${starMark(p)}</span>
+        <span class="s">${esc(CATS[p.category])}</span></span>`)).join('')}<div class="row dropempty"><span class="s">Drag here to take a stop off the plan</span></div></div></div>`;
+  } else if (un.length) {
+    html += `<div class="section"><h2 class="section-title">Not scheduled<span class="count">${un.length}</span></h2><div class="group thumbs">${un.map(placeRow).join('')}</div></div>`;
+  }
+  html += '<div class="section"><div class="section-f">Open a place to set an exact time, like a reservation.</div></div>';
   return html;
+}
+
+function dragRow(p, inner) {
+  return `<div class="row dragrow" data-drag-id="${p.id}">${inner}
+    <button class="handle" aria-label="Reorder ${esc(p.name)}. Use the up and down arrow keys to move it.">${ICON.grip}</button></div>`;
+}
+
+/** Called by drag.js when a stop is dropped in a new spot (day 0 = not scheduled). */
+async function onItineraryDrop(placeId, day, index) {
+  const r = route();
+  if (r.name !== 'trip') return;
+  try {
+    S.trip[r.id] = await api(`/v1/trips/${r.id}/move`, { method: 'POST', body: { place_id: placeId, day, index } });
+    fetchedAt.trips = 0;
+    S.focusHandle = placeId;
+    render();
+  } catch (e) {
+    toast(e.message, true);
+    render();
+  }
 }
 
 function popupHtml(p) {
@@ -907,20 +1130,134 @@ function toast(text, error = false) {
   toastTimer = setTimeout(() => animateOut([...toasts.children]), error ? 4000 : 2600);
 }
 
-function addSheet() {
+const REEL_LINK = /^https?:\/\/([a-z0-9-]+\.)*(tiktok\.com|instagram\.com|instagr\.am|youtube\.com|youtu\.be)\//i;
+const MAP_LINK = /^https?:\/\/((www\.|maps\.)?google\.[a-z.]+\/maps|maps\.app\.goo\.gl\/|goo\.gl\/maps|maps\.apple\.com\/|maps\.apple\/)/i;
+const findLink = (text) => (text.match(/https?:\/\/[^\s<>"']+/) || [null])[0];
+
+/** One sheet for every way to add: a reel link, a Google/Apple Maps link, a place name, or screenshots. */
+function addSheet({ tripId = '' } = {}) {
+  const st = { text: '', trip: tripId, results: '', hint: '' };
   openSheet({
-    type: 'form', title: 'Add a reel', confirm: 'Add',
-    body: () => `<div class="section"><div class="group"><div class="row">
-      <input class="field" id="add-url" type="url" inputmode="url" placeholder="https://www.tiktok.com/…" autocomplete="off" autocapitalize="off" aria-label="Reel link"></div></div>
-      <div class="section-f">Paste a TikTok, Instagram Reel or YouTube Shorts link. Sharing straight from the app is faster once the shortcut is set up.</div></div>`,
+    type: 'form', title: 'Add', confirm: 'Add', st,
+    body: () => `<div class="section"><div class="group"><label class="row searchrow" for="add-input">${ICON.search}
+        <input class="field" id="add-input" type="text" data-act="addinput" value="${esc(st.text)}" placeholder="Paste a link or search for a place"
+          autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="go" aria-label="Link or place name"></label></div>
+        <div class="section-f" id="add-hint">${st.hint || 'TikTok, Instagram and YouTube links find every place in the video. Google Maps and Apple Maps links add that place.'}</div></div>
+      <div id="add-results">${st.results}</div>
+      <div class="section"><div class="group tiles">
+        <label class="row" for="add-trip">${tile('blue', 'trips')}<span class="main"><span class="t">Trip</span></span>
+          <select class="select" id="add-trip" data-act="addtrip">
+            <option value="">Choose by location</option>
+            ${(S.trips || []).map((t) => `<option value="${t.id}" ${t.id === st.trip ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}
+          </select></label>
+        <button class="row" data-act="pickshots">${tile('pink', 'photo')}<span class="main"><span class="t">Choose screenshots</span>
+          <span class="s">Of a post, a map or an article</span></span>${ICON.chev}</button>
+      </div><input type="file" id="shots-input" data-act="shots" accept="image/*" multiple hidden></div>`,
     async ok() {
-      const v = $('#add-url').value.trim();
-      if (!v) return;
-      closeSheet();
-      await submitLink(v);
-      go('#/');
+      const text = st.text.trim();
+      const link = findLink(text);
+      if (link && REEL_LINK.test(link)) { closeSheet(); await submitLink(text); go('#/'); return; }
+      if (link && MAP_LINK.test(link)) { await addPlace('/v1/places/from-link', { url: link, trip_id: st.trip || null }); return; }
+      if (link) { toast('That link isn’t from TikTok, Instagram, YouTube or a maps app', true); return; }
+      const first = $('#add-results [data-act="addresult"]');
+      if (first) await addPlace('/v1/places', { candidate_id: first.dataset.id, trip_id: st.trip || null });
+      else if (text) await addByName(text, st.trip);
     },
   });
+}
+
+let searchSeq = 0;
+let searchTimer;
+function addInputChanged(value) {
+  const st = S.sheet && S.sheet.st;
+  if (!st) return;
+  st.text = value;
+  const text = value.trim();
+  const link = findLink(text);
+  const show = (results, hint) => {
+    st.results = results;
+    if (hint !== undefined) st.hint = hint;
+    const box = $('#add-results');
+    if (box) box.innerHTML = results;
+    const hintEl = $('#add-hint');
+    if (hintEl && hint !== undefined) hintEl.innerHTML = hint || 'TikTok, Instagram and YouTube links find every place in the video. Google Maps and Apple Maps links add that place.';
+  };
+  clearTimeout(searchTimer);
+  searchSeq++;
+  if (!text) { show('', ''); return; }
+  if (link) {
+    const reel = REEL_LINK.test(link);
+    const map = MAP_LINK.test(link);
+    const label = reel ? `Find the places in this ${platformName(platformOf(link))} post` : map ? 'Add the place from this map link' : '';
+    show(label ? `<div class="section"><div class="group tiles"><button class="row" data-act="sheetok">${reel ? platformTile(platformOf(link)) : tile('green', 'map')}
+      <span class="main"><span class="t">${label}</span><span class="s clip">${esc(link.replace(/^https?:\/\/(www\.)?/, ''))}</span></span>${ICON.chev}</button></div></div>` : '',
+    label ? '' : 'That link isn’t from TikTok, Instagram, YouTube or a maps app.');
+    return;
+  }
+  if (text.length < 2) return;
+  const seq = searchSeq;
+  searchTimer = setTimeout(async () => {
+    show(`<div class="section"><div class="group"><div class="row"><span class="spinner"></span><span class="s">Searching…</span></div></div></div>`);
+    let found = [];
+    let error = '';
+    try {
+      found = await api('/v1/places/search', { method: 'POST', body: { query: text, trip_id: st.trip || null } });
+    } catch (e) { error = e.message; }
+    if (seq !== searchSeq || !S.sheet || S.sheet.st !== st) return;
+    const rows = found.map((c) => `<button class="row" data-act="addresult" data-id="${esc(c.candidate_id)}">${catTile(c.category)}
+      <span class="main"><span class="t">${esc(c.name)}</span>${c.address ? `<span class="s clip">${esc(c.address)}</span>` : ''}</span>${ICON.plus.replace('<svg', '<svg class="addplus"')}</button>`).join('');
+    show(`<div class="section"><div class="group tiles">${rows}
+      <button class="row" data-act="addname">${tile('gray', 'pin')}<span class="main"><span class="t">Add “${esc(text)}”</span>
+        <span class="s">${found.length ? 'None of these: add it by name' : error ? esc(error) : 'No matches on the map. Add it by name and pin it later.'}</span></span></button></div></div>`);
+  }, 350);
+}
+
+async function addPlace(path, body) {
+  S.sheet.busy = true; renderOverlay();
+  try {
+    const res = await api(path, { method: 'POST', body });
+    const trip = await loadTrip(res.place.trip_id);
+    fetchedAt.trips = 0;
+    closeSheet();
+    toast(res.created ? `Added ${res.place.name} to ${trip.name}` : `${res.place.name} is already in ${trip.name}`);
+    go(`#/place/${res.place.id}`);
+  } catch (e) {
+    if (S.sheet) { S.sheet.busy = false; renderOverlay(); }
+    toast(e.message, true);
+  }
+}
+
+function addByName(name, tripId) {
+  if (tripId) return addPlace('/v1/places', { name, trip_id: tripId });
+  closeSheet();
+  openSheet({
+    type: 'form', title: `Add ${name}`, confirm: 'Add', st: { city: '' },
+    body: () => `<div class="section"><div class="section-h">Which city is it in?</div><div class="group"><div class="row">
+      <input class="field" id="add-city" placeholder="e.g. Lisbon" autocomplete="off" aria-label="City"></div></div>
+      <div class="section-f">It joins that city’s trip, or starts a new one. Pick a trip in the Add sheet to skip this.</div></div>`,
+    async ok() {
+      const city = $('#add-city').value.trim();
+      if (city) await addPlace('/v1/places', { name, city });
+    },
+  });
+}
+
+async function addScreenshots(files) {
+  const list = [...files].slice(0, 10);
+  if (!list.length) return;
+  const note = S.sheet && S.sheet.st && !findLink(S.sheet.st.text) ? S.sheet.st.text.trim() : '';
+  closeSheet();
+  toast(`Reading ${plural(list.length, 'screenshot')}…`);
+  try {
+    const images = [];
+    for (const f of list) images.push(await toJpegDataUrl(f));
+    const job = await api('/v1/jobs/screenshots', { method: 'POST', body: { images, note: note || null } });
+    S.jobs = [job, ...S.jobs.filter((j) => j.id !== job.id)];
+    schedulePoll(true);
+    go('#/imports');
+  } catch (e) {
+    toast(e.message, true);
+  }
 }
 
 function planSheet(trip) {
@@ -991,6 +1328,144 @@ async function shareTrip(trip) {
       <div class="section-f">Each place links to Google Maps, so friends can save it there.</div></div>`,
     async ok() { await copy(text, $('#share-text')); closeSheet(); },
   });
+}
+
+function shareMenu(t) {
+  const url = t.share_token ? `${location.origin}/s/${t.share_token}` : null;
+  const actions = [
+    url
+      ? { label: 'Share link', run: () => shareUrl(t, url) }
+      : { label: 'Create a share link', run: () => createShareLink(t) },
+    { label: 'Send as text', run: () => shareTrip(t) },
+    { label: 'Add to Calendar', run: () => exportTrip(t, 'ics') },
+    { label: 'Google My Maps file (.kml)', run: () => exportTrip(t, 'kml') },
+  ];
+  if (url) {
+    actions.push({ label: 'Turn off share link', destructive: true, run: async () => {
+      await api(`/v1/trips/${t.id}/share`, { method: 'DELETE' });
+      t.share_token = null;
+      fetchedAt.trips = 0;
+      toast('Share link turned off');
+      render();
+    } });
+  }
+  openSheet({ type: 'actions', title: url ? 'Anyone with the link can see this trip, but not your notes.' : `Share ${t.name}`, actions });
+}
+
+/** Must run straight from a tap: Safari only opens the share sheet for a user gesture. */
+function shareUrl(t, url) {
+  if (navigator.share) {
+    navigator.share({ title: t.name, text: `${t.name}: my trip on TripIt`, url }).catch((e) => {
+      if (e.name !== 'AbortError') copy(url);
+    });
+  } else {
+    copy(url);
+  }
+}
+
+async function createShareLink(t) {
+  try {
+    const res = await api(`/v1/trips/${t.id}/share`, { method: 'POST' });
+    t.share_token = res.token;
+    fetchedAt.trips = 0;
+    const url = location.origin + res.path;
+    render();
+    // The tap that started this has been used up by the request, so ask for one more to share.
+    openSheet({
+      type: 'form', title: 'Share link ready', confirm: navigator.share ? 'Share' : 'Copy',
+      body: () => `<div class="section"><div class="group">${tile('green', 'link', 'lg').replace('class="tile', 'class="tile centered-tile')}
+        <div class="copyline"><code>${esc(url)}</code><button class="copybtn" data-act="copy" data-value="${esc(url)}" aria-label="Copy link">Copy</button></div></div>
+        <div class="section-f">Friends see the map, the itinerary and each place, but not your notes. Turn the link off any time from Share.</div></div>`,
+      ok() { closeSheet(); shareUrl(t, url); },
+    });
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function exportTrip(t, format) {
+  // Open the tab during the tap so it isn't blocked, then point it at the file once the link is ready.
+  const win = format === 'ics' ? window.open('', '_blank') : null;
+  try {
+    const { url } = await api(`/v1/trips/${t.id}/export-link?format=${format}`, { method: 'POST' });
+    if (win) { win.location.href = url; return; }
+    if (format === 'ics') { location.href = url; return; }
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${t.name}.kml`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    toast('Import it at mymaps.google.com → Create a new map → Import');
+  } catch (e) {
+    if (win) win.close();
+    toast(e.message, true);
+  }
+}
+
+/** Fetches a trip, its travel times and photos so the service worker keeps them for offline use. */
+async function saveOffline(tripId, quiet = false) {
+  if (!('serviceWorker' in navigator) || !navigator.serviceWorker.controller) {
+    if (!quiet) toast('Offline saving needs TripIt opened from the Home Screen or a recent browser', true);
+    return;
+  }
+  const trip = await loadTrip(tripId);
+  const urls = [];
+  if (trip.cover_photo) urls.push(photoUrl(trip.cover_photo, 900));
+  trip.places.forEach((p) => (p.photos || []).forEach((ph, i) => {
+    if (i === 0) urls.push(photoUrl(ph, 240));
+    urls.push(photoUrl(ph, 1000));
+  }));
+  for (let d = 1; d <= trip.day_count; d++) urls.push(`/v1/trips/${tripId}/days/${d}/legs`);
+  if (!quiet) toast(`Saving ${trip.name} for offline…`);
+  let failed = 0;
+  for (let i = 0; i < urls.length; i += 6) {
+    await Promise.all(urls.slice(i, i + 6).map((u) => fetch(u, u.startsWith('/v1/trips/') ? { headers: { 'X-API-Key': getKey() } } : {})
+      .then((r) => { if (!r.ok && r.type !== 'opaque') failed++; }).catch(() => { failed++; })));
+  }
+  try { localStorage.setItem(`tripit.saved.${tripId}`, String(Date.now())); } catch { /* fine */ }
+  if (!quiet) toast(failed ? `Saved ${trip.name}, but ${plural(failed, 'item')} couldn’t be downloaded` : `${trip.name} is ready offline`, failed > 0);
+}
+
+function autoSaveToday() {
+  const active = activeTrip(S.trips);
+  if (!active || isOffline()) return;
+  let last = 0;
+  try { last = Number(localStorage.getItem(`tripit.saved.${active.trip.id}`)) || 0; } catch { /* fine */ }
+  if (Date.now() - last > 12 * 3600 * 1000) saveOffline(active.trip.id, true).catch(() => {});
+}
+
+// "Visited" taps made without signal wait here and sync when the connection is back.
+const OUTBOX = 'tripit.outbox';
+function readOutbox() {
+  try { return JSON.parse(localStorage.getItem(OUTBOX)) || {}; } catch { return {}; }
+}
+function writeOutbox(box) {
+  try { localStorage.setItem(OUTBOX, JSON.stringify(box)); } catch { /* kept for this visit only */ }
+}
+let flushing = false;
+async function flushOutbox() {
+  const box = readOutbox();
+  if (flushing || !Object.keys(box).length) return;
+  flushing = true;
+  try {
+    for (const [id, body] of Object.entries(box)) {
+      try {
+        await api(`/v1/places/${id}`, { method: 'PATCH', body });
+      } catch (e) {
+        if (e.status === 0) return; // still offline; try again later
+      }
+      delete box[id];
+      writeOutbox(box);
+    }
+  } finally {
+    flushing = false;
+  }
+}
+
+function applyLocally(id, changes) {
+  for (const t of Object.values(S.trip)) t.places = t.places.map((p) => (p.id === id ? { ...p, ...changes } : p));
+  if (S.places) S.places = S.places.map((p) => (p.id === id ? { ...p, ...changes } : p));
 }
 
 function renameSheet(trip) {
@@ -1094,7 +1569,12 @@ async function onAction(act, el) {
       return;
     }
     case 'reload': render(); return;
-    case 'add': addSheet(); return;
+    case 'add': { const r = route(); addSheet({ tripId: ['trip', 'today'].includes(r.name) ? r.id : '' }); return; }
+    case 'addtrip': S.sheet.st.trip = el.value; if (S.sheet.st.text) addInputChanged(S.sheet.st.text); return;
+    case 'addresult': await addPlace('/v1/places', { candidate_id: el.dataset.id, trip_id: S.sheet.st.trip || null }); return;
+    case 'addname': await addByName(S.sheet.st.text.trim(), S.sheet.st.trip); return;
+    case 'pickshots': $('#shots-input').click(); return;
+    case 'shots': await addScreenshots(el.files); return;
     case 'close': closeSheet(); return;
     case 'sheetok': if (S.sheet && S.sheet.ok) await S.sheet.ok(); return;
     case 'action': { const a = S.sheet.actions[Number(el.dataset.index)]; closeSheet(); await a.run(); return; }
@@ -1107,6 +1587,8 @@ async function onAction(act, el) {
       const t = S.trip[el.dataset.id];
       const actions = [
         { label: t.day_count ? 'Re-plan trip' : 'Plan my trip', run: () => planSheet(t) },
+        { label: 'Add a place', run: () => addSheet({ tripId: t.id }) },
+        { label: 'Save for offline', run: () => saveOffline(t.id) },
         { label: 'Rename', run: () => renameSheet(t) },
         { label: 'Update hours & photos', run: async () => {
           toast('Looking up hours and photos…');
@@ -1132,21 +1614,52 @@ async function onAction(act, el) {
       return;
     }
     case 'plan': planSheet(S.trip[el.dataset.id]); return;
-    case 'sharetrip': shareTrip(S.trip[el.dataset.id]); return;
+    case 'sharetrip': shareMenu(S.trip[el.dataset.id]); return;
     case 'editday': S.editDay = !S.editDay; render(); return;
-    case 'move': {
-      const t = S.trip[el.dataset.trip];
-      const day = Number(el.dataset.day);
-      const ids = stops(t, day).map((p) => p.id);
-      const i = ids.indexOf(el.dataset.id);
-      const j = i + Number(el.dataset.dir);
-      if (j < 0 || j >= ids.length) return;
-      [ids[i], ids[j]] = [ids[j], ids[i]];
-      S.trip[t.id] = await api(`/v1/trips/${t.id}/days/${day}/order`, { method: 'POST', body: { place_ids: ids } });
+    case 'mode': setTravelMode(el.dataset.mode); render(); return;
+    case 'star': {
+      const place = allPlaces().find((x) => x.id === el.dataset.id);
+      await patchPlace(el.dataset.id, { must_do: !place.must_do });
+      toast(place.must_do ? 'Removed from must-dos' : 'Marked as a must-do');
+      return;
+    }
+    case 'settime': await patchPlace(el.dataset.id, el.value ? { start_time: el.value } : { clear_start_time: true }); return;
+    case 'cleartime': await patchPlace(el.dataset.id, { clear_start_time: true }); return;
+    case 'done': {
+      if (navigator.vibrate) navigator.vibrate(10);
+      await patchPlace(el.dataset.id, { visited: true });
+      return;
+    }
+    case 'undone': await patchPlace(el.dataset.id, { visited: false }); return;
+    case 'todaydir': {
+      const place = allPlaces().find((x) => x.id === el.dataset.id);
+      const m = MODES.find((x) => x[0] === currentMode()) || MODES[0];
+      const dest = located(place) ? `${place.latitude},${place.longitude}` : encodeURIComponent(`${place.name}, ${place.city}`);
+      openSheet({
+        type: 'actions', title: `${m[1]} to ${place.name}`,
+        actions: [
+          { label: 'Apple Maps', run: () => window.open(`https://maps.apple.com/?daddr=${dest}${m[3] ? `&dirflg=${m[3]}` : ''}`, '_blank', 'noopener') },
+          { label: 'Google Maps', run: () => window.open(`https://www.google.com/maps/dir/?api=1&destination=${dest}&travelmode=${m[2]}`, '_blank', 'noopener') },
+        ],
+      });
+      return;
+    }
+    case 'pushtoggle': {
+      try {
+        const state = el.checked ? await enablePush(S.config.push_public_key) : (await disablePush(), 'off');
+        if (state === 'on') toast('Notifications are on');
+        else if (state === 'denied') toast('Notifications are blocked. Allow them in Settings → Notifications → TripIt.', true);
+      } catch (e) {
+        toast(e.message || 'Couldn’t turn on notifications', true);
+      }
       render();
       return;
     }
-    case 'mode': setTravelMode(el.dataset.mode); render(); return;
+    case 'pushtest': {
+      const { sent } = await api('/v1/push/test', { method: 'POST' });
+      toast(sent ? 'Test sent. It should arrive in a few seconds.' : 'No devices are signed up for notifications', !sent);
+      return;
+    }
     case 'directions': {
       const place = allPlaces().find((x) => x.id === el.dataset.id);
       const trip = place && S.trip[place.trip_id];
@@ -1232,7 +1745,7 @@ async function onAction(act, el) {
       return;
     }
     case 'copy': await copy(el.dataset.value, el.previousElementSibling); return;
-    case 'signout': setKey(''); S.config = null; go('#/setup'); return;
+    case 'signout': setKey(''); S.config = null; clearOfflineData(); go('#/setup'); return;
     default:
   }
 }
@@ -1246,9 +1759,16 @@ async function patchPlace(id, body, rerender = true) {
       if ('day_number' in body) await loadTrip(place.trip_id); // day count may have changed
     }
     if (S.places) S.places = S.places.map((p) => (p.id === id ? place : p));
-    if ('category' in body) fetchedAt.trips = 0;
+    if ('category' in body || 'must_do' in body) fetchedAt.trips = 0;
     if (rerender) render();
   } catch (e) {
+    if (e.status === 0 && Object.keys(body).every((k) => k === 'visited')) {
+      writeOutbox({ ...readOutbox(), [id]: body });
+      applyLocally(id, body);
+      toast('Saved on this phone. It syncs when you’re back online.');
+      if (rerender) render();
+      return;
+    }
     toast(e.message, true);
   }
 }
@@ -1268,7 +1788,7 @@ async function locate(id, query) {
 
 document.addEventListener('click', (ev) => {
   // Segmented controls swap the view in place; they shouldn't stack up history for Back to walk through.
-  const segLink = ev.target.closest('.seg-items a[href]');
+  const segLink = ev.target.closest('.seg-items a[href], a[data-replace]');
   if (segLink) {
     ev.preventDefault();
     const href = segLink.getAttribute('href');
@@ -1293,6 +1813,7 @@ document.addEventListener('change', (ev) => {
 document.addEventListener('input', (ev) => {
   const el = ev.target;
   if (el.dataset && ['notes', 'prefs'].includes(el.dataset.act)) onAction(el.dataset.act, el);
+  if (el.dataset && el.dataset.act === 'addinput') addInputChanged(el.value);
 });
 
 document.addEventListener('submit', async (ev) => {
@@ -1322,7 +1843,7 @@ document.addEventListener('keydown', (ev) => {
     S.sheet.index = (S.sheet.index + (ev.key === 'ArrowRight' ? 1 : -1) + n) % n;
     renderOverlay();
   }
-  if (ev.key === 'Enter' && S.sheet && S.sheet.ok && ev.target.matches('.sheet input.field')) { ev.preventDefault(); S.sheet.ok(); }
+  if (ev.key === 'Enter' && S.sheet && S.sheet.ok && !S.sheet.busy && ev.target.matches('.sheet input.field')) { ev.preventDefault(); S.sheet.ok(); }
 });
 
 // Swipe left/right in the photo viewer.
@@ -1356,8 +1877,27 @@ async function start() {
   }
   try { await loadJobs(); } catch { /* shown by the views */ }
   schedulePoll();
+  flushOutbox();
   if (route().name === 'setup') location.hash = '#/';
   else render();
+  setTimeout(() => { if (S.trips) autoSaveToday(); }, 3000);
+}
+
+window.addEventListener('tripit:network', (ev) => {
+  S.offline = ev.detail.offline;
+  $('#netpill').hidden = !S.offline;
+  if (!S.offline) flushOutbox();
+});
+window.addEventListener('online', () => { flushOutbox(); render({ quiet: true }); });
+enableDrag(view, onItineraryDrop);
+registerServiceWorker();
+// On first launch, what loaded before the service worker took over isn't saved yet: fetch it again through it.
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!getKey() && S.config === null) return;
+    ['/v1/config', '/v1/trips', '/v1/jobs?limit=40', '/v1/places'].forEach((u) => fetch(u, { headers: { 'X-API-Key': getKey() } }).catch(() => {}));
+    autoSaveToday();
+  }, { once: true });
 }
 
 document.addEventListener('tripit:maps-fallback', () => {
@@ -1366,6 +1906,7 @@ document.addEventListener('tripit:maps-fallback', () => {
 });
 
 hydrateIcons(document.getElementById('tabbar'));
+hydrateIcons(document.getElementById('netpill'));
 (async () => {
   try {
     S.config = await api('/v1/config');

@@ -7,7 +7,8 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from .db import Database, normalize
-from .geocode import Geocoder
+from .geocode import GeoMatch, Geocoder
+from .maplinks import MapLink
 from .hours import summary as hours_summary
 from .photos import PhotoStore
 from .photos import merge as merge_photos
@@ -20,6 +21,7 @@ from .models import (
     PlanRequest,
     PlanResult,
     ReelMetadata,
+    Trip,
     TripDetail,
 )
 from .planner import offline_plan
@@ -39,6 +41,7 @@ class Library:
         result: ExtractionResult,
         progress: Callable[[str], None] = lambda _: None,
         images: Optional[dict[str, Path]] = None,
+        photo_attribution: str = "From the reel",
     ) -> tuple[Optional[str], Optional[str], int]:
         """Saves places into a trip per city. Returns (first trip id, reel id, places added)."""
         reel = self.db.add_reel(reel_meta, title=result.title, summary=result.summary)
@@ -56,7 +59,8 @@ class Library:
             )
             if existing:
                 self._merge(existing, extracted)
-                self._add_reel_photos(existing.id, extracted.image_labels, images)
+                self.db.add_mention(existing.id, reel.id)
+                self._add_reel_photos(existing.id, extracted.image_labels, images, photo_attribution)
                 continue
 
             progress(f"Pinning places on the map ({index}/{len(result.places)})")
@@ -75,7 +79,7 @@ class Library:
                 city=city,
                 country=country,
             )
-            self._add_reel_photos(place.id, extracted.image_labels, images)
+            self._add_reel_photos(place.id, extracted.image_labels, images, photo_attribution)
             await self.locate(self.db.get_place(place.id))
             added += 1
 
@@ -100,7 +104,9 @@ class Library:
         )
         return True
 
-    def _add_reel_photos(self, place_id: str, labels: list[str], images: Optional[dict[str, Path]]) -> None:
+    def _add_reel_photos(
+        self, place_id: str, labels: list[str], images: Optional[dict[str, Path]], attribution: str = "From the reel",
+    ) -> None:
         if not self.photos or not images:
             return
         new = []
@@ -109,9 +115,83 @@ class Library:
             if path and path.exists():
                 ref = self.photos.save_reel_image(place_id, path)
                 if ref:
-                    new.append({"source": "reel", "ref": ref, "attribution": "From the reel"})
+                    new.append({"source": "reel", "ref": ref, "attribution": attribution})
         if new:
             self.db.update_place(place_id, photos=merge_photos(self.db.photo_refs(place_id), new))
+
+    # ---------- Adding places by hand ----------
+
+    def trip_center(self, trip_id: Optional[str]) -> Optional[tuple[float, float]]:
+        points = [(p.latitude, p.longitude) for p in self.db.list_places(trip_id) if p.latitude is not None] if trip_id else []
+        if not points:
+            return None
+        return sum(p[0] for p in points) / len(points), sum(p[1] for p in points) / len(points)
+
+    def _trip_for(self, trip_id: Optional[str], city: Optional[str], country: Optional[str],
+                  latitude: Optional[float] = None, longitude: Optional[float] = None) -> Trip:
+        """The chosen trip, else the trip for the place's city, else a trip within 50 km, else a new trip."""
+        trip = self.db.get_trip(trip_id) if trip_id else None
+        if trip:
+            return trip
+        if city:
+            trip = self.db.find_trip_by_city(city)
+            if trip:
+                return trip
+        if latitude is not None:
+            nearby = []
+            for t in self.db.list_trips():
+                center = self.trip_center(t.id)
+                if center and _meters(latitude, longitude, *center) <= 50_000:
+                    nearby.append((_meters(latitude, longitude, *center), t))
+            if nearby:
+                return min(nearby, key=lambda x: x[0])[1]
+        name = (city or "").strip() or "Saved places"
+        return self.db.create_trip(name=name, city=name, country=country or "")
+
+    def _same_name(self, trip_id: str, name: str) -> Optional[Place]:
+        return next((p for p in self.db.list_places(trip_id) if normalize(p.name) == normalize(name)), None)
+
+    async def add_match(self, match: GeoMatch, trip_id: Optional[str] = None) -> tuple[Place, bool]:
+        """Saves a place picked from search results. Returns (place, created); an existing place with the
+        same name in the trip is returned instead of a duplicate."""
+        trip = self._trip_for(trip_id, match.city, match.country, match.latitude, match.longitude)
+        existing = self._same_name(trip.id, match.name)
+        if existing:
+            return existing, False
+        checked = datetime.now(timezone.utc)
+        place = self.db.add_place(
+            trip_id=trip.id, name=match.name, category=match.category or "other",
+            city=match.city or trip.city, country=match.country or trip.country, address=match.address,
+            latitude=match.latitude, longitude=match.longitude, maps_url=match.maps_url,
+            opening_hours=match.hours, hours_checked_at=checked if match.hours or match.place_id else None,
+            photos=merge_photos([], match.photos), photos_checked_at=checked if match.photos else None,
+        )
+        return place, True
+
+    async def add_by_name(self, name: str, trip_id: Optional[str], city: Optional[str] = None, category: str = "other",
+                          latitude: Optional[float] = None, longitude: Optional[float] = None) -> tuple[Place, bool]:
+        """Saves a place by name (and pin, if known), then tries to find it on the map."""
+        trip = self._trip_for(trip_id, city, None, latitude, longitude)
+        existing = self._same_name(trip.id, name)
+        if existing:
+            return existing, False
+        place = self.db.add_place(trip_id=trip.id, name=name, category=category, city=city or trip.city,
+                                  country=trip.country, latitude=latitude, longitude=longitude)
+        if latitude is None:
+            await self.locate(place)
+        return self.db.get_place(place.id), True
+
+    async def add_from_link(self, link: MapLink, trip_id: Optional[str] = None) -> tuple[Place, bool]:
+        """Saves the place from a Google/Apple Maps link, filling in details from a search near its pin."""
+        near = (link.latitude, link.longitude) if link.latitude is not None else self.trip_center(trip_id)
+        if link.name:
+            for candidate in await self.geocoder.search(link.name, near=near, limit=3):
+                if link.latitude is None or _meters(link.latitude, link.longitude, candidate.latitude, candidate.longitude) <= 400:
+                    full = (await self.geocoder.details(candidate.place_id) if candidate.place_id else None) or candidate
+                    if link.latitude is not None:  # the link's pin is exact; keep it
+                        full.latitude, full.longitude = link.latitude, link.longitude
+                    return await self.add_match(full, trip_id)
+        return await self.add_by_name(link.name or "Dropped pin", trip_id, latitude=link.latitude, longitude=link.longitude)
 
     def delete_place(self, place_id: str) -> None:
         if self.photos:
@@ -182,7 +262,8 @@ class Library:
                 places=[
                     PlanPlace(id=p.id, name=p.name, category=p.category, latitude=p.latitude,
                               longitude=p.longitude, neighborhood=p.neighborhood, notes=p.summary[:300] or None,
-                              opening_hours=hours_summary(p.opening_hours))
+                              opening_hours=hours_summary(p.opening_hours), must_do=p.must_do,
+                              mentions=max(1, p.mention_count))
                     for p in places
                 ],
             )
@@ -221,6 +302,16 @@ class Library:
 
     def move_place(self, place: Place, day: Optional[int]) -> None:
         """Moves a place to the end of a day (or unschedules it with None)."""
+        self.move_to(place, day, None)
+
+    def move_to(self, place: Place, day: Optional[int], index: Optional[int]) -> None:
+        """Puts a place at a position within a day (end of the day when index is None), or unschedules it
+        with day None. Renumbers the day it left and the day it joined."""
+        places = self.db.list_places(place.trip_id)
+        if place.day_number is not None and place.day_number != day:
+            left = sorted((p for p in places if p.day_number == place.day_number and p.id != place.id), key=lambda p: p.day_order)
+            for order, p in enumerate(left):
+                self.db.update_place(p.id, day_order=order)
         if day is None:
             self.db.update_place(place.id, day_number=None, day_order=0)
             return
@@ -228,8 +319,10 @@ class Library:
         if day > trip.day_count:
             titles = trip.day_titles + [f"Day {n}" for n in range(len(trip.day_titles) + 1, day + 1)]
             self.db.update_trip(trip.id, day_count=day, day_titles=titles)
-        last = max((p.day_order for p in self.db.list_places(place.trip_id) if p.day_number == day), default=-1)
-        self.db.update_place(place.id, day_number=day, day_order=last + 1)
+        target = sorted((p for p in places if p.day_number == day and p.id != place.id), key=lambda p: p.day_order)
+        target.insert(len(target) if index is None else max(0, min(index, len(target))), place)
+        for order, p in enumerate(target):
+            self.db.update_place(p.id, day_number=day, day_order=order)
 
     def reorder_day(self, trip_id: str, day: int, place_ids: list[str]) -> None:
         on_day = {p.id for p in self.db.list_places(trip_id) if p.day_number == day}

@@ -84,14 +84,20 @@ On Android, install the app from Chrome's menu (**Install app**). TripIt then ap
 
 ## Using the app
 
-- **Trips:** places are grouped into one trip per city. Reels about the same city add to the same trip, and duplicates are merged.
+- **Today:** when a trip has a start date and today falls inside it, Trips opens with a **Today** card. The day view shows the next stop with a big **Directions** button, whether it closes soon ("Closes in 35 min"), the travel time from the last stop, and **Done** to move on to the next one.
+- **Offline:** TripIt keeps the trips you open on your phone, with their photos, travel times and the map areas you've looked at, so it works on the subway or abroad without data. Today's trip is saved automatically; use **••• → Save for offline** before you go. Tapping **Done** without signal is saved on the phone and syncs when you're back online.
+- **Notifications:** turn on **Settings → Import notifications** to hear when a shared reel's places are saved ("3 new places saved to New York") or when it couldn't be read. On iPhone this works once TripIt is on your Home Screen (iOS 16.4 or later).
+- **Add without a reel:** the **+** button takes a TikTok/Instagram/YouTube link, a **Google Maps or Apple Maps link**, or a place name to search for. **Choose screenshots** reads screenshots of a post, map or article and finds the places in them.
+- **Trips:** places are grouped into one trip per city. Reels about the same city add to the same trip, and duplicates are merged. A place several reels recommend shows a **🔥 3 reels** badge and is listed first.
+- **Must-dos:** tap the star on a place to make it a must-do. Must-dos are listed first, and the planner always fits them in.
 - **Places:** places are listed by category with what to order and tips from the reel. A place that couldn't be found on the map has an orange dot; open it and tap **Find** to search again.
-- **Itinerary:** **Plan my trip** asks Claude to group places by neighborhood and time of day. If Claude can't be reached, an offline planner groups nearby places instead. Tap **Edit** to reorder stops, or move a place to another day from its page.
+- **Itinerary:** **Plan my trip** asks Claude to group places by neighborhood and time of day. If Claude can't be reached, an offline planner groups nearby places instead. Tap **Edit** and drag the handles to reorder stops or move them between days (arrow keys work too). Set an **Exact time** on a place for reservations; the itinerary and calendar use it.
 - **Photos:** each place gets pictures. Claude picks the frames or slides of the reel that show the place, Google adds its place photos when you have a server key, and landmarks get a Wikimedia Commons photo. Thumbnails appear in the place list and itinerary; a place's page opens with a swipeable photo strip next to its map, and tapping a photo opens it full screen. Places saved before this feature get Google and Wikimedia photos via **••• → Update hours & photos**; reel frames are only kept for reels shared from now on.
 - **Travel times:** in the itinerary, pick **Walk**, **Transit**, **Drive** or **Bike** to see how long each hop takes, with a day total and a **Directions** link for each leg. Tap **From me** to add travel times from where you are; it asks for location permission the first time. A place's page also shows every mode from your location.
 - **Opening hours:** each place shows whether it's open now and its weekly hours. With a start date, the itinerary shows that day's hours and warns when a stop is closed or not open at its planned time (e.g. "Closed on Mondays"). Claude also takes hours into account when planning. Use **••• → Update opening hours** to look them up for places saved earlier.
 - **Map:** pins are colored by category. Filter by day to see that day's route in order.
-- **Open in Maps:** each place has buttons for Apple Maps and Google Maps, plus directions. **Share** on a trip sends the list with Google Maps links.
+- **Open in Maps:** each place has buttons for Apple Maps and Google Maps, plus directions.
+- **Share & export:** **Share** on a trip creates a read-only link friends can open without the app (they see the map, the itinerary and each place, but not your notes; turn it off any time). It can also send the list as text, add the itinerary to your **Calendar** (needs a start date), or download a **.kml** file to import into Google My Maps.
 
 ## How a reel becomes places
 
@@ -116,6 +122,7 @@ Instagram blocks most anonymous downloads. Export cookies for instagram.com from
 | `GOOGLE_MAPS_API_KEY` | – | Optional, server-side. Enable "Places API (New)" for map search and hours, and "Routes API" for travel times |
 | `GOOGLE_MAPS_BROWSER_KEY` | – | Optional. Shows Google Maps inside the app instead of OpenStreetMap (see below) |
 | `NOMINATIM_EMAIL` | – | Contact email for OpenStreetMap's geocoder (requested by its usage policy) |
+| `PUSH_CONTACT` | app address | `mailto:` or `https:` contact sent to push services with notifications. The notification key is created on first start and kept next to the database |
 | `DATABASE_PATH` | `data/tripit.db` (`/data/tripit.db` in Docker) | SQLite file |
 | `CLAUDE_MODEL` | `claude-opus-5-5` | |
 | `CLAUDE_EFFORT` | `medium` | `low` is cheaper and faster |
@@ -165,6 +172,13 @@ All `/v1` routes need the `X-API-Key` header when `APP_API_KEY` is set.
 | `POST /v1/trips/{id}/plan` `{days, start_date?, preferences?}` | Build the itinerary (Claude, with offline fallback) |
 | `DELETE /v1/trips/{id}/plan`, `POST /v1/trips/{id}/days/{n}/order` | Clear the itinerary or reorder a day |
 | `GET /v1/places`, `PATCH/DELETE /v1/places/{id}`, `POST /v1/places/{id}/locate` | Edit places, move them between days, re-run the map search |
+| `POST /v1/trips/{id}/move` `{place_id, day, index}` | Drag and drop: put a place at a position in a day (`day` 0 = not scheduled) |
+| `POST /v1/places/search` `{query, trip_id?}`, `POST /v1/places` `{candidate_id \| name, trip_id?, city?}` | Add a place without a reel |
+| `POST /v1/places/from-link` `{url, trip_id?}` | Add the place from a Google Maps or Apple Maps link |
+| `POST /v1/jobs/screenshots` `{images: [base64 JPEG], note?}` | Find places in up to 10 screenshots |
+| `POST/DELETE /v1/trips/{id}/share`, `GET /s/{token}` | Public read-only link to a trip (`/s/{token}/trip.ics` and `.kml` too) |
+| `POST /v1/trips/{id}/export-link?format=ics\|kml` | Short-lived download link for a calendar or Google My Maps file |
+| `POST/DELETE /v1/push/subscriptions`, `POST /v1/push/test` | Web Push notifications for finished imports |
 | `GET /share?url=…` | Share target used by Android and the simpler Shortcut variant |
 
 ## Native iOS app (optional)

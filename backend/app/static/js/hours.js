@@ -63,6 +63,24 @@ export function openStatus(hours, now = new Date()) {
   return { state: 'closed', label: 'Closed' };
 }
 
+/** {open: true, minutes} until it closes, or {open: false, minutes} until it opens (within a day); null if unknown. */
+export function nextChange(hours, now = new Date()) {
+  if (!hours || !hours.weekly) return null;
+  const today = mondayIndex(now);
+  const minute = now.getHours() * 60 + now.getMinutes();
+  for (const r of hours.weekly[(today + 6) % 7] || []) {
+    const [, c] = span(r);
+    if (c > 1440 && minute < c - 1440) return { open: true, minutes: c - 1440 - minute };
+  }
+  const spans = (hours.weekly[today] || []).map(span).sort((a, b) => a[0] - b[0]);
+  if (is24h(hours.weekly[today] || [])) return { open: true, minutes: Infinity };
+  for (const [o, c] of spans) if (minute >= o && minute < c) return { open: true, minutes: c - minute };
+  const later = spans.find(([o]) => o > minute);
+  if (later) return { open: false, minutes: later[0] - minute };
+  const tomorrow = (hours.weekly[(today + 1) % 7] || []).map(span).sort((a, b) => a[0] - b[0])[0];
+  return { open: false, minutes: tomorrow ? 1440 - minute + tomorrow[0] : Infinity };
+}
+
 function closingLabel(minutesLeft, close) {
   return minutesLeft <= 60
     ? { state: 'closing', label: `Closes soon · ${fmtTime(close)}` }
@@ -72,11 +90,12 @@ function closingLabel(minutesLeft, close) {
 const minToStr = (m) => `${String(Math.floor(m / 60) % 24).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
 
 /** Warning text if the place is closed on that day or during that time-of-day slot, else null. */
-export function slotConflict(hours, dayIdx, timeOfDay) {
+export function slotConflict(hours, dayIdx, timeOfDay, startTime = null) {
   if (!hours || !hours.weekly || dayIdx == null) return null;
   const ranges = hours.weekly[dayIdx] || [];
   if (!ranges.length) return `Closed on ${DAY_NAMES[dayIdx]}s`;
-  const slot = SLOTS[timeOfDay];
+  // An exact time (e.g. a reservation) is checked as the hour after it.
+  const slot = startTime ? [toMin(startTime), toMin(startTime) + 60] : SLOTS[timeOfDay];
   if (!slot || is24h(ranges)) return null;
   const spans = ranges.map(span);
   if (spans.some(([o, c]) => o < slot[1] && c > slot[0])) return null;

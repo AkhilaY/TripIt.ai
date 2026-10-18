@@ -48,6 +48,8 @@ class Settings(BaseSettings):
     routing: str = "auto"
     # Nominatim asks for a contact address in its usage policy (optional).
     nominatim_email: str = ""
+    # Contact sent to push services with notifications (mailto: or https:). Defaults to the app's address.
+    push_contact: str = ""
 
 
 @lru_cache

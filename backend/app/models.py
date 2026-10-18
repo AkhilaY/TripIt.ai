@@ -124,6 +124,8 @@ class PlanPlace(BaseModel):
     neighborhood: Optional[str] = None
     notes: Optional[str] = None
     opening_hours: Optional[str] = None
+    must_do: bool = False
+    mentions: int = 1  # how many saved reels recommend it
 
 
 class PlanRequest(BaseModel):
@@ -194,6 +196,11 @@ class Place(BaseModel):
     hours_checked_at: Optional[datetime] = None
     photos: list[PlacePhoto] = []
     photos_checked_at: Optional[datetime] = None
+    must_do: bool = False
+    start_time: Optional[str] = None  # "HH:MM" local time, e.g. a reservation
+    # Every saved reel that recommends this place (reel_id is the first one).
+    reel_ids: list[str] = []
+    mention_count: int = 0
     created_at: datetime
 
 
@@ -226,6 +233,7 @@ class Trip(BaseModel):
     mapped_count: int = 0
     categories: list[PlaceCategory] = []
     cover_photo: Optional[PlacePhoto] = None
+    share_token: Optional[str] = None  # set while a public link to the trip exists
 
 
 class TripDetail(Trip):
@@ -247,6 +255,9 @@ class PlaceUpdate(BaseModel):
     day_number: Optional[int] = Field(default=None, ge=0, le=21)
     time_of_day: Optional[TimeOfDay] = None
     clear_time_of_day: bool = False
+    must_do: Optional[bool] = None
+    start_time: Optional[str] = Field(default=None, pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
+    clear_start_time: bool = False
 
 
 class PlanTripRequest(BaseModel):
@@ -257,6 +268,60 @@ class PlanTripRequest(BaseModel):
 
 class ReorderRequest(BaseModel):
     place_ids: list[str]
+
+
+class MoveRequest(BaseModel):
+    place_id: str
+    day: int = Field(ge=0, le=21)  # 0 = not scheduled
+    index: int = Field(default=0, ge=0)
+
+
+class SearchPlacesRequest(BaseModel):
+    query: str = Field(min_length=1, max_length=300)
+    trip_id: Optional[str] = None  # search near this trip's places
+
+
+class PlaceCandidate(BaseModel):
+    candidate_id: str  # pass back to POST /v1/places
+    name: str
+    address: Optional[str] = None
+    category: PlaceCategory = PlaceCategory.other
+    latitude: float
+    longitude: float
+
+
+class AddPlaceRequest(BaseModel):
+    """Add a search result (candidate_id) or a place by name (name + trip_id or city)."""
+    candidate_id: Optional[str] = Field(default=None, max_length=300)
+    name: Optional[str] = Field(default=None, min_length=1, max_length=200)
+    city: Optional[str] = Field(default=None, max_length=120)
+    category: PlaceCategory = PlaceCategory.other
+    trip_id: Optional[str] = None
+
+
+class AddFromLinkRequest(BaseModel):
+    url: str = Field(min_length=1, max_length=2000)
+    trip_id: Optional[str] = None
+
+
+class AddPlaceResult(BaseModel):
+    place: Place
+    created: bool  # False when the trip already had a place with that name
+
+
+class ScreenshotJobRequest(BaseModel):
+    images: list[str] = Field(min_length=1, max_length=10, description="Base64 JPEG images (data: URLs are fine).")
+    note: Optional[str] = Field(default=None, max_length=2000)
+
+
+class PushSubscriptionRequest(BaseModel):
+    endpoint: str = Field(max_length=2000)
+    keys: dict[str, str] = {}
+
+
+class ShareLink(BaseModel):
+    token: str
+    path: str  # "/s/<token>", relative to the app's address
 
 
 class LocateRequest(BaseModel):

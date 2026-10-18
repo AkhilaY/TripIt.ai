@@ -18,9 +18,9 @@ T = TypeVar("T", bound=BaseModel)
 
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
 
-EXTRACT_SYSTEM = """You turn short travel posts (TikTok videos and photo slideshows, Instagram Reels and carousels, YouTube Shorts) into a structured list of places.
+EXTRACT_SYSTEM = """You turn short travel posts (TikTok videos and photo slideshows, Instagram Reels and carousels, YouTube Shorts) into a structured list of places. Sometimes you get screenshots someone saved instead (of a post, a map, an article or a message); treat them the same way.
 
-You get the post caption, a timestamped speech transcript when there is speech, and images: frames sampled from a video, or the slides of a photo post. Creators usually name each place in the voiceover or as text written over the frames or slides, so read the images carefully.
+You get the post caption, a timestamped speech transcript when there is speech, and images: frames sampled from a video, the slides of a photo post, or screenshots. Creators usually name each place in the voiceover or as text written over the frames or slides, so read the images carefully.
 
 Rules:
 - Include only real, specific places a person could visit or search for in a maps app: restaurants, bars, cafes, shops, landmarks, parks, hotels, tours. Skip generic advice ("try a bagel") unless it names a specific place.
@@ -37,6 +37,7 @@ PLAN_SYSTEM = """You are a travel planner. Arrange the given saved places into a
 - Put meals at sensible times: cafes and bakeries in the morning, restaurants at lunch or dinner, bars and nightlife in the evening.
 - Don't overload days: roughly 3-6 stops per day, fewer if they are big attractions.
 - Respect opening_hours when given (local times, Mon–Sun). Don't schedule a place on a day or at a time it's closed. If a start_date is given, day 1 falls on that date's weekday; otherwise prefer slots when the place is open on most days.
+- Places with must_do: true are the person's priorities: always schedule them. When there are more places than fit, leave out others first, starting with those fewer reels mention (mentions).
 - Use each place at most once, and only use place_ids from the input. Put places that don't fit in unscheduled_place_ids.
 - Day titles should name the area or theme."""
 

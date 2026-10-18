@@ -29,7 +29,9 @@ jobs:
       - run: pytest -q
       - name: Check web app scripts parse
         working-directory: backend/app/static/js
-        run: for f in *.js; do node --input-type=module --check < "$f" || exit 1; done
+        run: |
+          for f in *.js; do node --input-type=module --check < "$f" || exit 1; done
+          node --check ../sw.js
 
   ios:
     name: iOS build (simulator, unsigned)

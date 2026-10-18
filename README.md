@@ -122,7 +122,7 @@ Instagram blocks most anonymous downloads. Export cookies for instagram.com from
 
 - **Claude:** with Opus and about 24 frames, a reel costs roughly 10–15¢. Planning an itinerary costs a few cents.
 - **Hosting:** a few dollars a month on Fly.io with auto-stop.
-- **Maps:** OpenStreetMap search and the CARTO map tiles are free for personal use. Google Places has a monthly free allowance.
+- **Maps:** OpenStreetMap search and map tiles are free for light personal use. Google Places has a monthly free allowance.
 
 ## API
 

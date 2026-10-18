@@ -139,6 +139,10 @@ button.row:active, a.row:active { background: var(--fill); }
 .leaflet-popup-content-wrapper, .leaflet-popup-tip { background: var(--cell); color: var(--label); }
 .leaflet-popup-content { margin: 10px 14px; font-size: 15px; }
 .leaflet-popup-content a.popup-link { color: var(--accent); font-weight: 600; text-decoration: none; display: block; margin-top: 4px; }
+/* OpenStreetMap has no dark tiles; invert them in dark mode so the map isn't a bright white block. */
+@media (prefers-color-scheme: dark) {
+  .leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) brightness(0.9) contrast(0.9); }
+}
 .leaflet-control-attribution { font-size: 10px; background: var(--bar) !important; color: var(--secondary); }
 .leaflet-control-attribution a { color: var(--secondary); }
 .leaflet-bar a { background: var(--cell); color: var(--label); border-color: var(--sep); }

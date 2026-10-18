@@ -1,17 +1,9 @@
-// Leaflet maps with CARTO basemaps (OpenStreetMap data), styled to match light/dark mode.
+// Leaflet maps with OpenStreetMap tiles (free, no key). Dark mode inverts the tiles with a CSS filter.
 import { ICON } from './icons.js';
 
-const TILES = {
-  light: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
-  dark: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-};
-const ATTRIBUTION = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>';
-const darkQuery = matchMedia('(prefers-color-scheme: dark)');
+const TILES = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
+const ATTRIBUTION = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
 const live = new Set();
-
-darkQuery.addEventListener('change', () => {
-  live.forEach(({ layer }) => layer.setUrl(darkQuery.matches ? TILES.dark : TILES.light));
-});
 
 export function destroyMaps() {
   live.forEach(({ map }) => map.remove());
@@ -50,9 +42,7 @@ export function renderMap(el, places, { route = false, interactive = true, popup
     attributionControl: true,
     tap: interactive,
   });
-  const layer = L.tileLayer(darkQuery.matches ? TILES.dark : TILES.light, {
-    attribution: ATTRIBUTION, subdomains: 'abcd', maxZoom: 19, detectRetina: true,
-  }).addTo(map);
+  const layer = L.tileLayer(TILES, { attribution: ATTRIBUTION, maxZoom: 19 }).addTo(map);
   live.add({ map, layer });
   if (interactive) L.control.zoom({ position: 'bottomright' }).addTo(map);
 

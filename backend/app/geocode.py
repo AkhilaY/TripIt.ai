@@ -10,7 +10,7 @@ import asyncio
 import logging
 import math
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional, Protocol
 
 import httpx
@@ -18,6 +18,7 @@ import httpx
 from .config import Settings
 from .hours import from_google, parse_osm
 from .models import OpeningHours
+from .photos import wikidata_image
 
 log = logging.getLogger(__name__)
 
@@ -30,6 +31,7 @@ class GeoMatch:
     address: Optional[str] = None
     maps_url: Optional[str] = None
     hours: Optional[OpeningHours] = None
+    photos: list[dict] = field(default_factory=list)  # {"source", "ref", "attribution"}
 
 
 class Geocoder(Protocol):
@@ -53,7 +55,8 @@ def _km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
 class GooglePlacesGeocoder:
     URL = "https://places.googleapis.com/v1/places:searchText"
     # Opening hours put this request in Google's "Enterprise" Text Search tier (smaller free allowance).
-    FIELDS = "places.displayName,places.formattedAddress,places.location,places.googleMapsUri,places.regularOpeningHours"
+    FIELDS = ("places.displayName,places.formattedAddress,places.location,places.googleMapsUri,"
+              "places.regularOpeningHours,places.photos")
 
     def __init__(self, api_key: str, client: Optional[httpx.AsyncClient] = None):
         self.api_key = api_key
@@ -85,6 +88,11 @@ class GooglePlacesGeocoder:
             address=p.get("formattedAddress"),
             maps_url=p.get("googleMapsUri"),
             hours=from_google(p.get("regularOpeningHours")),
+            photos=[
+                {"source": "google", "ref": photo["name"],
+                 "attribution": ", ".join(a.get("displayName", "") for a in photo.get("authorAttributions", [])) or None}
+                for photo in (p.get("photos") or [])[:4] if photo.get("name")
+            ],
         )
 
 
@@ -145,12 +153,15 @@ class NominatimGeocoder:
                 address = result.get("address") or {}
                 street = " ".join(p for p in (address.get("house_number"), address.get("road")) if p)
                 area = address.get("suburb") or address.get("neighbourhood") or address.get("city")
+                extratags = result.get("extratags") or {}
+                image = await wikidata_image(self.client, extratags.get("wikidata", ""))
                 return GeoMatch(
                     name=result.get("name") or name,
                     latitude=lat,
                     longitude=lon,
                     address=", ".join(p for p in (street, area) if p) or result.get("display_name"),
-                    hours=parse_osm((result.get("extratags") or {}).get("opening_hours")),
+                    hours=parse_osm(extratags.get("opening_hours")),
+                    photos=[image] if image else [],
                 )
         return None
 

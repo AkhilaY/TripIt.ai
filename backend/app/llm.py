@@ -28,6 +28,7 @@ Rules:
 - city/country: where the place actually is. Use the reel's destination when the place's location isn't stated otherwise.
 - Never invent addresses, prices or dishes that weren't mentioned or shown. Use null when unknown.
 - confidence: high when the name is clearly stated or shown; low when you had to infer it from partial or garbled text.
+- image_labels: pick up to 3 images that actually show the place (its storefront, sign, interior, view or food), copying their labels exactly. Skip images that only show the creator, text cards or other places.
 - List places in the order they appear in the video. If the reel has no identifiable places, return an empty list."""
 
 PLAN_SYSTEM = """You are a travel planner. Arrange the given saved places into a realistic day-by-day itinerary.

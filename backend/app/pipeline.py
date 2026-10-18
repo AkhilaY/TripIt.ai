@@ -96,11 +96,13 @@ class Pipeline:
             self.store.update(job_id, status=JobStatus.analyzing, message="Finding places")
             result = await self.claude.extract_places(reel.metadata, shared_text, transcript, frames)
 
-        # Status stays "analyzing" while pinning so older clients that only know the original statuses work.
-        self.store.update(job_id, result=result, message="Pinning places on the map")
-        trip_id, reel_id, added = await self.library.save_extraction(
-            reel.metadata, result, progress=lambda msg: self.store.update(job_id, message=msg)
-        )
+            # Status stays "analyzing" while pinning so older clients that only know the original statuses work.
+            # Saved inside the temp dir block so frames Claude picked as place photos can be kept.
+            self.store.update(job_id, result=result, message="Pinning places on the map")
+            trip_id, reel_id, added = await self.library.save_extraction(
+                reel.metadata, result, progress=lambda msg: self.store.update(job_id, message=msg),
+                images=dict(frames),
+            )
 
         found = len(result.places)
         message = f"Found {found} place{'s' if found != 1 else ''}"

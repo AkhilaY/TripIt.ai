@@ -19,6 +19,12 @@ class PlaceCategory(str, Enum):
     other = "other"
 
 
+class PlacePhoto(BaseModel):
+    source: Literal["reel", "google", "wikimedia"]
+    url: str
+    attribution: Optional[str] = None
+
+
 class TimeRange(BaseModel):
     open: str  # "HH:MM", local time at the place
     close: str  # "HH:MM"; earlier than open means after midnight; "24:00" = midnight
@@ -49,6 +55,10 @@ class ExtractedPlace(BaseModel):
         description="Where in the reel the place was identified."
     )
     confidence: Literal["high", "medium", "low"]
+    image_labels: list[str] = Field(
+        description="Labels of up to 3 frames or slides, copied exactly (e.g. 'Slide 2', 'Frame at 12s'), that "
+        "clearly show this place itself: storefront, sign, interior, view or its food. Empty if none do."
+    )
 
 
 class ExtractionResult(BaseModel):
@@ -182,6 +192,8 @@ class Place(BaseModel):
     day_note: Optional[str] = None
     opening_hours: Optional[OpeningHours] = None
     hours_checked_at: Optional[datetime] = None
+    photos: list[PlacePhoto] = []
+    photos_checked_at: Optional[datetime] = None
     created_at: datetime
 
 

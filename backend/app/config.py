@@ -34,6 +34,8 @@ class Settings(BaseSettings):
 
     # Storage: one SQLite file. Put it on a persistent volume in production.
     database_path: str = "data/tripit.db"
+    # Photos saved from reels. Defaults to a "photos" folder next to the database (on the same volume).
+    photos_dir: str = ""
 
     # Geocoding: "auto" uses Google Places when a key is set, otherwise OpenStreetMap (Nominatim).
     geocoder: str = "auto"

@@ -24,6 +24,7 @@ from app.models import (
 )
 from app.planner import offline_plan
 from app.routing import Router
+from app.photos import PhotoStore
 
 H = {"X-API-Key": "secret"}
 
@@ -32,7 +33,7 @@ def extracted(name, city="New York", hood="Greenwich Village", category="food"):
     return {
         "name": name, "category": category, "city": city, "country": "USA", "neighborhood": hood,
         "address": None, "description": f"{name} is great", "recommended_items": ["slice"], "price_hint": "$",
-        "tips": None, "source": "on_screen", "confidence": "high",
+        "tips": None, "source": "on_screen", "confidence": "high", "image_labels": ["Frame at 0s"],
     }
 
 
@@ -104,7 +105,9 @@ def client(monkeypatch, tmp_path):
     db = Database(":memory:")
     geocoder = FakeGeocoder()
     claude = ClaudeService(settings, client=SimpleNamespace(beta=SimpleNamespace(messages=messages)))
-    library = Library(db, geocoder)
+    photo_store = PhotoStore(tmp_path / "photos", "secret")
+    db.photo_url = photo_store.url
+    library = Library(db, geocoder, photos=photo_store)
     store = JobStore(db)
     app.state.db = db
     app.state.store = store
@@ -112,13 +115,14 @@ def client(monkeypatch, tmp_path):
     app.state.library = library
     app.state.pipeline = pipeline_module.Pipeline(settings, store, claude, library)
     app.state.router = Router(db, settings)
+    app.state.photos = photo_store
 
     with TestClient(app) as c:
         c.messages = messages
         c.geocoder = geocoder
         yield c
     app.dependency_overrides.clear()
-    for attr in ("db", "store", "claude", "library", "pipeline", "router"):
+    for attr in ("db", "store", "claude", "library", "pipeline", "router", "photos"):
         delattr(app.state, attr)
 
 
@@ -652,3 +656,58 @@ def test_database_migrates_old_files(tmp_path):
     trip = db.create_trip("Lisbon", "Lisbon", "Portugal")
     place = db.add_place(trip_id=trip.id, name="Cafe", category="cafe")
     assert place.opening_hours is None
+
+
+# ---------- Photos ----------
+
+
+def test_reel_frames_become_place_photos(client):
+    job = import_reel(client)
+    trip = client.get(f"/v1/trips/{job['trip_id']}", headers=H).json()
+    joes = next(p for p in trip["places"] if p["name"] == "Joe's Pizza")
+    assert len(joes["photos"]) == 1 and joes["photos"][0]["source"] == "reel"
+    url = joes["photos"][0]["url"]
+    assert "sig=" in url
+
+    r = client.get(url)  # no API key header: the signature authorizes it
+    assert r.status_code == 200 and r.headers["content-type"] == "image/jpeg"
+    assert client.get(url.split("?")[0] + "?sig=wrong").status_code == 403
+    assert client.get(f"/v1/places/{joes['id']}/photos/5?sig=x").status_code == 404
+
+    # Deleting the place removes its saved photo files.
+    photo_dir = app.state.photos.dir
+    assert any(photo_dir.iterdir())
+    client.delete(f"/v1/places/{joes['id']}", headers=H)
+    assert not any(f.name.startswith(joes["id"]) for f in photo_dir.iterdir())
+
+
+def test_photo_merge_order_and_caps():
+    from app.photos import merge
+
+    existing = [{"source": "reel", "ref": "a.jpg"}, {"source": "wikimedia", "ref": "w1"}]
+    new = [{"source": "google", "ref": f"g{i}"} for i in range(6)] + [{"source": "wikimedia", "ref": "w2"}]
+    out = merge(existing, new, replace_sources=("google", "wikimedia"))
+    assert [p["source"] for p in out] == ["google"] * 4 + ["reel", "wikimedia"]
+    assert out[-1]["ref"] == "w2"
+
+
+async def test_google_photos_and_wikidata_image():
+    def google(request):
+        return httpx.Response(200, json={"places": [{
+            "displayName": {"text": "The Met"}, "location": {"latitude": 40.779, "longitude": -73.963},
+            "photos": [{"name": "places/abc/photos/p1", "authorAttributions": [{"displayName": "Ana P."}]}],
+        }]})
+
+    geo = GooglePlacesGeocoder("k", client=httpx.AsyncClient(transport=httpx.MockTransport(google)))
+    m = await geo.locate("The Met", None, "New York", "USA")
+    assert m.photos == [{"source": "google", "ref": "places/abc/photos/p1", "attribution": "Ana P."}]
+
+    from app.photos import wikidata_image
+
+    def wikidata(request):
+        return httpx.Response(200, json={"entities": {"Q160236": {"claims": {"P18": [
+            {"mainsnak": {"datavalue": {"value": "Metropolitan Museum of Art (The Met).jpg"}}}]}}}})
+
+    img = await wikidata_image(httpx.AsyncClient(transport=httpx.MockTransport(wikidata)), "Q160236")
+    assert img["source"] == "wikimedia" and img["ref"].startswith("https://commons.wikimedia.org/wiki/Special:FilePath/Metropolitan_Museum")
+    assert await wikidata_image(httpx.AsyncClient(transport=httpx.MockTransport(wikidata)), "not-a-qid") is None

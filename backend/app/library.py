@@ -3,11 +3,14 @@
 import logging
 import math
 from datetime import date, datetime, timezone
+from pathlib import Path
 from typing import Callable, Optional
 
 from .db import Database, normalize
 from .geocode import Geocoder
 from .hours import summary as hours_summary
+from .photos import PhotoStore
+from .photos import merge as merge_photos
 from .llm import ClaudeError, ClaudeService
 from .models import (
     ExtractedPlace,
@@ -25,15 +28,17 @@ log = logging.getLogger(__name__)
 
 
 class Library:
-    def __init__(self, db: Database, geocoder: Geocoder):
+    def __init__(self, db: Database, geocoder: Geocoder, photos: Optional[PhotoStore] = None):
         self.db = db
         self.geocoder = geocoder
+        self.photos = photos
 
     async def save_extraction(
         self,
         reel_meta: ReelMetadata,
         result: ExtractionResult,
         progress: Callable[[str], None] = lambda _: None,
+        images: Optional[dict[str, Path]] = None,
     ) -> tuple[Optional[str], Optional[str], int]:
         """Saves places into a trip per city. Returns (first trip id, reel id, places added)."""
         reel = self.db.add_reel(reel_meta, title=result.title, summary=result.summary)
@@ -51,6 +56,7 @@ class Library:
             )
             if existing:
                 self._merge(existing, extracted)
+                self._add_reel_photos(existing.id, extracted.image_labels, images)
                 continue
 
             progress(f"Pinning places on the map ({index}/{len(result.places)})")
@@ -69,7 +75,8 @@ class Library:
                 city=city,
                 country=country,
             )
-            await self.locate(place)
+            self._add_reel_photos(place.id, extracted.image_labels, images)
+            await self.locate(self.db.get_place(place.id))
             added += 1
 
         self.db.set_reel_trip(reel.id, first_trip)
@@ -88,8 +95,34 @@ class Library:
             resolved_name=match.name if normalize(match.name) != normalize(place.name) else None,
             opening_hours=match.hours,
             hours_checked_at=datetime.now(timezone.utc),
+            photos=merge_photos(self.db.photo_refs(place.id), match.photos, replace_sources=("google", "wikimedia")),
+            photos_checked_at=datetime.now(timezone.utc),
         )
         return True
+
+    def _add_reel_photos(self, place_id: str, labels: list[str], images: Optional[dict[str, Path]]) -> None:
+        if not self.photos or not images:
+            return
+        new = []
+        for label in labels[:3]:
+            path = images.get(label.strip())
+            if path and path.exists():
+                ref = self.photos.save_reel_image(place_id, path)
+                if ref:
+                    new.append({"source": "reel", "ref": ref, "attribution": "From the reel"})
+        if new:
+            self.db.update_place(place_id, photos=merge_photos(self.db.photo_refs(place_id), new))
+
+    def delete_place(self, place_id: str) -> None:
+        if self.photos:
+            self.photos.delete(self.db.photo_refs(place_id))
+        self.db.delete_place(place_id)
+
+    def delete_trip(self, trip_id: str) -> None:
+        if self.photos:
+            for place in self.db.list_places(trip_id):
+                self.photos.delete(self.db.photo_refs(place.id))
+        self.db.delete_trip(trip_id)
 
     async def refresh_details(self, trip_id: str, limit: int = 30) -> int:
         """Looks up opening hours (and a pin, if missing) for places that haven't been checked yet.
@@ -98,17 +131,22 @@ class Library:
         for place in self.db.list_places(trip_id):
             if updated >= limit:
                 break
-            if place.hours_checked_at is not None and place.latitude is not None:
+            if place.hours_checked_at is not None and place.photos_checked_at is not None and place.latitude is not None:
                 continue  # already looked up; "Find" on the place page re-runs it on demand
             match = await self.geocoder.locate(place.name, place.neighborhood, place.city, place.country)
             if not match:
-                self.db.update_place(place.id, hours_checked_at=datetime.now(timezone.utc))
+                now = datetime.now(timezone.utc)
+                self.db.update_place(place.id, hours_checked_at=now, photos_checked_at=now)
                 continue
             if place.latitude is None:
                 await self.locate(place)
             elif _meters(place.latitude, place.longitude, match.latitude, match.longitude) <= 300:
-                self.db.update_place(place.id, opening_hours=match.hours, hours_checked_at=datetime.now(timezone.utc),
-                                     maps_url=place.maps_url or match.maps_url)
+                self.db.update_place(
+                    place.id, opening_hours=match.hours, hours_checked_at=datetime.now(timezone.utc),
+                    maps_url=place.maps_url or match.maps_url,
+                    photos=merge_photos(self.db.photo_refs(place.id), match.photos, replace_sources=("google", "wikimedia")),
+                    photos_checked_at=datetime.now(timezone.utc),
+                )
             updated += 1
         return updated
 

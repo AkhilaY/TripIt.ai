@@ -87,6 +87,7 @@ On Android, install the app from Chrome's menu (**Install app**). TripIt then ap
 - **Trips:** places are grouped into one trip per city. Reels about the same city add to the same trip, and duplicates are merged.
 - **Places:** places are listed by category with what to order and tips from the reel. A place that couldn't be found on the map has an orange dot; open it and tap **Find** to search again.
 - **Itinerary:** **Plan my trip** asks Claude to group places by neighborhood and time of day. If Claude can't be reached, an offline planner groups nearby places instead. Tap **Edit** to reorder stops, or move a place to another day from its page.
+- **Photos:** each place gets pictures. Claude picks the frames or slides of the reel that show the place, Google adds its place photos when you have a server key, and landmarks get a Wikimedia Commons photo. Thumbnails appear in the place list and itinerary; a place's page opens with a swipeable photo strip next to its map, and tapping a photo opens it full screen. Places saved before this feature get Google and Wikimedia photos via **••• → Update hours & photos**; reel frames are only kept for reels shared from now on.
 - **Travel times:** in the itinerary, pick **Walk**, **Transit**, **Drive** or **Bike** to see how long each hop takes, with a day total and a **Directions** link for each leg. Tap **From me** to add travel times from where you are; it asks for location permission the first time. A place's page also shows every mode from your location.
 - **Opening hours:** each place shows whether it's open now and its weekly hours. With a start date, the itinerary shows that day's hours and warns when a stop is closed or not open at its planned time (e.g. "Closed on Mondays"). Claude also takes hours into account when planning. Use **••• → Update opening hours** to look them up for places saved earlier.
 - **Map:** pins are colored by category. Filter by day to see that day's route in order.
@@ -142,7 +143,7 @@ For better map search on restaurants and shops too, enable **Places API (New)** 
 Without Google, travel times are estimates from distance (marked "≈"), there are no transit times for short hops, and opening hours come from OpenStreetMap where it has them. For real routes, transit and fuller hours, use a server-side Google key in `GOOGLE_MAPS_API_KEY` with these APIs enabled in Google Cloud:
 
 - **Routes API**: walking, transit, driving and cycling times. Results are cached for days to keep requests low.
-- **Places API (New)**: map search plus opening hours. Asking for hours puts searches in Google's "Enterprise" tier, which has a smaller free monthly allowance.
+- **Places API (New)**: map search, opening hours and place photos. Photos are fetched through your server each time they're viewed (Google doesn't allow storing them), and each fetch counts as a Place Photo request. Asking for hours puts searches in Google's "Enterprise" tier, which has a smaller free monthly allowance.
 
 Restrict this key by API (Routes API and Places API (New)), not by website, because it's used from the server. If Google refuses the key, TripIt falls back to estimates automatically. **Settings → Travel times** shows which one is active.
 

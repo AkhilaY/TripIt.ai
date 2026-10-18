@@ -9,7 +9,7 @@ import threading
 import uuid
 from datetime import date, datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable, Optional
+from typing import Any, Callable, Iterable, Optional
 
 from .models import ExtractionResult, Job, JobStatus, Place, Reel, ReelMetadata, Trip, TripDetail
 
@@ -97,17 +97,17 @@ CREATE TABLE IF NOT EXISTS route_cache (
 
 # Columns added after the first release; created on existing databases at startup.
 MIGRATIONS = {
-    "places": [("opening_hours", "TEXT"), ("hours_checked_at", "TEXT")],
+    "places": [("opening_hours", "TEXT"), ("hours_checked_at", "TEXT"), ("photos", "TEXT"), ("photos_checked_at", "TEXT")],
 }
 
 PLACE_COLUMNS = (
     "trip_id", "reel_id", "name", "category", "summary", "recommended_items", "price_hint", "tips",
     "user_notes", "confidence", "visited", "neighborhood", "address", "city", "country", "latitude",
     "longitude", "maps_url", "resolved_name", "day_number", "day_order", "time_of_day", "day_note",
-    "opening_hours", "hours_checked_at",
+    "opening_hours", "hours_checked_at", "photos", "photos_checked_at",
 )
 TRIP_COLUMNS = ("name", "city", "country", "start_date", "day_count", "day_titles", "plan_notes", "planned_by")
-JSON_COLUMNS = {"recommended_items", "day_titles", "warnings", "opening_hours"}
+JSON_COLUMNS = {"recommended_items", "day_titles", "warnings", "opening_hours", "photos"}
 
 
 def now() -> datetime:
@@ -133,6 +133,9 @@ def _encode(column: str, value: Any) -> Any:
 
 
 class Database:
+    # Turns a stored photo ref into the URL the app loads; main.py swaps in a signed version.
+    photo_url: Callable[[str, int, str], str] = staticmethod(lambda place_id, index, ref: f"/v1/places/{place_id}/photos/{index}")
+
     def __init__(self, path: str):
         if path != ":memory:":
             Path(path).parent.mkdir(parents=True, exist_ok=True)
@@ -270,9 +273,17 @@ class Database:
     def delete_place(self, place_id: str) -> None:
         self._exec("DELETE FROM places WHERE id = ?", (place_id,))
 
-    @staticmethod
-    def _place(row: sqlite3.Row) -> Place:
+    def photo_refs(self, place_id: str) -> list[dict]:
+        rows = self._rows("SELECT photos FROM places WHERE id = ?", (place_id,))
+        return json.loads(rows[0]["photos"]) if rows and rows[0]["photos"] else []
+
+    def _place(self, row: sqlite3.Row) -> Place:
         data = dict(row)
+        refs = json.loads(data["photos"]) if data.get("photos") else []
+        data["photos"] = [
+            {"source": r["source"], "url": self.photo_url(data["id"], i, r["ref"]), "attribution": r.get("attribution")}
+            for i, r in enumerate(refs)
+        ]
         data["recommended_items"] = json.loads(data["recommended_items"])
         data["visited"] = bool(data["visited"])
         data["opening_hours"] = json.loads(data["opening_hours"]) if data.get("opening_hours") else None

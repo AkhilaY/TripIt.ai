@@ -140,11 +140,20 @@ function navbar(title, { back, backLabel, right = '', plain = false }) {
 }
 
 const badge = (cat) => `<span class="badge" style="${cvar(cat)}">${ICON[cat] || ICON.other}</span>`;
+const photoUrl = (photo, width) => `${photo.url}${photo.url.includes('?') ? '&' : '?'}w=${width}`;
+
+/** Photo thumbnail with the category icon underneath, so a failed image still shows something. */
+function thumb(p, size = 48) {
+  const photo = p.photos && p.photos[0];
+  if (!photo) return badge(p.category);
+  return `<span class="thumbbox" style="${cvar(p.category)};width:${size}px;height:${size}px">${ICON[p.category] || ICON.other}
+    <img src="${esc(photoUrl(photo, 240))}" alt="" loading="lazy" decoding="async" onerror="this.remove()"></span>`;
+}
 const isNew = (p) => (S.newIds.has(p.id) ? '<span class="chip-new">NEW</span>' : '');
 
 function placeRow(p) {
   return `<a class="row indent" href="#/place/${p.id}">
-    ${badge(p.category)}
+    ${thumb(p, 48)}
     <span class="main"><span class="t ${p.visited ? 'strike' : ''}">${esc(p.name)}${isNew(p)}${p.latitude == null ? ' <span class="flag" title="Not on the map yet">●</span>' : ''}</span>
     <span class="s">${esc([p.neighborhood, p.city].filter(Boolean).join(' · '))}</span>
     ${p.recommended_items.length ? `<span class="s clip">Try: ${esc(p.recommended_items.join(', '))}</span>` : ''}
@@ -384,7 +393,14 @@ const VIEWS = {
 
     const html = `${navbar(p.name, { back: `#/trip/${trip.id}`, backLabel: trip.name })}
       <div class="section" style="margin-top:8px"><div class="group">
-        ${located ? '<div class="map mini-map"><div id="mini-map" style="position:absolute;inset:0"></div></div>' : ''}
+        ${p.photos && p.photos.length
+          ? `<div class="gallery" aria-label="Photos of ${esc(p.name)}">
+              ${p.photos.map((ph, i) => `<button class="gimg" data-act="viewphoto" data-id="${p.id}" data-index="${i}" aria-label="Open photo ${i + 1} of ${p.photos.length}">
+                <img src="${esc(photoUrl(ph, 900))}" alt="${esc(p.name)}" ${i ? 'loading="lazy"' : ''} decoding="async" onerror="this.closest('.gimg').remove()">
+                <span class="gcap">${esc(photoCaption(ph))}</span></button>`).join('')}
+              ${located ? '<div class="gimg gmap"><div id="mini-map" style="position:absolute;inset:0"></div></div>' : ''}
+            </div>`
+          : (located ? '<div class="map mini-map"><div id="mini-map" style="position:absolute;inset:0"></div></div>' : '')}
         <div class="ph" style="${cvar(p.category)}">
           <span class="cat">${ICON[p.category] || ''}${CATS[p.category]}</span>
           <h2>${esc(p.name)}${isNew(p)}</h2>
@@ -529,6 +545,16 @@ const VIEWS = {
   },
 };
 
+function photoCaption(ph) {
+  if (ph.source === 'reel') return 'From the reel';
+  if (ph.source === 'google') return ph.attribution ? `Google · ${ph.attribution}` : 'Google';
+  return ph.attribution || 'Wikimedia Commons';
+}
+
+function photoViewer(place, index) {
+  openSheet({ type: 'photos', place, index });
+}
+
 function hoursSection(p) {
   const h = p.opening_hours;
   if (!h || !h.text || !h.text.length) {
@@ -601,6 +627,7 @@ function itinerary(trip) {
         const conflict = slotConflict(p.opening_hours, dayIdx, p.time_of_day);
         const todays = dayIdx != null ? dayHours(p.opening_hours, dayIdx) : null;
         const inner = `<span class="tod" style="${cvar(p.category)}"><i></i><span>${cap(p.time_of_day || '')}</span></span>
+          ${p.photos && p.photos.length ? thumb(p, 52) : ''}
           <span class="main"><span class="t ${p.visited ? 'strike' : ''}">${esc(p.name)}${isNew(p)}</span>
           <span class="s">${CATS[p.category]}${p.neighborhood ? ` · ${esc(p.neighborhood)}` : ''}</span>
           ${todays && !conflict ? `<span class="s">${ICON.clock.replace('<svg', '<svg width="12" height="12" style="display:inline;vertical-align:-1px;margin-right:3px"')}${esc(todays)}</span>` : ''}
@@ -638,7 +665,16 @@ function renderOverlay() {
   const sh = S.sheet;
   let html = '';
   if (sh) {
-    if (sh.type === 'actions') {
+    if (sh.type === 'photos') {
+      const photos = sh.place.photos;
+      const ph = photos[sh.index];
+      html = `<div class="viewer" role="dialog" aria-label="Photos of ${esc(sh.place.name)}">
+        <img src="${esc(photoUrl(ph, 1600))}" alt="${esc(sh.place.name)}">
+        <div class="viewer-top"><span>${sh.index + 1} / ${photos.length}</span><button class="viewer-btn" data-act="close" aria-label="Close">✕</button></div>
+        ${photos.length > 1 ? `<button class="viewer-btn viewer-prev" data-act="photostep" data-d="-1" aria-label="Previous photo">‹</button>
+          <button class="viewer-btn viewer-next" data-act="photostep" data-d="1" aria-label="Next photo">›</button>` : ''}
+        <div class="viewer-cap">${esc(sh.place.name)} · ${esc(photoCaption(ph))}</div></div>`;
+    } else if (sh.type === 'actions') {
       html = `<div class="dim" data-act="close"></div><div class="actionsheet" role="dialog" aria-label="${esc(sh.title || 'Actions')}">
         <div class="group">${sh.title ? `<div class="row centered"><span class="s">${esc(sh.title)}</span></div>` : ''}
         ${sh.actions.map((a, i) => `<button class="row ${a.destructive ? 'destructive' : ''}" style="${a.destructive ? '' : 'color:var(--accent)'}" data-act="action" data-index="${i}">${esc(a.label)}</button>`).join('')}</div>
@@ -864,10 +900,10 @@ async function onAction(act, el) {
       const actions = [
         { label: t.day_count ? 'Re-plan trip' : 'Plan my trip', run: () => planSheet(t) },
         { label: 'Rename', run: () => renameSheet(t) },
-        { label: 'Update opening hours', run: async () => {
-          toast('Looking up opening hours…');
+        { label: 'Update hours & photos', run: async () => {
+          toast('Looking up hours and photos…');
           S.trip[t.id] = await api(`/v1/trips/${t.id}/refresh-details`, { method: 'POST' });
-          toast('Opening hours updated');
+          toast('Hours and photos updated');
           render();
         } },
       ];
@@ -895,6 +931,17 @@ async function onAction(act, el) {
       return;
     }
     case 'mode': setTravelMode(el.dataset.mode); render(); return;
+    case 'viewphoto': {
+      const place = Object.values(S.trip).flatMap((t) => t.places).find((x) => x.id === el.dataset.id);
+      if (place) photoViewer(place, Number(el.dataset.index));
+      return;
+    }
+    case 'photostep': {
+      const n = S.sheet.place.photos.length;
+      S.sheet.index = (S.sheet.index + Number(el.dataset.d) + n) % n;
+      renderOverlay();
+      return;
+    }
     case 'fromhere': {
       const t = S.trip[el.dataset.id];
       el.innerHTML = '<span class="spinner" style="width:14px;height:14px"></span>Locating…';
@@ -1034,8 +1081,28 @@ document.addEventListener('submit', async (ev) => {
 
 document.addEventListener('keydown', (ev) => {
   if (ev.key === 'Escape' && S.sheet) closeSheet();
+  if (S.sheet && S.sheet.type === 'photos' && (ev.key === 'ArrowRight' || ev.key === 'ArrowLeft')) {
+    const n = S.sheet.place.photos.length;
+    S.sheet.index = (S.sheet.index + (ev.key === 'ArrowRight' ? 1 : -1) + n) % n;
+    renderOverlay();
+  }
   if (ev.key === 'Enter' && S.sheet && S.sheet.ok && ev.target.matches('.sheet input.field')) { ev.preventDefault(); S.sheet.ok(); }
 });
+
+// Swipe left/right in the photo viewer.
+let touchX = null;
+document.addEventListener('touchstart', (ev) => {
+  touchX = S.sheet && S.sheet.type === 'photos' ? ev.touches[0].clientX : null;
+}, { passive: true });
+document.addEventListener('touchend', (ev) => {
+  if (touchX == null || !S.sheet || S.sheet.type !== 'photos') return;
+  const dx = ev.changedTouches[0].clientX - touchX;
+  touchX = null;
+  if (Math.abs(dx) < 40) return;
+  const n = S.sheet.place.photos.length;
+  S.sheet.index = (S.sheet.index + (dx < 0 ? 1 : -1) + n) % n;
+  renderOverlay();
+}, { passive: true });
 
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible' && route().name !== 'setup') { schedulePoll(true); }

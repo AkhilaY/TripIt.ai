@@ -6,8 +6,9 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated, Optional
 
+import httpx
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from .config import Settings, get_settings
@@ -36,6 +37,7 @@ from .models import (
     TripDetail,
     TripUpdate,
 )
+from .photos import PhotoStore
 from .pipeline import Pipeline
 from .routing import Router
 
@@ -47,10 +49,13 @@ STATIC_DIR = Path(__file__).parent / "static"
 
 def build_services(app: FastAPI, settings: Settings) -> None:
     db = Database(settings.database_path)
+    photos = PhotoStore(Path(settings.photos_dir or Path(settings.database_path).parent / "photos"), settings.app_api_key)
+    db.photo_url = photos.url
     app.state.db = db
+    app.state.photos = photos
     app.state.store = JobStore(db)
     app.state.claude = ClaudeService(settings)
-    app.state.library = Library(db, make_geocoder(settings))
+    app.state.library = Library(db, make_geocoder(settings), photos=photos)
     app.state.pipeline = Pipeline(settings, app.state.store, app.state.claude, app.state.library)
     app.state.router = Router(db, settings)
 
@@ -200,7 +205,7 @@ async def update_trip(trip_id: str, body: TripUpdate, request: Request) -> TripD
 @app.delete("/v1/trips/{trip_id}", status_code=204, dependencies=[Auth])
 async def delete_trip(trip_id: str, request: Request) -> Response:
     _trip_or_404(request, trip_id)
-    _db(request).delete_trip(trip_id)
+    _library(request).delete_trip(trip_id)
     return Response(status_code=204)
 
 
@@ -283,7 +288,7 @@ async def update_place(place_id: str, body: PlaceUpdate, request: Request) -> Pl
 @app.delete("/v1/places/{place_id}", status_code=204, dependencies=[Auth])
 async def delete_place(place_id: str, request: Request) -> Response:
     _place_or_404(request, place_id)
-    _db(request).delete_place(place_id)
+    _library(request).delete_place(place_id)
     return Response(status_code=204)
 
 
@@ -293,6 +298,40 @@ async def locate_place(place_id: str, body: LocateRequest, request: Request) -> 
     if not await _library(request).locate(place, query=body.query):
         raise HTTPException(status_code=422, detail="Couldn't find that on the map. Try adding the street or neighborhood.")
     return _db(request).get_place(place_id)
+
+
+@app.get("/v1/places/{place_id}/photos/{index}", include_in_schema=False)
+async def place_photo(
+    place_id: str, index: int, request: Request, settings: Annotated[Settings, Depends(get_settings)],
+    sig: str = "", w: int = 1000,
+):
+    """Serves a place photo. Authorized by the signature in the URL, since <img> tags can't send headers."""
+    refs = _db(request).photo_refs(place_id)
+    if index < 0 or index >= len(refs):
+        raise HTTPException(status_code=404, detail="Photo not found")
+    photo = refs[index]
+    if not request.app.state.photos.check(place_id, index, photo["ref"], sig):
+        raise HTTPException(status_code=403, detail="Bad photo link")
+    if photo["source"] == "reel":
+        path = request.app.state.photos.path(photo["ref"])
+        if not path:
+            raise HTTPException(status_code=404, detail="Photo file missing")
+        return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=2592000, immutable"})
+    if photo["source"] == "wikimedia":
+        return RedirectResponse(photo["ref"], status_code=302, headers={"Cache-Control": "private, max-age=86400"})
+    if photo["source"] == "google" and settings.google_maps_api_key:
+        width = min(max(w, 100), 1600)
+        try:
+            async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
+                r = await client.get(f"https://places.googleapis.com/v1/{photo['ref']}/media",
+                                     params={"maxWidthPx": width, "key": settings.google_maps_api_key})
+        except httpx.HTTPError:
+            raise HTTPException(status_code=502, detail="Couldn't load photo")
+        if r.status_code != 200:
+            raise HTTPException(status_code=404, detail="Photo no longer available")
+        return Response(r.content, media_type=r.headers.get("content-type", "image/jpeg"),
+                        headers={"Cache-Control": "private, max-age=86400"})
+    raise HTTPException(status_code=404, detail="Photo not available")
 
 
 @app.get("/v1/reels", response_model=list[Reel], dependencies=[Auth])

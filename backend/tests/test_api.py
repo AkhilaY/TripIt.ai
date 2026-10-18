@@ -711,3 +711,21 @@ async def test_google_photos_and_wikidata_image():
     img = await wikidata_image(httpx.AsyncClient(transport=httpx.MockTransport(wikidata)), "Q160236")
     assert img["source"] == "wikimedia" and img["ref"].startswith("https://commons.wikimedia.org/wiki/Special:FilePath/Metropolitan_Museum")
     assert await wikidata_image(httpx.AsyncClient(transport=httpx.MockTransport(wikidata)), "not-a-qid") is None
+
+
+def test_jobs_saved_before_new_fields_still_load(client):
+    """Imports stored by older versions lack fields added later (e.g. image_labels)."""
+    import json as _json
+
+    db = app.state.db
+    job = db.create_job("https://www.tiktok.com/@a/video/old", None)
+    old = EXTRACTION.model_dump()
+    for place in old["places"]:
+        del place["image_labels"]
+    db._exec("UPDATE jobs SET status = 'done', result = ? WHERE id = ?", (_json.dumps(old), job.id))
+    db._exec("INSERT INTO jobs (id, url, status, created_at, updated_at, result) VALUES ('broken', 'u', 'done', '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00', '{not json')")
+
+    assert client.get("/v1/jobs", headers=H).status_code == 200
+    detail = client.get(f"/v1/jobs/{job.id}", headers=H).json()
+    assert detail["result"]["places"][0]["image_labels"] == []
+    assert client.get("/v1/jobs/broken", headers=H).json()["result"] is None

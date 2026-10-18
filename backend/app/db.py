@@ -4,6 +4,7 @@ One file, no server to run. On Fly.io/Render put DATABASE_PATH on a persistent v
 """
 
 import json
+import logging
 import sqlite3
 import threading
 import uuid
@@ -12,6 +13,8 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, Optional
 
 from .models import ExtractionResult, Job, JobStatus, Place, Reel, ReelMetadata, Trip, TripDetail
+
+log = logging.getLogger(__name__)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS trips (
@@ -390,11 +393,25 @@ class Database:
             created_at=row["created_at"],
             updated_at=row["updated_at"],
             reel=ReelMetadata.model_validate_json(row["reel"]) if row["reel"] else None,
-            result=ExtractionResult.model_validate_json(row["result"]) if row["result"] else None,
+            result=_load_result(row["result"]),
             warnings=json.loads(row["warnings"]),
             trip_id=row["trip_id"],
             added_places=row["added_places"],
         )
+
+
+def _load_result(raw: Optional[str]) -> Optional[ExtractionResult]:
+    """Parses a stored extraction, filling in fields added since it was saved (e.g. image_labels)."""
+    if not raw:
+        return None
+    try:
+        data = json.loads(raw)
+        for place in data.get("places", []):
+            place.setdefault("image_labels", [])
+        return ExtractionResult.model_validate(data)
+    except (ValueError, TypeError) as e:  # pydantic's ValidationError is a ValueError
+        log.warning("Couldn't read a stored extraction result: %s", e)
+        return None
 
 
 # ---------- Route cache ----------

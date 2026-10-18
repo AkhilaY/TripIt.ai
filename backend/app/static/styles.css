@@ -214,3 +214,29 @@ button.row:active, a.row:active { background: var(--fill); }
 .gpin { position: absolute; width: 30px; height: 38px; }
 .gpopup { color: #1C1C1E; font-family: var(--font); font-size: 15px; line-height: 1.35; padding: 2px 4px; }
 .gpopup a.popup-link { color: #E2513E; font-weight: 600; text-decoration: none; display: block; margin-top: 4px; }
+
+/* Travel modes, legs and opening hours */
+.modebar { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 16px; }
+.modebar::-webkit-scrollbar { display: none; }
+.modechip { border: 0; display: inline-flex; align-items: center; gap: 5px; font-size: 14px; font-weight: 500; padding: 7px 12px; border-radius: 16px;
+  background: var(--cell); color: var(--label); white-space: nowrap; cursor: pointer; }
+.modechip svg { width: 16px; height: 16px; }
+.modechip.on { background: var(--accent); color: var(--accent-ink); }
+.modechip.locate { margin-left: auto; }
+.modechip.locate.on { background: var(--accent-soft); color: var(--accent); }
+.leg { display: flex; align-items: center; gap: 8px; padding: 6px 16px 6px 44px; font-size: 13px; color: var(--secondary); position: relative; min-height: 32px; background: var(--bg); }
+.leg::before { content: ""; position: absolute; left: 32px; top: 0; bottom: 0; border-left: 2px dotted var(--tertiary); }
+.leg svg { width: 15px; height: 15px; flex-shrink: 0; }
+.leg-t { flex: 1; min-width: 0; }
+.leg-dir { color: var(--accent); font-weight: 600; text-decoration: none; font-size: 13px; flex-shrink: 0; }
+.daytravel { font-weight: 400; color: var(--secondary); font-size: 13px; margin-left: 8px; }
+.daytravel:empty { display: none; }
+.warnline { font-size: 13px; color: var(--warn); display: inline-flex; align-items: center; gap: 4px; }
+.warnline svg { width: 13px; height: 13px; }
+.hours-open { color: var(--ok); }
+.hours-closing { color: var(--warn); }
+.hours-closed { color: var(--danger); }
+.herechip { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--accent); font-weight: 600; margin-top: 2px; }
+.herechip svg { width: 13px; height: 13px; }
+.hourlist { gap: 4px; font-size: 15px; color: var(--secondary); }
+.hourlist .today { color: var(--label); font-weight: 600; }

@@ -41,6 +41,9 @@ class Settings(BaseSettings):
     # Separate key for showing Google Maps in the web app. It is sent to browsers, so restrict it in
     # Google Cloud to the Maps JavaScript API and to your app's address (e.g. https://my-tripit.fly.dev/*).
     google_maps_browser_key: str = ""
+    # Travel times: "auto" uses Google's Routes API with GOOGLE_MAPS_API_KEY (enable "Routes API" on it),
+    # "estimate" always uses distance-based estimates.
+    routing: str = "auto"
     # Nominatim asks for a contact address in its usage policy (optional).
     nominatim_email: str = ""
 

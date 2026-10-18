@@ -23,6 +23,7 @@ from app.models import (
     ReelMetadata,
 )
 from app.planner import offline_plan
+from app.routing import Router
 
 H = {"X-API-Key": "secret"}
 
@@ -72,7 +73,9 @@ class FakeGeocoder:
             return GeoMatch(name=name, latitude=40.6818, longitude=-74.0003, address="575 Henry St")
         if name in self.COORDS:
             lat, lon = self.COORDS[name]
-            return GeoMatch(name=name, latitude=lat, longitude=lon, address="Somewhere St")
+            from app.hours import parse_osm
+            return GeoMatch(name=name, latitude=lat, longitude=lon, address="Somewhere St",
+                            hours=parse_osm("Mo-Fr 11:00-23:00; Sa-Su 10:00-02:00"))
         return None
 
 
@@ -108,13 +111,14 @@ def client(monkeypatch, tmp_path):
     app.state.claude = claude
     app.state.library = library
     app.state.pipeline = pipeline_module.Pipeline(settings, store, claude, library)
+    app.state.router = Router(db, settings)
 
     with TestClient(app) as c:
         c.messages = messages
         c.geocoder = geocoder
         yield c
     app.dependency_overrides.clear()
-    for attr in ("db", "store", "claude", "library", "pipeline"):
+    for attr in ("db", "store", "claude", "library", "pipeline", "router"):
         delattr(app.state, attr)
 
 
@@ -517,3 +521,134 @@ def test_config_exposes_only_the_browser_maps_key(client):
     body = client.get("/v1/config", headers=H).json()
     assert body["google_maps_key"] == "browser-key"
     assert "server-only" not in str(body)
+
+
+# ---------- Opening hours ----------
+
+
+def test_parse_osm_hours():
+    from app.hours import parse_osm
+
+    h = parse_osm("Mo-Fr 08:00-18:00; Sa 09:00-14:00,17:00-22:00; Su off")
+    assert [r.model_dump() for r in h.weekly[0]] == [{"open": "08:00", "close": "18:00"}]
+    assert len(h.weekly[5]) == 2 and h.weekly[6] == []
+    assert h.text[6] == "Sunday: Closed" and h.text[0] == "Monday: 8 AM – 6 PM"
+
+    assert parse_osm("24/7").text[0] == "Monday: Open 24 hours"
+    late = parse_osm("Fr-Sa 18:00-26:00")
+    assert late.weekly[4][0].close == "02:00" and late.weekly[0] == []
+    assert parse_osm("11:00-22:00").weekly[3][0].open == "11:00"
+    assert parse_osm("Mo-Sa 10:00-20:00; PH off").weekly[6] == []
+    odd = parse_osm("Jan-Mar Mo-Fr 10:00-16:00")
+    assert odd.weekly is None and odd.text == ["Jan-Mar Mo-Fr 10:00-16:00"]
+    assert parse_osm("") is None
+
+
+def test_google_hours():
+    from app.hours import from_google
+
+    data = {
+        "periods": [
+            {"open": {"day": 1, "hour": 11, "minute": 30}, "close": {"day": 1, "hour": 22, "minute": 0}},
+            {"open": {"day": 6, "hour": 18, "minute": 0}, "close": {"day": 0, "hour": 2, "minute": 0}},
+        ],
+        "weekdayDescriptions": ["Monday: 11:30 AM – 10:00 PM"] + ["x"] * 6,
+    }
+    h = from_google(data)
+    assert h.weekly[0][0].open == "11:30" and h.weekly[5][0].close == "02:00" and h.weekly[6] == []
+    always = from_google({"periods": [{"open": {"day": 0, "hour": 0, "minute": 0}}]})
+    assert always.weekly[2][0].close == "24:00"
+
+
+def test_hours_saved_on_import_and_refresh(client):
+    job = import_reel(client)
+    trip = client.get(f"/v1/trips/{job['trip_id']}", headers=H).json()
+    joes = next(p for p in trip["places"] if p["name"] == "Joe's Pizza")
+    assert joes["opening_hours"]["weekly"][5][0] == {"open": "10:00", "close": "02:00"}
+    assert joes["opening_hours"]["source"] == "openstreetmap"
+
+    # Lucali has no pin and no hours; refresh tries again and marks it as checked.
+    r = client.post(f"/v1/trips/{job['trip_id']}/refresh-details", headers=H)
+    assert r.status_code == 200
+    lucali = next(p for p in r.json()["places"] if p["name"] == "Lucali")
+    assert lucali["hours_checked_at"] is not None
+
+
+def test_planner_gets_opening_hours(client):
+    job = import_reel(client)
+    client.messages.stop_reason = "refusal"  # fall back offline; we only check what was sent
+    client.post(f"/v1/trips/{job['trip_id']}/plan", json={"days": 1, "start_date": "2026-11-02"}, headers=H)
+    payload = client.messages.calls[-1]["messages"][0]["content"][0]["text"]
+    assert "Sat 10:00-02:00" in payload and '"start_weekday": "Monday"' in payload
+
+
+# ---------- Travel times ----------
+
+
+def test_day_legs_estimates(client):
+    job = import_reel(client)
+    trip = client.get(f"/v1/trips/{job['trip_id']}", headers=H).json()
+    ids = {p["name"]: p["id"] for p in trip["places"]}
+    for name in ("Joe's Pizza", "Prince Street Pizza", "Lucali"):
+        client.patch(f"/v1/places/{ids[name]}", json={"day_number": 1}, headers=H)
+    legs = client.get(f"/v1/trips/{job['trip_id']}/days/1/legs", headers=H).json()
+    assert legs["provider"] == "estimate"
+    assert len(legs["legs"]) == 1  # Lucali has no pin, so only Joe's → Prince St
+    walk = legs["legs"][0]["times"]["walk"]
+    assert walk["estimated"] and 900 < walk["distance_m"] < 1600 and 10 * 60 < walk["duration_s"] < 25 * 60
+    assert legs["legs"][0]["times"]["transit"] is None  # too short to bother with transit
+
+    r = client.post("/v1/routes/from", json={"latitude": 40.7580, "longitude": -73.9855, "place_ids": [ids["Joe's Pizza"]]}, headers=H)
+    leg = r.json()["legs"][0]
+    assert leg["from_place_id"] is None and leg["times"]["transit"]["estimated"]
+
+
+async def test_google_routes_parsing_cache_and_fallback():
+    from app.models import TravelMode
+
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        import json as _json
+        body = _json.loads(request.content)
+        calls.append(body["travelMode"])
+        assert request.headers["X-Goog-Api-Key"] == "k"
+        if body["travelMode"] == "TRANSIT":
+            return httpx.Response(200, json=[{"condition": "ROUTE_NOT_FOUND"}])
+        # originIndex/destinationIndex of 0 are omitted in proto3 JSON
+        return httpx.Response(200, json=[{"duration": "754s", "distanceMeters": 1023, "condition": "ROUTE_EXISTS"}])
+
+    db = Database(":memory:")
+    router = Router(db, Settings(google_maps_api_key="k"), client=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+    a, b = (40.7305, -74.0021), (40.7231, -73.9945)
+    times = await router._all_modes(a, b)
+    assert times[TravelMode.walk].duration_s == 754 and not times[TravelMode.walk].estimated
+    assert times[TravelMode.transit] is None
+    n = len(calls)
+    await router._all_modes(a, b)
+    assert len(calls) == n  # served from the cache
+
+    def refuse(request):
+        return httpx.Response(403, json={"error": {"message": "Routes API has not been used in project"}})
+
+    router2 = Router(Database(":memory:"), Settings(google_maps_api_key="k"), client=httpx.AsyncClient(transport=httpx.MockTransport(refuse)))
+    t = await router2._pair(a, b, TravelMode.walk)
+    assert t.estimated and router2.provider == "estimate"
+
+
+def test_database_migrates_old_files(tmp_path):
+    import sqlite3
+
+    path = tmp_path / "old.db"
+    conn = sqlite3.connect(path)
+    conn.executescript("""CREATE TABLE places (id TEXT PRIMARY KEY, trip_id TEXT NOT NULL, reel_id TEXT, name TEXT NOT NULL,
+        category TEXT NOT NULL DEFAULT 'other', summary TEXT NOT NULL DEFAULT '', recommended_items TEXT NOT NULL DEFAULT '[]',
+        price_hint TEXT, tips TEXT, user_notes TEXT NOT NULL DEFAULT '', confidence TEXT NOT NULL DEFAULT 'high',
+        visited INTEGER NOT NULL DEFAULT 0, neighborhood TEXT, address TEXT, city TEXT NOT NULL DEFAULT '',
+        country TEXT NOT NULL DEFAULT '', latitude REAL, longitude REAL, maps_url TEXT, resolved_name TEXT,
+        day_number INTEGER, day_order INTEGER NOT NULL DEFAULT 0, time_of_day TEXT, day_note TEXT, created_at TEXT NOT NULL);""")
+    conn.close()
+    db = Database(str(path))
+    trip = db.create_trip("Lisbon", "Lisbon", "Portugal")
+    place = db.add_place(trip_id=trip.id, name="Cafe", category="cafe")
+    assert place.opening_hours is None

@@ -35,6 +35,7 @@ PLAN_SYSTEM = """You are a travel planner. Arrange the given saved places into a
 - Group places that are geographically close into the same day to minimise travel (use latitude/longitude and neighborhood).
 - Put meals at sensible times: cafes and bakeries in the morning, restaurants at lunch or dinner, bars and nightlife in the evening.
 - Don't overload days: roughly 3-6 stops per day, fewer if they are big attractions.
+- Respect opening_hours when given (local times, Mon–Sun). Don't schedule a place on a day or at a time it's closed. If a start_date is given, day 1 falls on that date's weekday; otherwise prefer slots when the place is open on most days.
 - Use each place at most once, and only use place_ids from the input. Put places that don't fit in unscheduled_place_ids.
 - Day titles should name the area or theme."""
 
@@ -82,6 +83,7 @@ class ClaudeService:
             "city": request.city,
             "days": request.days,
             "start_date": request.start_date.isoformat() if request.start_date else None,
+            "start_weekday": request.start_date.strftime("%A") if request.start_date else None,
             "preferences": request.preferences,
             "places": [p.model_dump(mode="json", exclude_none=True) for p in request.places],
         }

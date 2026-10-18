@@ -19,6 +19,9 @@ from .llm import ClaudeError, ClaudeService
 from .media import UnsupportedURLError, find_url, platform_for
 from .models import (
     CreateJobRequest,
+    DayLegs,
+    RoutesFromRequest,
+    RoutesFromResponse,
     Job,
     JobStatus,
     LocateRequest,
@@ -34,6 +37,7 @@ from .models import (
     TripUpdate,
 )
 from .pipeline import Pipeline
+from .routing import Router
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 mimetypes.add_type("application/manifest+json", ".webmanifest")
@@ -48,6 +52,7 @@ def build_services(app: FastAPI, settings: Settings) -> None:
     app.state.claude = ClaudeService(settings)
     app.state.library = Library(db, make_geocoder(settings))
     app.state.pipeline = Pipeline(settings, app.state.store, app.state.claude, app.state.library)
+    app.state.router = Router(db, settings)
 
 
 @asynccontextmanager
@@ -113,7 +118,12 @@ async def config(request: Request, settings: Annotated[Settings, Depends(get_set
     """Also used by the web app to check the API key."""
     geocoder = request.app.state.library.geocoder
     name = "google" if isinstance(geocoder, GooglePlacesGeocoder) else "none" if isinstance(geocoder, NoGeocoder) else "openstreetmap"
-    return {"ok": True, "geocoder": name, "google_maps_key": settings.google_maps_browser_key or None}
+    return {
+        "ok": True,
+        "geocoder": name,
+        "routing": request.app.state.router.provider,
+        "google_maps_key": settings.google_maps_browser_key or None,
+    }
 
 
 # ---------- Imports (jobs) ----------
@@ -216,6 +226,33 @@ async def reorder_day(trip_id: str, day: int, body: ReorderRequest, request: Req
     _trip_or_404(request, trip_id)
     _library(request).reorder_day(trip_id, day, body.place_ids)
     return _trip_or_404(request, trip_id)
+
+
+@app.post("/v1/trips/{trip_id}/refresh-details", response_model=TripDetail, dependencies=[Auth])
+async def refresh_details(trip_id: str, request: Request) -> TripDetail:
+    """Looks up opening hours (and missing pins) for places that haven't been checked yet."""
+    _trip_or_404(request, trip_id)
+    await _library(request).refresh_details(trip_id)
+    return _trip_or_404(request, trip_id)
+
+
+@app.get("/v1/trips/{trip_id}/days/{day}/legs", response_model=DayLegs, dependencies=[Auth])
+async def day_legs(trip_id: str, day: int, request: Request) -> DayLegs:
+    trip = _trip_or_404(request, trip_id)
+    stops = sorted((p for p in trip.places if p.day_number == day), key=lambda p: p.day_order)
+    router: Router = request.app.state.router
+    legs = await router.day_legs(stops)
+    return DayLegs(day=day, provider=router.provider, legs=legs)
+
+
+@app.post("/v1/routes/from", response_model=RoutesFromResponse, dependencies=[Auth])
+async def routes_from(body: RoutesFromRequest, request: Request) -> RoutesFromResponse:
+    """Travel times from a point (your current location) to the given places."""
+    db = _db(request)
+    places = [p for p in (db.get_place(pid) for pid in body.place_ids) if p is not None]
+    router: Router = request.app.state.router
+    legs = await router.from_point((body.latitude, body.longitude), places)
+    return RoutesFromResponse(provider=router.provider, legs=legs)
 
 
 # ---------- Places & reels ----------

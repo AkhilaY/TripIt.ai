@@ -1,5 +1,6 @@
 import { api, ApiError, getKey, setKey } from './api.js';
 import { ICON, hydrateIcons } from './icons.js';
+import { DAY_NAMES, dayHours, mondayIndex, openStatus, slotConflict } from './hours.js';
 import { configureMaps, destroyMaps, mapProvider, renderMap } from './map.js';
 
 // ---------- Constants & helpers ----------
@@ -64,6 +65,8 @@ const S = {
   mapDay: {},           // tripId -> day shown on the trip map (0 = all)
   mapTrip: null,        // trip shown on the Map tab ('all' or an id)
   navigations: 0,
+  legs: {},             // `${tripId}:${day}:${ids}` -> DayLegs
+  here: null,           // {at, provider, times: {placeId: {walk, transit, drive, bike}}}
   scroll: {},
 };
 
@@ -144,7 +147,8 @@ function placeRow(p) {
     ${badge(p.category)}
     <span class="main"><span class="t ${p.visited ? 'strike' : ''}">${esc(p.name)}${isNew(p)}${p.latitude == null ? ' <span class="flag" title="Not on the map yet">●</span>' : ''}</span>
     <span class="s">${esc([p.neighborhood, p.city].filter(Boolean).join(' · '))}</span>
-    ${p.recommended_items.length ? `<span class="s clip">Try: ${esc(p.recommended_items.join(', '))}</span>` : ''}</span>
+    ${p.recommended_items.length ? `<span class="s clip">Try: ${esc(p.recommended_items.join(', '))}</span>` : ''}
+    ${hoursLine(p)}${hereChip(p)}</span>
     ${ICON.chev}</a>`;
 }
 
@@ -181,6 +185,136 @@ async function findPlace(id) {
 const tripPlace = (trip, id) => trip.places.find((p) => p.id === id);
 const stops = (trip, day) => trip.places.filter((p) => p.day_number === day).sort((a, b) => a.day_order - b.day_order);
 
+// ---------- Travel times ----------
+
+const MODES = [
+  ['walk', 'Walk', 'walking', 'w'],
+  ['transit', 'Transit', 'transit', 'r'],
+  ['drive', 'Drive', 'driving', 'd'],
+  ['bike', 'Bike', 'bicycling', null],
+];
+
+function travelMode() {
+  try { return localStorage.getItem('tripit.mode') || 'walk'; } catch { return 'walk'; }
+}
+function setTravelMode(mode) {
+  try { localStorage.setItem('tripit.mode', mode); } catch { /* remembered for this visit only */ }
+  S.mode = mode;
+}
+const currentMode = () => S.mode || travelMode();
+
+function fmtDuration(sec) {
+  const m = Math.max(1, Math.round(sec / 60));
+  if (m < 60) return `${m} min`;
+  const h = Math.floor(m / 60);
+  return `${h} h${m % 60 ? ` ${m % 60} min` : ''}`;
+}
+function fmtDistance(m) {
+  const km = m / 1000;
+  return km < 1 ? `${Math.round(m / 10) * 10} m` : `${km < 10 ? km.toFixed(1) : Math.round(km)} km`;
+}
+const located = (p) => p && p.latitude != null && p.longitude != null;
+
+/** Picks the time for the chosen mode; for short hops with no transit time, falls back to walking. */
+function pickTime(times, mode) {
+  if (!times) return null;
+  if (times[mode]) return { mode, time: times[mode] };
+  if (mode === 'transit' && times.walk) return { mode: 'walk', time: times.walk, fallback: true };
+  return null;
+}
+
+function directionsUrl(from, to, mode) {
+  const m = MODES.find((x) => x[0] === mode) || MODES[0];
+  const origin = from ? `&origin=${from.latitude},${from.longitude}` : '';
+  return `https://www.google.com/maps/dir/?api=1${origin}&destination=${to.latitude},${to.longitude}&travelmode=${m[2]}`;
+}
+
+function legHtml(leg, from, to, mode) {
+  const picked = pickTime(leg && leg.times, mode);
+  if (!picked) return `<span class="s">No ${mode} route found</span>`;
+  const { time } = picked;
+  const approx = time.estimated ? '≈ ' : '';
+  const note = picked.fallback ? ' <span class="s">(short walk)</span>' : '';
+  return `${ICON[picked.mode]}<span class="leg-t">${approx}${fmtDuration(time.duration_s)} · ${fmtDistance(time.distance_m)}${note}</span>
+    <a class="leg-dir" href="${esc(directionsUrl(from, to, picked.mode))}" target="_blank" rel="noopener">Directions</a>`;
+}
+
+function legsKey(trip, day) {
+  return `${trip.id}:${day}:${stops(trip, day).filter(located).map((p) => p.id).join(',')}`;
+}
+
+async function loadLegs(trip) {
+  const mode = currentMode();
+  const jobs = [];
+  for (let d = 1; d <= trip.day_count; d++) {
+    const key = legsKey(trip, d);
+    if (key.split(':')[2].split(',').filter(Boolean).length < 2) continue;
+    const fill = (data) => fillLegs(trip, d, data, mode);
+    if (S.legs[key]) { fill(S.legs[key]); continue; }
+    jobs.push(api(`/v1/trips/${trip.id}/days/${d}/legs`).then((data) => { S.legs[key] = data; fill(data); })
+      .catch(() => document.querySelectorAll(`.leg[data-day="${d}"]`).forEach((el) => { el.innerHTML = '<span class="s">Travel time unavailable</span>'; })));
+  }
+  await Promise.all(jobs);
+}
+
+function fillLegs(trip, day, data, mode) {
+  const byPair = new Map(data.legs.map((l) => [`${l.from_place_id}>${l.to_place_id}`, l]));
+  let total = 0;
+  let anyEstimate = false;
+  document.querySelectorAll(`.leg[data-day="${day}"]`).forEach((el) => {
+    const leg = byPair.get(`${el.dataset.from}>${el.dataset.to}`);
+    const from = tripPlace(trip, el.dataset.from);
+    const to = tripPlace(trip, el.dataset.to);
+    el.innerHTML = legHtml(leg, from, to, mode);
+    const picked = pickTime(leg && leg.times, mode);
+    if (picked) { total += picked.time.duration_s; anyEstimate = anyEstimate || picked.time.estimated; }
+  });
+  const totalEl = document.querySelector(`.daytravel[data-day="${day}"]`);
+  if (totalEl && total) totalEl.textContent = `${anyEstimate ? '≈ ' : ''}${fmtDuration(total)} travel`;
+  const note = document.getElementById('travel-note');
+  if (note) note.hidden = data.provider !== 'estimate';
+}
+
+function hereTimes(placeId) {
+  return S.here && S.here.times[placeId];
+}
+
+async function locateMe(places) {
+  if (!navigator.geolocation) throw new ApiError('This browser can’t share your location.', 0);
+  const pos = await new Promise((resolve, reject) => navigator.geolocation.getCurrentPosition(resolve, reject, {
+    enableHighAccuracy: false, timeout: 15000, maximumAge: 5 * 60 * 1000,
+  })).catch((e) => {
+    throw new ApiError(e.code === 1
+      ? 'Location access is off. Allow it for TripIt in Settings → Privacy & Security → Location Services → Safari Websites.'
+      : 'Couldn’t get your location. Try again outside or with Wi-Fi on.', 0);
+  });
+  const ids = places.filter(located).map((p) => p.id).slice(0, 50);
+  if (!ids.length) throw new ApiError('None of these places are on the map yet.', 0);
+  const res = await api('/v1/routes/from', { method: 'POST', body: { latitude: pos.coords.latitude, longitude: pos.coords.longitude, place_ids: ids } });
+  const times = { ...(S.here ? S.here.times : {}) };
+  res.legs.forEach((l) => { times[l.to_place_id] = l.times; });
+  S.here = { at: Date.now(), provider: res.provider, coords: { latitude: pos.coords.latitude, longitude: pos.coords.longitude }, times };
+}
+
+function hereChip(p) {
+  const picked = pickTime(hereTimes(p.id), currentMode());
+  if (!picked) return '';
+  return `<span class="herechip">${ICON[picked.mode]}${picked.time.estimated ? '≈ ' : ''}${fmtDuration(picked.time.duration_s)} from you</span>`;
+}
+
+function hoursLine(p) {
+  const st = openStatus(p.opening_hours);
+  return st ? `<span class="s hours-${st.state}">${esc(st.label)}</span>` : '';
+}
+
+function dayIndexFor(trip, day) {
+  if (!trip.start_date) return null;
+  const d = new Date(`${trip.start_date}T12:00:00`);
+  if (Number.isNaN(d.getTime())) return null;
+  d.setDate(d.getDate() + day - 1);
+  return mondayIndex(d);
+}
+
 // ---------- Views ----------
 
 const VIEWS = {
@@ -213,7 +347,7 @@ const VIEWS = {
     const head = `${navbar(trip.name, { back: '#/', backLabel: 'Trips', right })}${seg}`;
 
     if (mode === 'places') return head + placesList(trip);
-    if (mode === 'itinerary') return head + itinerary(trip);
+    if (mode === 'itinerary') return { html: head + itinerary(trip), after: () => loadLegs(trip) };
 
     const day = S.mapDay[trip.id] || 0;
     const shown = day ? stops(trip, day) : trip.places;
@@ -275,6 +409,9 @@ const VIEWS = {
         <a class="row" href="${esc(links.appleDir)}" target="_blank" rel="noopener"><span class="main"><span class="t link">Directions in Apple Maps</span></span></a>
         <a class="row" href="${esc(links.googleDir)}" target="_blank" rel="noopener"><span class="main"><span class="t link">Directions in Google Maps</span></span></a>
       </div></div>
+
+      ${hoursSection(p)}
+      ${gettingThere(p)}
 
       ${(p.recommended_items.length || p.tips || p.price_hint) ? `<div class="section"><div class="section-h">From the reel</div><div class="group">
         ${p.recommended_items.map((i) => `<div class="row"><span class="reelitem">${ICON.star}<span>${esc(i)}</span></span></div>`).join('')}
@@ -368,6 +505,7 @@ const VIEWS = {
       <div class="section"><div class="section-h">Server</div><div class="group">
         <div class="row"><span class="main"><span class="s">Address</span><span class="t">${esc(origin)}</span></span></div>
         <div class="row"><span class="main"><span class="t">Finding places on the map</span></span><span class="val">${esc(geocoder)}</span></div>
+        <div class="row"><span class="main"><span class="t">Travel times</span></span><span class="val">${S.config.routing === 'google' ? 'Google Routes' : 'Estimated'}</span></div>
         <div class="row"><span class="main"><span class="t">Maps in the app</span></span><span class="val">${mapProvider() === 'google' ? 'Google Maps' : 'OpenStreetMap'}</span></div>
         ${key ? '<button class="row destructive" data-act="signout">Sign out on this device</button>' : ''}
       </div></div>`;
@@ -390,6 +528,39 @@ const VIEWS = {
     return '';
   },
 };
+
+function hoursSection(p) {
+  const h = p.opening_hours;
+  if (!h || !h.text || !h.text.length) {
+    return '<div class="section"><div class="section-h">Hours</div><div class="group"><div class="row"><span class="s">No opening hours found for this place. Check Google Maps before you go.</span></div></div></div>';
+  }
+  const st = openStatus(h);
+  const today = mondayIndex(new Date());
+  const lines = h.weekly && h.text.length === 7 ? h.text : h.text;
+  return `<div class="section"><div class="section-h">Hours</div><div class="group">
+    ${st ? `<div class="row"><span class="main"><span class="t hours-${st.state}" style="font-weight:600">${esc(st.label)}</span><span class="s">By this device’s clock</span></span></div>` : ''}
+    <div class="row"><span class="main hourlist">${lines.map((line, i) => `<span class="${h.weekly && i === today ? 'today' : ''}">${esc(line)}</span>`).join('')}</span></div>
+  </div><div class="section-f">From ${h.source === 'google' ? 'Google' : 'OpenStreetMap'}. Hours change, so check before you go.</div></div>`;
+}
+
+function gettingThere(p) {
+  if (!located(p)) return '';
+  const times = hereTimes(p.id);
+  if (!times) {
+    return `<div class="section"><div class="section-h">Getting there</div><div class="group">
+      <button class="row" data-act="herePlace" data-id="${p.id}">${ICON.locate.replace('<svg', '<svg width="20" height="20" style="color:var(--accent)"')}<span class="main"><span class="t link">Travel times from my location</span></span></button></div></div>`;
+  }
+  const rows = MODES.map(([m, label, , apple]) => {
+    const t = times[m];
+    const value = t ? `${t.estimated ? '≈ ' : ''}${fmtDuration(t.duration_s)} · ${fmtDistance(t.distance_m)}` : (m === 'transit' ? 'Walk instead' : 'No route');
+    const links = `<a class="leg-dir" href="${esc(directionsUrl(S.here.coords, p, m))}" target="_blank" rel="noopener">Google</a>${apple ? ` <a class="leg-dir" href="https://maps.apple.com/?saddr=${S.here.coords.latitude},${S.here.coords.longitude}&daddr=${p.latitude},${p.longitude}&dirflg=${apple}" target="_blank" rel="noopener">Apple</a>` : ''}`;
+    return `<div class="row"><span style="color:var(--secondary);width:22px">${ICON[m]}</span><span class="main"><span class="t" style="font-size:16px">${label}</span><span class="s">${value}</span></span>${links}</div>`;
+  }).join('');
+  const est = Object.values(times).some((t) => t && t.estimated);
+  return `<div class="section"><div class="section-h">Getting there</div><div class="group">${rows}
+    <button class="row" data-act="herePlace" data-id="${p.id}"><span class="main"><span class="t link" style="font-size:15px">Update from my location</span></span></button></div>
+    ${est ? '<div class="section-f">Estimates from distance; Directions shows the real route.</div>' : ''}</div>`;
+}
 
 function placesList(trip) {
   if (!trip.places.length) return `<div class="empty">${ICON.pinslash}<h3>No places</h3><p>Places you save from reels appear here.</p></div>`;
@@ -415,22 +586,40 @@ function itinerary(trip) {
     <span style="display:flex;gap:4px"><button class="navbtn" data-act="plan" data-id="${trip.id}">Re-plan</button>
     <button class="navbtn bold" data-act="editday">${S.editDay ? 'Done' : 'Edit'}</button></span></div>`;
   if (trip.plan_notes) html += `<div class="section"><div class="group"><div class="para" style="border:0">${esc(trip.plan_notes)}</div></div></div>`;
+  const mode = currentMode();
+  html += `<div class="section modebar" role="group" aria-label="Travel mode">
+    ${MODES.map(([m, label]) => `<button class="modechip ${m === mode ? 'on' : ''}" data-act="mode" data-mode="${m}" aria-pressed="${m === mode}">${ICON[m]}${label}</button>`).join('')}
+    <button class="modechip locate ${S.here ? 'on' : ''}" data-act="fromhere" data-id="${trip.id}">${ICON.locate}${S.here ? 'Update' : 'From me'}</button></div>`;
   for (let d = 1; d <= trip.day_count; d++) {
     const list = stops(trip, d);
     const date = dayDate(trip.start_date, d);
-    html += `<div class="section"><div class="dayhead"><div class="d">Day ${d}${date ? `<span>${date}</span>` : ''}</div>
+    const dayIdx = dayIndexFor(trip, d);
+    const locatedList = list.filter(located);
+    html += `<div class="section"><div class="dayhead"><div class="d">Day ${d}${date ? `<span>${date}</span>` : ''}<span class="daytravel" data-day="${d}"></span></div>
       <div class="dt">${esc(trip.day_titles[d - 1] || `Day ${d}`)}</div></div>
       <div class="group">${list.map((p, i) => {
+        const conflict = slotConflict(p.opening_hours, dayIdx, p.time_of_day);
+        const todays = dayIdx != null ? dayHours(p.opening_hours, dayIdx) : null;
         const inner = `<span class="tod" style="${cvar(p.category)}"><i></i><span>${cap(p.time_of_day || '')}</span></span>
           <span class="main"><span class="t ${p.visited ? 'strike' : ''}">${esc(p.name)}${isNew(p)}</span>
           <span class="s">${CATS[p.category]}${p.neighborhood ? ` · ${esc(p.neighborhood)}` : ''}</span>
-          ${p.day_note ? `<span class="daynote">${esc(p.day_note)}</span>` : ''}</span>`;
-        return S.editDay
+          ${todays && !conflict ? `<span class="s">${ICON.clock.replace('<svg', '<svg width="12" height="12" style="display:inline;vertical-align:-1px;margin-right:3px"')}${esc(todays)}</span>` : ''}
+          ${conflict ? `<span class="warnline">${ICON.warn}${esc(conflict)}${todays && todays !== 'Closed' ? ` (${esc(todays)})` : ''}</span>` : ''}
+          ${p.day_note ? `<span class="daynote">${esc(p.day_note)}</span>` : ''}
+          ${hereChip(p)}</span>`;
+        const next = locatedList[locatedList.indexOf(p) + 1];
+        const legRow = located(p) && next && !S.editDay
+          ? `<div class="leg" data-day="${d}" data-from="${p.id}" data-to="${next.id}"><span class="spinner" style="width:14px;height:14px"></span></div>` : '';
+        return (S.editDay
           ? `<div class="row">${inner}<span class="movers">
               <button class="mover" data-act="move" data-trip="${trip.id}" data-day="${d}" data-id="${p.id}" data-dir="-1" aria-label="Move ${esc(p.name)} up" ${i === 0 ? 'disabled' : ''}>${ICON.up}</button>
               <button class="mover" data-act="move" data-trip="${trip.id}" data-day="${d}" data-id="${p.id}" data-dir="1" aria-label="Move ${esc(p.name)} down" ${i === list.length - 1 ? 'disabled' : ''}>${ICON.down}</button></span></div>`
-          : `<a class="row" href="#/place/${p.id}">${inner}${ICON.chev}</a>`;
+          : `<a class="row" href="#/place/${p.id}">${inner}${ICON.chev}</a>`) + legRow;
       }).join('') || '<div class="row"><span class="s">Nothing planned. Move places here from their page.</span></div>'}</div></div>`;
+  }
+  html += `<div class="section" id="travel-note" hidden><div class="section-f">${ICON.info || ''}Travel times are estimates from distance. Real routes and transit times need a Google key with the Routes API (see the README).</div></div>`;
+  if (!trip.start_date && trip.places.some((p) => p.opening_hours && p.opening_hours.weekly)) {
+    html += '<div class="section"><div class="section-f">Set a start date when you re-plan to check each stop is open on the day it’s scheduled.</div></div>';
   }
   const un = trip.places.filter((p) => p.day_number == null);
   if (un.length) html += `<div class="section"><div class="section-h">Not scheduled</div><div class="group">${un.map(placeRow).join('')}</div></div>`;
@@ -675,6 +864,12 @@ async function onAction(act, el) {
       const actions = [
         { label: t.day_count ? 'Re-plan trip' : 'Plan my trip', run: () => planSheet(t) },
         { label: 'Rename', run: () => renameSheet(t) },
+        { label: 'Update opening hours', run: async () => {
+          toast('Looking up opening hours…');
+          S.trip[t.id] = await api(`/v1/trips/${t.id}/refresh-details`, { method: 'POST' });
+          toast('Opening hours updated');
+          render();
+        } },
       ];
       if (t.day_count) actions.push({ label: 'Clear itinerary', destructive: true, run: async () => { S.trip[t.id] = await api(`/v1/trips/${t.id}/plan`, { method: 'DELETE' }); render(); } });
       actions.push({ label: 'Delete trip', destructive: true, run: () => openSheet({
@@ -696,6 +891,31 @@ async function onAction(act, el) {
       if (j < 0 || j >= ids.length) return;
       [ids[i], ids[j]] = [ids[j], ids[i]];
       S.trip[t.id] = await api(`/v1/trips/${t.id}/days/${day}/order`, { method: 'POST', body: { place_ids: ids } });
+      render();
+      return;
+    }
+    case 'mode': setTravelMode(el.dataset.mode); render(); return;
+    case 'fromhere': {
+      const t = S.trip[el.dataset.id];
+      el.innerHTML = '<span class="spinner" style="width:14px;height:14px"></span>Locating…';
+      try {
+        await locateMe(t.places);
+        toast('Travel times from your location added');
+      } finally {
+        render();
+      }
+      return;
+    }
+    case 'herePlace': {
+      const place = Object.values(S.trip).flatMap((t) => t.places).find((x) => x.id === el.dataset.id);
+      el.querySelector('.t').textContent = 'Locating…';
+      try { await locateMe([place]); } finally { render(); }
+      return;
+    }
+    case 'refreshhours': {
+      toast('Looking up opening hours…');
+      S.trip[el.dataset.id] = await api(`/v1/trips/${el.dataset.id}/refresh-details`, { method: 'POST' });
+      toast('Opening hours updated');
       render();
       return;
     }

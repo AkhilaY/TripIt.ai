@@ -1,11 +1,13 @@
 """Turns Claude's extraction into saved trips and places, and applies itineraries."""
 
 import logging
-from datetime import date
+import math
+from datetime import date, datetime, timezone
 from typing import Callable, Optional
 
 from .db import Database, normalize
 from .geocode import Geocoder
+from .hours import summary as hours_summary
 from .llm import ClaudeError, ClaudeService
 from .models import (
     ExtractedPlace,
@@ -84,8 +86,31 @@ class Library:
             address=place.address or match.address,
             maps_url=match.maps_url,
             resolved_name=match.name if normalize(match.name) != normalize(place.name) else None,
+            opening_hours=match.hours,
+            hours_checked_at=datetime.now(timezone.utc),
         )
         return True
+
+    async def refresh_details(self, trip_id: str, limit: int = 30) -> int:
+        """Looks up opening hours (and a pin, if missing) for places that haven't been checked yet.
+        Keeps the current pin when the new match is somewhere else (> 300 m away)."""
+        updated = 0
+        for place in self.db.list_places(trip_id):
+            if updated >= limit:
+                break
+            if place.hours_checked_at is not None and place.latitude is not None:
+                continue  # already looked up; "Find" on the place page re-runs it on demand
+            match = await self.geocoder.locate(place.name, place.neighborhood, place.city, place.country)
+            if not match:
+                self.db.update_place(place.id, hours_checked_at=datetime.now(timezone.utc))
+                continue
+            if place.latitude is None:
+                await self.locate(place)
+            elif _meters(place.latitude, place.longitude, match.latitude, match.longitude) <= 300:
+                self.db.update_place(place.id, opening_hours=match.hours, hours_checked_at=datetime.now(timezone.utc),
+                                     maps_url=place.maps_url or match.maps_url)
+            updated += 1
+        return updated
 
     def _merge(self, place: Place, extracted: ExtractedPlace) -> None:
         items = place.recommended_items + [i for i in extracted.recommended_items if i not in place.recommended_items]
@@ -118,7 +143,8 @@ class Library:
                 preferences=preferences,
                 places=[
                     PlanPlace(id=p.id, name=p.name, category=p.category, latitude=p.latitude,
-                              longitude=p.longitude, neighborhood=p.neighborhood, notes=p.summary[:300] or None)
+                              longitude=p.longitude, neighborhood=p.neighborhood, notes=p.summary[:300] or None,
+                              opening_hours=hours_summary(p.opening_hours))
                     for p in places
                 ],
             )
@@ -171,3 +197,10 @@ class Library:
         on_day = {p.id for p in self.db.list_places(trip_id) if p.day_number == day}
         for order, place_id in enumerate(pid for pid in place_ids if pid in on_day):
             self.db.update_place(place_id, day_order=order)
+
+
+def _meters(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    dlat = math.radians(lat2 - lat1)
+    dlon = math.radians(lon2 - lon1)
+    a = math.sin(dlat / 2) ** 2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2) ** 2
+    return 6_371_000 * 2 * math.asin(math.sqrt(a))

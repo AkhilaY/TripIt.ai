@@ -87,6 +87,8 @@ On Android, install the app from Chrome's menu (**Install app**). TripIt then ap
 - **Trips:** places are grouped into one trip per city. Reels about the same city add to the same trip, and duplicates are merged.
 - **Places:** places are listed by category with what to order and tips from the reel. A place that couldn't be found on the map has an orange dot; open it and tap **Find** to search again.
 - **Itinerary:** **Plan my trip** asks Claude to group places by neighborhood and time of day. If Claude can't be reached, an offline planner groups nearby places instead. Tap **Edit** to reorder stops, or move a place to another day from its page.
+- **Travel times:** in the itinerary, pick **Walk**, **Transit**, **Drive** or **Bike** to see how long each hop takes, with a day total and a **Directions** link for each leg. Tap **From me** to add travel times from where you are; it asks for location permission the first time. A place's page also shows every mode from your location.
+- **Opening hours:** each place shows whether it's open now and its weekly hours. With a start date, the itinerary shows that day's hours and warns when a stop is closed or not open at its planned time (e.g. "Closed on Mondays"). Claude also takes hours into account when planning. Use **••• → Update opening hours** to look them up for places saved earlier.
 - **Map:** pins are colored by category. Filter by day to see that day's route in order.
 - **Open in Maps:** each place has buttons for Apple Maps and Google Maps, plus directions. **Share** on a trip sends the list with Google Maps links.
 
@@ -110,7 +112,7 @@ Instagram blocks most anonymous downloads. Export cookies for instagram.com from
 |---|---|---|
 | `ANTHROPIC_API_KEY` | – | Required |
 | `APP_API_KEY` | – | Shared secret for the web app and Shortcut. Leave empty only on your own computer |
-| `GOOGLE_MAPS_API_KEY` | – | Optional. Better matches for restaurants and shops; enable "Places API (New)" |
+| `GOOGLE_MAPS_API_KEY` | – | Optional, server-side. Enable "Places API (New)" for map search and hours, and "Routes API" for travel times |
 | `GOOGLE_MAPS_BROWSER_KEY` | – | Optional. Shows Google Maps inside the app instead of OpenStreetMap (see below) |
 | `NOMINATIM_EMAIL` | – | Contact email for OpenStreetMap's geocoder (requested by its usage policy) |
 | `DATABASE_PATH` | `data/tripit.db` (`/data/tripit.db` in Docker) | SQLite file |
@@ -134,6 +136,15 @@ Without a key, the app's maps use free OpenStreetMap tiles. To use Google Maps i
 If Google rejects the key, the app falls back to OpenStreetMap and shows a message. **Settings → Maps in the app** shows which one is active.
 
 For better map search on restaurants and shops too, enable **Places API (New)** and put a *second* key (no website restriction, API-restricted to Places API (New)) in `GOOGLE_MAPS_API_KEY`. That one stays on the server.
+
+### Real travel times and better opening hours (optional)
+
+Without Google, travel times are estimates from distance (marked "≈"), there are no transit times for short hops, and opening hours come from OpenStreetMap where it has them. For real routes, transit and fuller hours, use a server-side Google key in `GOOGLE_MAPS_API_KEY` with these APIs enabled in Google Cloud:
+
+- **Routes API**: walking, transit, driving and cycling times. Results are cached for days to keep requests low.
+- **Places API (New)**: map search plus opening hours. Asking for hours puts searches in Google's "Enterprise" tier, which has a smaller free monthly allowance.
+
+Restrict this key by API (Routes API and Places API (New)), not by website, because it's used from the server. If Google refuses the key, TripIt falls back to estimates automatically. **Settings → Travel times** shows which one is active.
 
 ### Costs
 

@@ -85,15 +85,29 @@ CREATE TABLE IF NOT EXISTS jobs (
     added_places INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS jobs_url ON jobs(url);
+
+CREATE TABLE IF NOT EXISTS route_cache (
+    key TEXT PRIMARY KEY,
+    duration_s INTEGER,
+    distance_m INTEGER,
+    provider TEXT NOT NULL,
+    fetched_at TEXT NOT NULL
+);
 """
+
+# Columns added after the first release; created on existing databases at startup.
+MIGRATIONS = {
+    "places": [("opening_hours", "TEXT"), ("hours_checked_at", "TEXT")],
+}
 
 PLACE_COLUMNS = (
     "trip_id", "reel_id", "name", "category", "summary", "recommended_items", "price_hint", "tips",
     "user_notes", "confidence", "visited", "neighborhood", "address", "city", "country", "latitude",
     "longitude", "maps_url", "resolved_name", "day_number", "day_order", "time_of_day", "day_note",
+    "opening_hours", "hours_checked_at",
 )
 TRIP_COLUMNS = ("name", "city", "country", "start_date", "day_count", "day_titles", "plan_notes", "planned_by")
-JSON_COLUMNS = {"recommended_items", "day_titles", "warnings"}
+JSON_COLUMNS = {"recommended_items", "day_titles", "warnings", "opening_hours"}
 
 
 def now() -> datetime:
@@ -106,7 +120,9 @@ def new_id() -> str:
 
 def _encode(column: str, value: Any) -> Any:
     if column in JSON_COLUMNS:
-        return json.dumps(value)
+        if value is None and column == "opening_hours":
+            return None
+        return json.dumps(value.model_dump() if hasattr(value, "model_dump") else value)
     if isinstance(value, bool):
         return int(value)
     if isinstance(value, (datetime, date)):
@@ -128,6 +144,14 @@ class Database:
             if path != ":memory:":
                 self._conn.execute("PRAGMA journal_mode = WAL")
             self._conn.executescript(SCHEMA)
+            self._migrate()
+
+    def _migrate(self) -> None:
+        for table, columns in MIGRATIONS.items():
+            existing = {row["name"] for row in self._conn.execute(f"PRAGMA table_info({table})")}
+            for name, sql_type in columns:
+                if name not in existing:
+                    self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {sql_type}")
 
     def _exec(self, sql: str, params: Iterable[Any] = ()) -> sqlite3.Cursor:
         with self._lock:
@@ -251,6 +275,7 @@ class Database:
         data = dict(row)
         data["recommended_items"] = json.loads(data["recommended_items"])
         data["visited"] = bool(data["visited"])
+        data["opening_hours"] = json.loads(data["opening_hours"]) if data.get("opening_hours") else None
         return Place(**data)
 
     # ---------- Reels ----------
@@ -359,6 +384,24 @@ class Database:
             trip_id=row["trip_id"],
             added_places=row["added_places"],
         )
+
+
+# ---------- Route cache ----------
+
+
+def cache_get(db: "Database", key: str, max_age_s: int) -> Optional[sqlite3.Row]:
+    rows = db._rows("SELECT * FROM route_cache WHERE key = ?", (key,))
+    if not rows:
+        return None
+    age = (now() - datetime.fromisoformat(rows[0]["fetched_at"])).total_seconds()
+    return rows[0] if age <= max_age_s else None
+
+
+def cache_put(db: "Database", key: str, duration_s: Optional[int], distance_m: Optional[int], provider: str) -> None:
+    db._exec(
+        "INSERT OR REPLACE INTO route_cache (key, duration_s, distance_m, provider, fetched_at) VALUES (?, ?, ?, ?, ?)",
+        (key, duration_s, distance_m, provider, now().isoformat()),
+    )
 
 
 def normalize(text: str) -> str:

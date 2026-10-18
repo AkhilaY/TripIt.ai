@@ -34,6 +34,12 @@ export const ICON = {
   down: sv(P('M6 9l6 6 6-6'), 'stroke-width="2.6"'),
   sparkle: sv(P('M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8zM19 16l.8 2.2L22 19l-2.2.8L19 22l-.8-2.2L16 19l2.2-.8z')),
   link: sv(P('M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1')),
+  walk: sv('<circle cx="13" cy="4.5" r="1.8"/>' + P('M10 21l2-6-2.5-3 1.5-4.5 4 3.5 3 1M8.5 12l2-4.5')),
+  transit: sv(P('M6 4h12a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zM4 11h16M8 17l-2 4M16 17l2 4') + '<circle cx="8" cy="14" r=".8" fill="currentColor"/><circle cx="16" cy="14" r=".8" fill="currentColor"/>'),
+  drive: sv(P('M5 13l1.6-4.8A2 2 0 0 1 8.5 7h7a2 2 0 0 1 1.9 1.2L19 13M4 13h16v5H4zM6 18v2M18 18v2') + '<circle cx="7.5" cy="15.5" r=".8" fill="currentColor"/><circle cx="16.5" cy="15.5" r=".8" fill="currentColor"/>'),
+  bike: sv('<circle cx="6" cy="16" r="3.5"/><circle cx="18" cy="16" r="3.5"/>' + P('M6 16l4-8h5l3 8M10 8l2.5 8H6M14 5h2')),
+  locate: sv(P('M12 2v3M12 19v3M2 12h3M19 12h3') + '<circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2" fill="currentColor"/>'),
+  clock: sv('<circle cx="12" cy="12" r="9.5"/>' + P('M12 7v5l3 2')),
   pinslash: sv(P('M12 21s-7-6.2-7-11.5c0-1.3.4-2.6 1-3.6M9 3.6A7 7 0 0 1 19 9.5c0 2-1 4-2.3 5.8M3 3l18 18')),
 };
 

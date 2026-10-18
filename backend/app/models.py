@@ -19,6 +19,18 @@ class PlaceCategory(str, Enum):
     other = "other"
 
 
+class TimeRange(BaseModel):
+    open: str  # "HH:MM", local time at the place
+    close: str  # "HH:MM"; earlier than open means after midnight; "24:00" = midnight
+
+
+class OpeningHours(BaseModel):
+    weekly: Optional[list[list[TimeRange]]] = None  # 7 lists, Monday first; None if not machine-readable
+    text: list[str] = []
+    source: str = ""
+    raw: Optional[str] = None
+
+
 # ---------- Claude extraction output ----------
 
 
@@ -101,6 +113,7 @@ class PlanPlace(BaseModel):
     longitude: Optional[float] = None
     neighborhood: Optional[str] = None
     notes: Optional[str] = None
+    opening_hours: Optional[str] = None
 
 
 class PlanRequest(BaseModel):
@@ -167,6 +180,8 @@ class Place(BaseModel):
     day_order: int = 0
     time_of_day: Optional[TimeOfDay] = None
     day_note: Optional[str] = None
+    opening_hours: Optional[OpeningHours] = None
+    hours_checked_at: Optional[datetime] = None
     created_at: datetime
 
 
@@ -234,3 +249,46 @@ class ReorderRequest(BaseModel):
 class LocateRequest(BaseModel):
     # Optional better search text, e.g. "Joe's Pizza Carmine St".
     query: Optional[str] = Field(default=None, max_length=300)
+
+
+# ---------- Travel times ----------
+
+
+class TravelMode(str, Enum):
+    walk = "walk"
+    transit = "transit"
+    drive = "drive"
+    bike = "bike"
+
+
+class TravelTime(BaseModel):
+    duration_s: int
+    distance_m: int
+    # True when computed from straight-line distance instead of a real route.
+    estimated: bool = False
+
+
+class Leg(BaseModel):
+    from_place_id: Optional[str] = None  # None = your current location
+    to_place_id: str
+    times: dict[TravelMode, Optional[TravelTime]]
+
+
+class DayLegs(BaseModel):
+    day: int
+    provider: str  # "google" or "estimate"
+    legs: list[Leg]
+
+
+class Coordinates(BaseModel):
+    latitude: float = Field(ge=-90, le=90)
+    longitude: float = Field(ge=-180, le=180)
+
+
+class RoutesFromRequest(Coordinates):
+    place_ids: list[str] = Field(min_length=1, max_length=50)
+
+
+class RoutesFromResponse(BaseModel):
+    provider: str
+    legs: list[Leg]

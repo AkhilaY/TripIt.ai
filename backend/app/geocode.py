@@ -16,6 +16,8 @@ from typing import Optional, Protocol
 import httpx
 
 from .config import Settings
+from .hours import from_google, parse_osm
+from .models import OpeningHours
 
 log = logging.getLogger(__name__)
 
@@ -27,6 +29,7 @@ class GeoMatch:
     longitude: float
     address: Optional[str] = None
     maps_url: Optional[str] = None
+    hours: Optional[OpeningHours] = None
 
 
 class Geocoder(Protocol):
@@ -49,8 +52,8 @@ def _km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
 
 class GooglePlacesGeocoder:
     URL = "https://places.googleapis.com/v1/places:searchText"
-    # Pro-tier fields only, to stay in the cheaper SKU.
-    FIELDS = "places.displayName,places.formattedAddress,places.location,places.googleMapsUri"
+    # Opening hours put this request in Google's "Enterprise" Text Search tier (smaller free allowance).
+    FIELDS = "places.displayName,places.formattedAddress,places.location,places.googleMapsUri,places.regularOpeningHours"
 
     def __init__(self, api_key: str, client: Optional[httpx.AsyncClient] = None):
         self.api_key = api_key
@@ -81,6 +84,7 @@ class GooglePlacesGeocoder:
             longitude=loc["longitude"],
             address=p.get("formattedAddress"),
             maps_url=p.get("googleMapsUri"),
+            hours=from_google(p.get("regularOpeningHours")),
         )
 
 
@@ -97,7 +101,7 @@ class NominatimGeocoder:
         self._cities: dict[str, Optional[tuple[float, float]]] = {}
 
     async def _search(self, params: dict) -> list[dict]:
-        params = {"format": "jsonv2", "addressdetails": 1, "limit": 3, **params}
+        params = {"format": "jsonv2", "addressdetails": 1, "extratags": 1, "limit": 3, **params}
         if self.email:
             params["email"] = self.email
         async with self._lock:
@@ -146,6 +150,7 @@ class NominatimGeocoder:
                     latitude=lat,
                     longitude=lon,
                     address=", ".join(p for p in (street, area) if p) or result.get("display_name"),
+                    hours=parse_osm((result.get("extratags") or {}).get("opening_hours")),
                 )
         return None
 

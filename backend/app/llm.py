@@ -99,15 +99,16 @@ class ClaudeService:
         result = await self._parse(PLAN_SYSTEM, content, PlanResult)
         return _sanitize_plan(result, request)
 
-    async def _parse(self, system: str, content: list[dict], output_type: type[T]) -> T:
+    async def _parse(self, system: str, content: list[dict], output_type: type[T], effort: Optional[str] = None,
+                     messages: Optional[list[dict]] = None) -> T:
         try:
             response = await self.client.beta.messages.parse(
                 model=self.settings.claude_model,
                 max_tokens=16000,
                 system=system,
-                messages=[{"role": "user", "content": content}],
+                messages=messages or [{"role": "user", "content": content}],
                 thinking={"type": "adaptive"},
-                output_config={"effort": self.settings.claude_effort},
+                output_config={"effort": effort or self.settings.claude_effort},
                 output_format=output_type,
                 betas=[FALLBACK_BETA],
                 fallbacks="default",

@@ -84,6 +84,10 @@ On Android, install the app from Chrome's menu (**Install app**). TripIt then ap
 
 ## Using the app
 
+- **Your travel taste:** a five-question profile (pace, budget, food, interests, mornings) tailors everything below. Start it from the Trips screen or **Settings → Your travel taste**.
+- **The Edits:** Claude curates each trip's saved places into editorial lists ("The Date Night Edit", "One Perfect Afternoon in Williamsburg"), shown on the Trips screen and at the top of each trip. Without Claude, simple lists by rule (must-dos, coffee & pastry, after dark) are used instead.
+- **Concierge:** a chat tab that knows your saved places, itinerary, taste and the time of day. Ask it to plan an evening or rework a day; it proposes changes and nothing moves until you tap **Apply**.
+- **Daily briefing:** the Today view opens with a short briefing for the day: how it starts, what's closed or closing early, what to book, and a tip from your saves.
 - **Today:** when a trip has a start date and today falls inside it, Trips opens with a **Today** card. The day view shows the next stop with a big **Directions** button, whether it closes soon ("Closes in 35 min"), the travel time from the last stop, and **Done** to move on to the next one.
 - **Offline:** TripIt keeps the trips you open on your phone, with their photos, travel times and the map areas you've looked at, so it works on the subway or abroad without data. Today's trip is saved automatically; use **••• → Save for offline** before you go. Tapping **Done** without signal is saved on the phone and syncs when you're back online.
 - **Notifications:** turn on **Settings → Import notifications** to hear when a shared reel's places are saved ("3 new places saved to New York") or when it couldn't be read. On iPhone this works once TripIt is on your Home Screen (iOS 16.4 or later).
@@ -156,7 +160,7 @@ Restrict this key by API (Routes API and Places API (New)), not by website, beca
 
 ### Costs
 
-- **Claude:** with Opus and about 24 frames, a reel costs roughly 10–15¢. Planning an itinerary costs a few cents.
+- **Claude:** with Opus and about 24 frames, a reel costs roughly 10–15¢. Planning an itinerary, curating a trip's edits, a daily briefing (cached per day) or a concierge reply each cost a few cents.
 - **Hosting:** a few dollars a month on Fly.io with auto-stop.
 - **Maps:** OpenStreetMap search and map tiles are free for light personal use. Google Places has a monthly free allowance.
 
@@ -179,6 +183,10 @@ All `/v1` routes need the `X-API-Key` header when `APP_API_KEY` is set.
 | `POST/DELETE /v1/trips/{id}/share`, `GET /s/{token}` | Public read-only link to a trip (`/s/{token}/trip.ics` and `.kml` too) |
 | `POST /v1/trips/{id}/export-link?format=ics\|kml` | Short-lived download link for a calendar or Google My Maps file |
 | `POST/DELETE /v1/push/subscriptions`, `POST /v1/push/test` | Web Push notifications for finished imports |
+| `GET/PUT /v1/profile` | Your travel taste |
+| `GET /v1/edits`, `GET/POST /v1/trips/{id}/edits` | Curated edits (POST curates or refreshes them) |
+| `POST /v1/concierge` `{trip_id?, messages, local_time?}` | Concierge reply, with places to show and proposed changes |
+| `POST /v1/trips/{id}/days/{n}/briefing` `{local_date?, refresh?}` | The daily briefing |
 | `GET /share?url=…` | Share target used by Android and the simpler Shortcut variant |
 
 ## Native iOS app (optional)

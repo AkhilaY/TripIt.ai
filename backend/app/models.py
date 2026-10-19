@@ -370,3 +370,91 @@ class RoutesFromRequest(Coordinates):
 class RoutesFromResponse(BaseModel):
     provider: str
     legs: list[Leg]
+
+
+# ---------- Taste profile, curated edits, concierge, briefings ----------
+
+
+class TasteProfile(BaseModel):
+    pace: Optional[Literal["slow", "balanced", "packed"]] = None
+    budget: Optional[Literal["value", "mix", "splurge"]] = None
+    food: list[str] = Field(default=[], max_length=12)
+    interests: list[str] = Field(default=[], max_length=12)
+    mornings: Optional[Literal["early", "late"]] = None
+    notes: Optional[str] = Field(default=None, max_length=500)  # "vegetarian, travelling with a toddler"
+    updated_at: Optional[datetime] = None
+
+
+class EditEntry(BaseModel):
+    place_id: str
+    note: str = Field(description="One line, under 20 words, on why it belongs in this edit, in a polished editorial voice.")
+
+
+class CuratedEdit(BaseModel):
+    title: str = Field(description="Magazine-style title, e.g. 'The Date Night Edit' or 'One Perfect Afternoon in Soho'.")
+    dek: str = Field(description="A one-sentence standfirst under the title, like a magazine subheading.")
+    entries: list[EditEntry] = Field(description="3 to 8 saved places, in the order to read or visit them.")
+
+
+class EditsResult(BaseModel):
+    edits: list[CuratedEdit] = Field(description="3 to 6 edits.")
+
+
+class TripEdit(CuratedEdit):
+    id: str
+    cover_photo: Optional[PlacePhoto] = None
+
+
+class TripEdits(BaseModel):
+    trip_id: str
+    trip_name: str = ""
+    edits: list[TripEdit] = []
+    curated_by: Optional[str] = None  # "claude" or "offline"; None until first curated
+    created_at: Optional[datetime] = None
+    stale: bool = False  # places were added or removed since
+
+
+class ConciergeMessage(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(min_length=1, max_length=4000)
+
+
+class ConciergeRequest(BaseModel):
+    trip_id: Optional[str] = None
+    messages: list[ConciergeMessage] = Field(min_length=1, max_length=40)
+    local_time: Optional[str] = Field(default=None, max_length=40)  # the phone's clock, e.g. "2026-10-19T14:05"
+    latitude: Optional[float] = Field(default=None, ge=-90, le=90)
+    longitude: Optional[float] = Field(default=None, ge=-180, le=180)
+
+
+class ProposedAction(BaseModel):
+    type: Literal["move", "must_do", "set_time", "visited"]
+    place_id: str
+    day: Optional[int] = Field(description="For move: the day number, or 0 to take it off the plan. Otherwise null.")
+    index: Optional[int] = Field(description="For move: 0-based position within the day, or null for the end.")
+    value: Optional[bool] = Field(description="For must_do and visited: true or false. Otherwise null.")
+    time: Optional[str] = Field(description="For set_time: 'HH:MM' (24h), or '' to clear. Otherwise null.")
+    label: str = Field(description="Short description shown on the confirm button, e.g. 'Move Lucali to Day 2'.")
+
+
+class ConciergeReply(BaseModel):
+    reply: str = Field(description="Your answer: warm, polished and concise (under 120 words unless asked for more). Plain text, short paragraphs, no markdown.")
+    place_ids: list[str] = Field(description="Saved places to show as cards under the answer, most relevant first. Empty if none apply.")
+    actions: list[ProposedAction] = Field(description="Changes to propose. The traveler confirms before anything changes. Empty unless they asked for a change.")
+
+
+class BriefingRequest(BaseModel):
+    local_date: Optional[date] = None  # the phone's date; defaults to the trip day's date
+    refresh: bool = False
+
+
+class BriefingText(BaseModel):
+    headline: str = Field(description="Under 8 words, e.g. 'Slow morning, then Williamsburg'.")
+    points: list[str] = Field(description="2 to 4 short lines: how the day starts, anything closed or closing early, what to book or bring, one insider tip from the notes.")
+
+
+class DayBriefing(BriefingText):
+    trip_id: str
+    day: int
+    curated_by: str  # "claude" or "offline"
+    created_at: datetime

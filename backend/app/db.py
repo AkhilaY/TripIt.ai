@@ -102,6 +102,29 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
     created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS trip_edits (
+    trip_id TEXT PRIMARY KEY REFERENCES trips(id) ON DELETE CASCADE,
+    data TEXT NOT NULL,
+    curated_by TEXT NOT NULL,
+    signature TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS briefings (
+    trip_id TEXT NOT NULL REFERENCES trips(id) ON DELETE CASCADE,
+    day INTEGER NOT NULL,
+    on_date TEXT NOT NULL,
+    signature TEXT NOT NULL,
+    data TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (trip_id, day, on_date)
+);
+
 CREATE TABLE IF NOT EXISTS route_cache (
     key TEXT PRIMARY KEY,
     duration_s INTEGER,
@@ -386,6 +409,35 @@ class Database:
 
     def set_reel_trip(self, reel_id: str, trip_id: Optional[str]) -> None:
         self._exec("UPDATE reels SET trip_id = ? WHERE id = ?", (trip_id, reel_id))
+
+    # ---------- Settings, edits, briefings ----------
+
+    def get_setting(self, key: str) -> Optional[Any]:
+        rows = self._rows("SELECT value FROM settings WHERE key = ?", (key,))
+        return json.loads(rows[0]["value"]) if rows else None
+
+    def set_setting(self, key: str, value: Any) -> None:
+        self._exec("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (key, json.dumps(value, default=str)))
+
+    def get_edits(self, trip_id: str) -> Optional[sqlite3.Row]:
+        rows = self._rows("SELECT * FROM trip_edits WHERE trip_id = ?", (trip_id,))
+        return rows[0] if rows else None
+
+    def save_edits(self, trip_id: str, data: list[dict], curated_by: str, signature: str) -> None:
+        self._exec(
+            "INSERT OR REPLACE INTO trip_edits (trip_id, data, curated_by, signature, created_at) VALUES (?, ?, ?, ?, ?)",
+            (trip_id, json.dumps(data), curated_by, signature, now().isoformat()),
+        )
+
+    def get_briefing(self, trip_id: str, day: int, on_date: str) -> Optional[sqlite3.Row]:
+        rows = self._rows("SELECT * FROM briefings WHERE trip_id = ? AND day = ? AND on_date = ?", (trip_id, day, on_date))
+        return rows[0] if rows else None
+
+    def save_briefing(self, trip_id: str, day: int, on_date: str, signature: str, data: dict) -> None:
+        self._exec(
+            "INSERT OR REPLACE INTO briefings (trip_id, day, on_date, signature, data, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (trip_id, day, on_date, signature, json.dumps(data, default=str), now().isoformat()),
+        )
 
     # ---------- Push subscriptions ----------
 

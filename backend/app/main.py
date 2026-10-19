@@ -20,6 +20,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Res
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
+from .concierge import Curator
 from .config import Settings, get_settings
 from .db import Database
 from .exports import ExportError, ics, kml, schedule
@@ -35,7 +36,11 @@ from .models import (
     AddFromLinkRequest,
     AddPlaceRequest,
     AddPlaceResult,
+    BriefingRequest,
+    ConciergeReply,
+    ConciergeRequest,
     CreateJobRequest,
+    DayBriefing,
     DayLegs,
     RoutesFromRequest,
     RoutesFromResponse,
@@ -56,7 +61,9 @@ from .models import (
     SearchPlacesRequest,
     ShareLink,
     Trip,
+    TasteProfile,
     TripDetail,
+    TripEdits,
     TripUpdate,
 )
 from .photos import PhotoStore
@@ -82,6 +89,7 @@ def build_services(app: FastAPI, settings: Settings) -> None:
     app.state.pipeline = Pipeline(settings, app.state.store, app.state.claude, app.state.library)
     app.state.router = Router(db, settings)
     app.state.push = Push(db, Path(settings.database_path).parent / "vapid_private.pem", settings.push_contact)
+    app.state.curator = Curator(db, app.state.claude)
     app.state.pipeline.on_finished = lambda job: notify_import(app, job)
 
 
@@ -467,6 +475,70 @@ async def shared_export(token: str, fmt: str, request: Request) -> Response:
     if fmt not in ("ics", "kml"):
         raise HTTPException(status_code=404, detail="Not found")
     return _export_response(_shared_or_404(request, token), fmt)
+
+
+# ---------- Taste profile, edits, concierge, briefings ----------
+
+
+def _curator(request: Request) -> Curator:
+    return request.app.state.curator
+
+
+@app.get("/v1/profile", response_model=TasteProfile, dependencies=[Auth])
+async def get_profile(request: Request) -> TasteProfile:
+    return _curator(request).profile()
+
+
+@app.put("/v1/profile", response_model=TasteProfile, dependencies=[Auth])
+async def put_profile(body: TasteProfile, request: Request) -> TasteProfile:
+    body.food = [f.strip()[:40] for f in body.food if f.strip()]
+    body.interests = [i.strip()[:40] for i in body.interests if i.strip()]
+    return _curator(request).save_profile(body)
+
+
+@app.get("/v1/edits", response_model=list[TripEdits], dependencies=[Auth])
+async def all_edits(request: Request) -> list[TripEdits]:
+    """Curated edits across trips, for the home screen."""
+    out = []
+    for trip in _db(request).list_trips():
+        detail = _db(request).get_trip_detail(trip.id)
+        edits = _curator(request).edits(detail)
+        if edits.edits:
+            out.append(edits)
+    return out
+
+
+@app.get("/v1/trips/{trip_id}/edits", response_model=TripEdits, dependencies=[Auth])
+async def trip_edits(trip_id: str, request: Request) -> TripEdits:
+    return _curator(request).edits(_trip_or_404(request, trip_id))
+
+
+@app.post("/v1/trips/{trip_id}/edits", response_model=TripEdits, dependencies=[Auth])
+async def curate_trip(trip_id: str, request: Request) -> TripEdits:
+    """(Re)curates the trip's edits with Claude, or by simple rules if Claude is unavailable."""
+    trip = _trip_or_404(request, trip_id)
+    if len(trip.places) < 3:
+        raise HTTPException(status_code=422, detail="Save at least three places to curate edits")
+    return await _curator(request).curate(trip)
+
+
+@app.post("/v1/concierge", response_model=ConciergeReply, dependencies=[Auth])
+async def concierge(body: ConciergeRequest, request: Request) -> ConciergeReply:
+    if body.trip_id:
+        _trip_or_404(request, body.trip_id)
+    try:
+        return await _curator(request).chat(body)
+    except ClaudeError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@app.post("/v1/trips/{trip_id}/days/{day}/briefing", response_model=DayBriefing, dependencies=[Auth])
+async def day_briefing(trip_id: str, day: int, body: BriefingRequest, request: Request) -> DayBriefing:
+    trip = _trip_or_404(request, trip_id)
+    try:
+        return await _curator(request).briefing(trip, day, body.local_date, body.refresh)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
 
 
 # ---------- Notifications ----------

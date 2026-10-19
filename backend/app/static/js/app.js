@@ -91,6 +91,15 @@ const S = {
   scroll: {},
   offline: false,       // showing the copy saved on this phone
   lastNext: {},         // tripId -> place id shown as "Up next" (to animate when it changes)
+  profile: null,        // taste profile
+  edits: {},            // tripId -> curated edits
+  allEdits: null,       // edits across trips, for the home screen
+  curating: {},         // tripId -> true while edits are being curated
+  curateTried: {},      // tripId -> already auto-curated this visit
+  briefing: {},         // `${tripId}:${day}:${date}` -> daily briefing
+  chatTrip: undefined,  // trip the concierge is talking about (null = all trips)
+  chatBusy: false,
+  taste: null,          // onboarding draft: {step, p}
 };
 
 const view = $('#view');
@@ -115,6 +124,17 @@ const loadTrips = () => once('trips', async () => { S.trips = await api('/v1/tri
 const loadTrip = (id) => once(`trip:${id}`, async () => { S.trip[id] = await api(`/v1/trips/${id}`); fetchedAt[`trip:${id}`] = Date.now(); return S.trip[id]; });
 const loadPlaces = () => once('places', async () => { S.places = await api('/v1/places'); fetchedAt.places = Date.now(); return S.places; });
 const loadJobs = () => once('jobs', async () => { S.jobs = await api('/v1/jobs?limit=40'); fetchedAt.jobs = Date.now(); return S.jobs; });
+const loadProfile = () => once('profile', async () => { S.profile = await api('/v1/profile'); fetchedAt.profile = Date.now(); return S.profile; });
+const loadEdits = (id) => once(`edits:${id}`, async () => { S.edits[id] = await api(`/v1/trips/${id}/edits`); fetchedAt[`edits:${id}`] = Date.now(); return S.edits[id]; });
+const loadAllEdits = () => once('alledits', async () => { S.allEdits = await api('/v1/edits'); fetchedAt.alledits = Date.now(); return S.allEdits; });
+
+/** For extras that shouldn't hold up a screen: returns what's loaded (refreshing it quietly), or starts loading
+ * and re-renders once it arrives. */
+function background(value, key, load) {
+  if (value == null) load().then(() => render({ quiet: true })).catch(() => {});
+  else revalidate(key, load);
+  return value;
+}
 
 function cachedTrips() {
   if (!S.trips) return loadTrips();
@@ -155,13 +175,17 @@ function route() {
   if (parts[0] === 'trip' && parts[1]) return { name: 'trip', id: parts[1], mode: parts[2] || 'places', params };
   if (parts[0] === 'place' && parts[1]) return { name: 'place', id: parts[1], params };
   if (parts[0] === 'today' && parts[1]) return { name: 'today', id: parts[1], params };
-  if (['map', 'imports', 'settings', 'setup', 'add'].includes(parts[0])) return { name: parts[0], params };
+  if (parts[0] === 'edit' && parts[1] && parts[2]) return { name: 'edit', id: parts[1], editId: parts[2], params };
+  if (['map', 'imports', 'settings', 'setup', 'add', 'concierge', 'taste'].includes(parts[0])) return { name: parts[0], params };
   return { name: 'trips', params };
 }
 
-const TAB_FOR = { trips: 'trips', trip: 'trips', place: 'trips', today: 'trips', map: 'map', imports: 'imports', settings: 'settings', add: 'trips' };
-const TAB_INDEX = { trips: 0, map: 1, imports: 2, settings: 3 };
-const DEPTH = { trip: 1, today: 1, place: 2 };
+const TAB_FOR = {
+  trips: 'trips', trip: 'trips', place: 'trips', today: 'trips', edit: 'trips', map: 'map', concierge: 'concierge',
+  imports: 'imports', settings: 'settings', taste: 'settings', add: 'trips',
+};
+const TAB_INDEX = { trips: 0, map: 1, concierge: 2, imports: 3, settings: 4 };
+const DEPTH = { trip: 1, today: 1, taste: 1, edit: 2, place: 2 };
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
 let renderToken = 0;
 let lastKey = '';
@@ -186,10 +210,12 @@ const editing = () => {
 };
 
 let navigating = 0; // token of a navigation render still loading its data
+let quietPending = false; // a background refresh arrived mid-navigation; repaint once it's done
 
 async function render({ quiet = false } = {}) {
   // Background refreshes never cancel a navigation that's still loading, or a field someone is typing in.
-  if (quiet && (navigating || editing())) return;
+  if (quiet && navigating) { quietPending = true; return; }
+  if (quiet && editing()) return;
   const r = route();
   const token = ++renderToken;
   const key = location.hash;
@@ -197,7 +223,10 @@ async function render({ quiet = false } = {}) {
   try {
     await paint(r, token, key, quiet);
   } finally {
-    if (navigating === token) navigating = 0;
+    if (navigating === token) {
+      navigating = 0;
+      if (quietPending) { quietPending = false; setTimeout(() => render({ quiet: true }), 0); }
+    }
   }
 }
 
@@ -234,10 +263,11 @@ async function paint(r, token, key, quiet) {
       if (on) t.setAttribute('aria-current', 'page'); else t.removeAttribute('aria-current');
     });
     if (tab in TAB_INDEX) tabbar.style.setProperty('--i', TAB_INDEX[tab]);
-    tabbar.hidden = r.name === 'setup';
+    tabbar.hidden = r.name === 'setup' || r.name === 'taste';
     const app = $('.app');
     app.classList.toggle('fullbleed', r.name === 'map' || (r.name === 'trip' && r.mode === 'map'));
-    app.classList.toggle('notabs', r.name === 'setup');
+    app.classList.toggle('notabs', r.name === 'setup' || r.name === 'taste');
+    app.classList.toggle('chat', r.name === 'concierge');
 
     destroyMaps();
     view.innerHTML = html;
@@ -264,6 +294,7 @@ async function paint(r, token, key, quiet) {
     root.dataset.vt = kind;
     const vt = document.startViewTransition(swap);
     vt.finished.finally(() => { if (root.dataset.vt === kind) delete root.dataset.vt; });
+    await vt.updateCallbackDone.catch(() => {}); // the swap runs a frame later; stay "navigating" until it has
   } else {
     swap();
   }
@@ -630,6 +661,218 @@ async function fillNextTravel(trip, day, next, prev) {
   } catch { /* travel time is a nice-to-have */ }
 }
 
+// ---------- Taste, edits, briefings, concierge ----------
+
+const TASTE_STEPS = [
+  { key: 'pace', q: 'How do you like to travel?', single: true, options: [
+    ['slow', 'Slow & savoured', 'Fewer places, longer lunches'], ['balanced', 'Balanced', 'A rhythm of plans and wandering'],
+    ['packed', 'See it all', 'Every hour well spent']] },
+  { key: 'budget', q: 'When it comes to spending…', single: true, options: [
+    ['value', 'Hidden gems', 'Good value and local favourites'], ['mix', 'A considered mix', 'Save here, splurge there'],
+    ['splurge', 'Worth the splurge', 'The best table in town']] },
+  { key: 'food', q: 'What do you look for at the table?', options: ['Fine dining', 'Neighbourhood favourites', 'Street food',
+    'Cafés & bakeries', 'Natural wine', 'Cocktail bars', 'Seafood', 'Vegetarian-friendly'] },
+  { key: 'interests', q: 'What makes a trip for you?', options: ['Design & architecture', 'Art & museums', 'Fashion & boutiques',
+    'Views & nature', 'Wellness & spas', 'Nightlife', 'History', 'Markets'] },
+  { key: 'mornings', q: 'And your mornings?', single: true, notes: true, options: [
+    ['early', 'Early riser', 'First in line, golden light'], ['late', 'Late starts', 'Nothing before ten']] },
+];
+
+function tasteSummary(p) {
+  if (!p || !p.updated_at) return '';
+  const label = (key) => {
+    const step = TASTE_STEPS.find((x) => x.key === key);
+    const opt = step.options.find((o) => o[0] === p[key]);
+    return opt ? opt[1] : '';
+  };
+  return [label('pace'), label('budget'), ...(p.interests || []).slice(0, 2)].filter(Boolean).join(' · ');
+}
+
+function tasteInvite() {
+  const p = background(S.profile, 'profile', loadProfile);
+  let dismissed = false;
+  try { dismissed = localStorage.getItem('tripit.tasteInvite') === 'no'; } catch { /* fine */ }
+  if (!p || p.updated_at || dismissed) return '';
+  return `<div class="section"><div class="invite"><div class="eyebrow">Personalise</div><h2>Tell us how you travel</h2>
+    <p>Five quick questions, and every edit, briefing and suggestion is tailored to you.</p>
+    <div class="invite-actions"><a class="btn" href="#/taste">Begin</a><button class="linkbtn" data-act="dismissinvite">Not now</button></div></div></div>`;
+}
+
+function editCard(te, e) {
+  const cover = e.cover_photo ? `<img src="${esc(photoUrl(e.cover_photo, 640))}" alt="" loading="lazy" decoding="async" onerror="this.remove()">` : '';
+  return `<a class="editcard" href="#/edit/${te.trip_id}/${e.id}">${cover}<span class="editcard-body">
+    <span class="eyebrow">The Edit · ${esc(te.trip_name)}</span><span class="editcard-title">${esc(e.title)}</span>
+    <span class="editcard-meta">${plural(e.entries.length, 'place')}</span></span></a>`;
+}
+
+function homeEdits(tripCount) {
+  if (!tripCount) return '';
+  const all = background(S.allEdits, 'alledits', loadAllEdits);
+  if (!all || !all.length) return '';
+  const cards = all.flatMap((te) => te.edits.slice(0, 3).map((e) => editCard(te, e))).slice(0, 9);
+  return `<div class="railhead"><h2 class="section-title">The Edits</h2><span class="eyebrow">Curated for you</span></div>
+    <div class="rail">${cards.join('')}</div><div class="railhead"><h2 class="section-title">Your trips</h2></div>`;
+}
+
+function editsSection(trip) {
+  if (S.curating[trip.id]) {
+    return `<div class="railhead"><h2 class="section-title">The Edits</h2><span class="eyebrow">Curating…</span></div>
+      <div class="rail">${'<div class="editcard skeleton"></div>'.repeat(3)}</div>`;
+  }
+  const te = background(S.edits[trip.id], `edits:${trip.id}`, () => loadEdits(trip.id));
+  if (!te) return '';
+  if (!te.edits.length) {
+    if (trip.places.length < 3) return '';
+    if (trip.places.length >= 4 && !S.curateTried[trip.id] && !isOffline()) setTimeout(() => curate(trip.id, true), 0);
+    return `<div class="section"><div class="invite"><div class="eyebrow">The Edits</div><h2>Curate this trip</h2>
+      <p>Editorial lists from your saved places, tailored to your taste: date nights, slow mornings, one perfect afternoon.</p>
+      <div class="invite-actions"><button class="btn" data-act="curate" data-id="${trip.id}">Curate</button></div></div></div>`;
+  }
+  const profileNewer = S.profile && S.profile.updated_at && te.created_at && new Date(S.profile.updated_at) > new Date(te.created_at);
+  const aside = te.stale || profileNewer
+    ? `<button class="linkbtn" data-act="curate" data-id="${trip.id}">${profileNewer ? 'Refresh for your taste' : 'Refresh'}</button>`
+    : `<span class="eyebrow">${te.curated_by === 'claude' ? 'Curated for you' : 'From your saves'}</span>`;
+  return `<div class="railhead"><h2 class="section-title">The Edits</h2>${aside}</div>
+    <div class="rail">${te.edits.map((e) => editCard(te, e)).join('')}</div>`;
+}
+
+async function curate(tripId, auto = false) {
+  if (S.curating[tripId]) return;
+  S.curating[tripId] = true;
+  S.curateTried[tripId] = true;
+  render({ quiet: auto });
+  try {
+    S.edits[tripId] = await api(`/v1/trips/${tripId}/edits`, { method: 'POST' });
+    fetchedAt[`edits:${tripId}`] = Date.now();
+    S.allEdits = null;
+  } catch (e) {
+    if (!auto) toast(e.message, true);
+  } finally {
+    S.curating[tripId] = false;
+    render({ quiet: true });
+  }
+}
+
+function briefingHtml(b) {
+  return `<div class="brief-top"><span class="eyebrow">Your briefing</span>
+      <button class="brief-refresh" data-act="briefrefresh" aria-label="Refresh briefing">${ICON.sparkle}</button></div>
+    <h2 class="brief-head">${esc(b.headline)}</h2>
+    <ul class="brief-points">${b.points.map((p) => `<li>${esc(p)}</li>`).join('')}</ul>`;
+}
+
+async function loadBriefing(tripId, day, date, key, refresh = false) {
+  if (S.briefing[key] && !refresh) return;
+  try {
+    const b = await api(`/v1/trips/${tripId}/days/${day}/briefing`, { method: 'POST', body: { local_date: date, refresh } });
+    S.briefing[key] = b;
+    const el = document.getElementById('briefing');
+    if (el) el.innerHTML = briefingHtml(b);
+  } catch {
+    const el = document.getElementById('briefing');
+    if (el && !S.briefing[key]) el.closest('.section').remove();
+  }
+}
+
+const CHAT_PROMPTS = ['Plan my evening', 'Where should I eat near my next stop?', 'What’s worth booking ahead?',
+  'Make tomorrow more relaxed', 'Rainy day ideas from my saves'];
+const chatKey = (tripId) => `tripit.chat.${tripId || 'all'}`;
+function readChat(tripId) {
+  try { return JSON.parse(localStorage.getItem(chatKey(tripId))) || []; } catch { return []; }
+}
+function writeChat(tripId, msgs) {
+  try { localStorage.setItem(chatKey(tripId), JSON.stringify(msgs.slice(-40))); } catch { /* kept for this visit only */ }
+}
+function localIso() {
+  const d = new Date();
+  return `${isoDate(d)}T${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
+function chatWelcome() {
+  return `<div class="welcome"><div class="eyebrow">At your service</div>
+    <p class="welcome-text">Ask about your saved places, plan an evening, or rework a day. I suggest changes; nothing moves until you confirm.</p>
+    <div class="prompts">${CHAT_PROMPTS.map((q) => `<button class="prompt" data-act="chatprompt" data-q="${esc(q)}">${esc(q)}</button>`).join('')}</div></div>`;
+}
+
+function chatMessage(m, i, tripId) {
+  if (m.role === 'user') return `<div class="msg me"><p>${esc(m.content)}</p></div>`;
+  const trip = tripId ? S.trip[tripId] : null;
+  const paras = esc(m.content).split(/\n{2,}/).map((t) => `<p>${t.replace(/\n/g, '<br>')}</p>`).join('');
+  const places = (m.place_ids || []).map((id) => trip && tripPlace(trip, id)).filter(Boolean);
+  const cards = places.length ? `<div class="msg-places">${places.map((p) => `<a class="msg-place" href="#/place/${p.id}">${thumb(p, 44)}
+    <span class="main"><span class="t">${esc(p.name)}</span><span class="s">${esc([CATS[p.category], p.neighborhood].filter(Boolean).join(' · '))}</span></span>${ICON.chev}</a>`).join('')}</div>` : '';
+  const acts = m.actions && m.actions.length ? `<div class="proposal"><div class="eyebrow">Proposed changes</div>
+    <ul>${m.actions.map((a) => `<li>${esc(a.label)}</li>`).join('')}</ul>
+    ${m.applied ? '<span class="s">Applied to your trip</span>' : m.dismissed ? '<span class="s">Left as it was</span>'
+      : `<div class="proposal-actions"><button class="btn small" data-act="chatapply" data-index="${i}">Apply</button>
+        <button class="linkbtn" data-act="chatdismiss" data-index="${i}">Not now</button></div>`}</div>` : '';
+  return `<div class="msg ai${m.error ? ' error' : ''}"><div class="ai-name">${m.error ? 'Couldn’t answer' : 'Concierge'}</div>${paras}${cards}${acts}</div>`;
+}
+
+function renderChatLog(typing = false) {
+  const log = document.getElementById('chatlog');
+  if (!log) return;
+  const msgs = readChat(S.chatTrip);
+  log.innerHTML = (msgs.length ? msgs.map((m, i) => chatMessage(m, i, S.chatTrip)).join('') : chatWelcome())
+    + (typing ? '<div class="msg ai typing" aria-label="Concierge is typing"><span></span><span></span><span></span></div>' : '');
+  hydrateIcons(log);
+  requestAnimationFrame(() => window.scrollTo({ top: document.body.scrollHeight, behavior: reducedMotion.matches ? 'auto' : 'smooth' }));
+}
+
+async function sendChat(text) {
+  text = text.trim();
+  if (!text || S.chatBusy) return;
+  const tripId = S.chatTrip;
+  const msgs = readChat(tripId);
+  msgs.push({ role: 'user', content: text });
+  writeChat(tripId, msgs);
+  S.chatBusy = true;
+  renderChatLog(true);
+  try {
+    const coords = S.here && S.here.coords;
+    const reply = await api('/v1/concierge', { method: 'POST', body: {
+      trip_id: tripId || null, local_time: localIso(),
+      latitude: coords ? coords.latitude : null, longitude: coords ? coords.longitude : null,
+      messages: msgs.filter((m) => !m.error).slice(-20).map(({ role, content }) => ({ role, content })),
+    } });
+    msgs.push({ role: 'assistant', content: reply.reply, place_ids: reply.place_ids, actions: reply.actions });
+  } catch (e) {
+    msgs.push({ role: 'assistant', content: e.message || 'Something went wrong', error: true });
+  }
+  writeChat(tripId, msgs);
+  S.chatBusy = false;
+  renderChatLog();
+}
+
+async function applyChatActions(index) {
+  const tripId = S.chatTrip;
+  const msgs = readChat(tripId);
+  const m = msgs[index];
+  if (!m || !m.actions || m.applied || !tripId) return;
+  try {
+    for (const a of m.actions) {
+      if (a.type === 'move') await api(`/v1/trips/${tripId}/move`, { method: 'POST', body: { place_id: a.place_id, day: a.day, index: a.index ?? 999 } });
+      else if (a.type === 'must_do') await api(`/v1/places/${a.place_id}`, { method: 'PATCH', body: { must_do: a.value } });
+      else if (a.type === 'visited') await api(`/v1/places/${a.place_id}`, { method: 'PATCH', body: { visited: a.value } });
+      else if (a.type === 'set_time') await api(`/v1/places/${a.place_id}`, { method: 'PATCH', body: a.time ? { start_time: a.time } : { clear_start_time: true } });
+    }
+    m.applied = true;
+    writeChat(tripId, msgs);
+    await loadTrip(tripId);
+    fetchedAt.trips = 0;
+    toast('Your trip is updated');
+  } catch (e) {
+    toast(e.message, true);
+  }
+  renderChatLog();
+}
+
+// Keep the composer above the on-screen keyboard.
+if (window.visualViewport) {
+  const kb = () => document.documentElement.style.setProperty('--kb', `${Math.max(0, innerHeight - visualViewport.height - visualViewport.offsetTop)}px`);
+  visualViewport.addEventListener('resize', kb);
+  visualViewport.addEventListener('scroll', kb);
+}
+
 // ---------- Views ----------
 
 const addButton = `<button class="gbtn tint" data-act="add" aria-label="Add a reel">${ICON.plus}</button>`;
@@ -647,7 +890,8 @@ const VIEWS = {
     const active = activeTrip(trips);
     if (active && !S.trip[active.trip.id]) loadTrip(active.trip.id).then(() => render({ quiet: true })).catch(() => {});
     return {
-      html: `${navbar('Trips', { right: addButton })}<h1 class="largetitle" data-anchor>Trips</h1>${active ? todayCard(active) : ''}${body}`,
+      html: `${navbar('Trips', { right: addButton })}<h1 class="largetitle" data-anchor>Trips</h1>${active ? todayCard(active) : ''}
+        ${tasteInvite()}${homeEdits(trips.length)}${body}`,
       // Warm the cache so opening a trip is instant.
       after: () => setTimeout(() => trips.slice(0, 8).forEach((t) => { if (!S.trip[t.id]) loadTrip(t.id).catch(() => {}); }), 400),
     };
@@ -669,7 +913,7 @@ const VIEWS = {
       <div class="subtitle"><span>${esc(meta)}</span><span class="tiles-inline" aria-hidden="true">${cats.slice(0, 6).map((c) => catTile(c, 'sm')).join('')}</span>
         ${trip.share_token ? `<button class="chip-shared" data-act="sharetrip" data-id="${trip.id}">${ICON.link}Shared</button>` : ''}</div>${seg}`;
 
-    if (mode === 'places') return head + placesList(trip);
+    if (mode === 'places') return head + editsSection(trip) + placesList(trip);
     if (mode === 'itinerary') return { html: head + itinerary(trip), after: () => loadLegs(trip) };
 
     const day = S.mapDay[trip.id] || 0;
@@ -705,6 +949,8 @@ const VIEWS = {
     const later = list.filter((p) => !p.visited && p !== next);
     const prev = next ? [...list.slice(0, list.indexOf(next))].reverse().find(located) : null;
     const title = isToday ? 'Today' : `Day ${day}`;
+    const briefDate = isToday ? isoDate(new Date()) : null;
+    const briefKey = `${trip.id}:${day}:${briefDate || ''}`;
     const pills = trip.day_count > 1 ? `<div class="daypills" role="tablist">${Array.from({ length: trip.day_count }, (_, i) => i + 1).map((d) =>
       `<a class="daypill${d === day ? ' on' : ''}" href="#/today/${trip.id}?day=${d}" data-replace role="tab" aria-selected="${d === day}">${active && active.day === d ? 'Today' : `Day ${d}`}</a>`).join('')}</div>` : '';
     const row = (p) => {
@@ -720,12 +966,13 @@ const VIEWS = {
       ${pills}
       <div class="section"><div class="progress big" aria-label="${done.length} of ${list.length} stops done"><i style="width:${list.length ? Math.round((done.length / list.length) * 100) : 0}%"></i></div>
         <div class="section-f">${done.length} of ${plural(list.length, 'stop')} done</div></div>
+      ${list.length ? `<div class="section"><div class="briefing" id="briefing">${S.briefing[briefKey] ? briefingHtml(S.briefing[briefKey]) : '<div class="brief-skel"></div>'}</div></div>` : ''}
       ${!list.length ? emptyState('gray', 'calendar', 'Nothing planned', 'Open a place and move it to this day.')
         : next ? `<div class="section">${nextCard(trip, next, list.indexOf(next) + 1, list.length, isToday, dayIdx)}</div>`
         : `<div class="section"><div class="group donecard">${tile('green', 'done', 'lg')}<div><h3>Day complete</h3><p class="s">You visited all ${plural(list.length, 'stop')}.${day < trip.day_count ? ` Day ${day + 1} is next.` : ''}</p></div></div></div>`}
       ${later.length ? `<div class="section"><h2 class="section-title">Later${isToday ? ' today' : ''}<span class="count">${later.length}</span></h2><div class="group thumbs">${later.map(row).join('')}</div></div>` : ''}
       ${done.length ? `<div class="section"><h2 class="section-title">Done<span class="count">${done.length}</span></h2><div class="group thumbs">${done.map(row).join('')}</div></div>` : ''}`;
-    return { html, after: () => { if (next) fillNextTravel(trip, day, next, prev); } };
+    return { html, after: () => { if (next) fillNextTravel(trip, day, next, prev); if (list.length) loadBriefing(trip.id, day, briefDate, briefKey); } };
   },
 
   async place(r) {
@@ -829,6 +1076,79 @@ const VIEWS = {
     };
   },
 
+  async edit(r) {
+    const trip = await cachedTrip(r.id);
+    const te = S.edits[r.id] || await loadEdits(r.id);
+    const e = te.edits.find((x) => x.id === r.editId);
+    if (!e) throw new ApiError('This edit was refreshed. Open the trip to see the latest ones.', 404);
+    const entries = e.entries.map((en) => ({ ...en, p: tripPlace(trip, en.place_id) })).filter((en) => en.p);
+    const html = `${navbar(e.title, { back: `#/trip/${trip.id}`, backLabel: trip.name })}
+      <header class="edithead">${e.cover_photo ? `<div class="edithero"><img src="${esc(photoUrl(e.cover_photo, 1200))}" alt="" decoding="async" onerror="this.parentElement.remove()"></div>` : ''}
+        <div class="eyebrow">The Edit · ${esc(trip.name)}</div>
+        <h1 class="edittitle" data-anchor>${esc(e.title)}</h1>
+        <p class="dek">${esc(e.dek)}</p>
+        <div class="byline">${te.curated_by === 'claude' ? 'Curated for you' : 'From your saves'} · ${plural(entries.length, 'place')}</div></header>
+      <ol class="editlist">${entries.map(({ p, note }, i) => {
+        const photo = p.photos && p.photos[0] && !(e.cover_photo && p.photos[0].url === e.cover_photo.url) ? p.photos[0] : null;
+        const st = openStatus(p.opening_hours);
+        return `<li><a class="editentry" href="#/place/${p.id}">
+          ${photo ? `<span class="ee-photo"><img src="${esc(photoUrl(photo, 900))}" alt="" loading="lazy" decoding="async" onerror="this.parentElement.remove()"></span>` : ''}
+          <span class="ee-body"><span class="ee-num">${String(i + 1).padStart(2, '0')}</span>
+            <span class="eyebrow">${esc([CATS[p.category], p.neighborhood].filter(Boolean).join(' · '))}</span>
+            <span class="ee-name">${esc(p.name)}${starMark(p)}</span>
+            ${note ? `<span class="ee-note">${esc(note)}</span>` : ''}
+            ${st ? `<span class="s hours-${st.state}">${esc(st.label)}</span>` : ''}</span></a></li>`;
+      }).join('')}</ol>
+      <div class="section"><a class="btn tint wide" href="#/trip/${trip.id}/map">${ICON.map}See them on the map</a></div>`;
+    return html;
+  },
+
+  async concierge() {
+    const trips = await cachedTrips();
+    if (S.chatTrip === undefined || (S.chatTrip && !trips.some((t) => t.id === S.chatTrip))) {
+      const active = activeTrip(trips);
+      S.chatTrip = active ? active.trip.id : (trips[0] ? trips[0].id : null);
+    }
+    const tripId = S.chatTrip;
+    if (tripId && !S.trip[tripId]) loadTrip(tripId).then(() => renderChatLog()).catch(() => {});
+    const msgs = readChat(tripId);
+    const chips = trips.length ? `<div class="daypills">${[...trips.map((t) => ({ id: t.id, name: t.name })), { id: '', name: 'All trips' }].map((t) =>
+      `<button class="daypill${(t.id || null) === tripId ? ' on' : ''}" data-act="chattrip" data-id="${t.id}">${esc(t.name)}</button>`).join('')}</div>` : '';
+    return {
+      html: `${navbar('Concierge', { right: msgs.length ? `<button class="gbtn" data-act="chatnew" aria-label="New conversation">${ICON.plus}</button>` : '' })}
+        <h1 class="largetitle" data-anchor>Concierge</h1>
+        <div class="subtitle"><span>Your personal travel assistant</span></div>${chips}
+        <div class="chatlog" id="chatlog">${msgs.length ? msgs.map((m, i) => chatMessage(m, i, tripId)).join('') : chatWelcome()}</div>
+        <form class="composer" data-form="chat"><textarea id="chat-input" rows="1" placeholder="Ask your concierge…" aria-label="Message to your concierge" enterkeyhint="send"></textarea>
+          <button class="sendbtn" type="submit" aria-label="Send">${ICON.send}</button></form>`,
+      after: () => { if (msgs.length) window.scrollTo(0, document.body.scrollHeight); },
+    };
+  },
+
+  async taste() {
+    if (!S.taste) S.taste = { step: 0, dir: 1, p: { ...(S.profile || await loadProfile()) } };
+    const { step, p } = S.taste;
+    const q = TASTE_STEPS[step];
+    const last = step === TASTE_STEPS.length - 1;
+    const chosen = (v) => (q.single ? p[q.key] === v : (p[q.key] || []).includes(v));
+    const opts = q.options.map((o) => {
+      const [value, label, hint] = Array.isArray(o) ? o : [o, o, ''];
+      return `<button class="opt${chosen(value) ? ' on' : ''}" data-act="tastepick" data-value="${esc(value)}" aria-pressed="${chosen(value)}">
+        <span class="opt-label">${esc(label)}</span>${hint ? `<span class="opt-hint">${esc(hint)}</span>` : ''}</button>`;
+    }).join('');
+    return `<div class="taste">
+      <header class="tastehead"><button class="gbtn" data-act="tasteback" aria-label="Back">${ICON.back}</button>
+        <span class="eyebrow">${step + 1} of ${TASTE_STEPS.length}</span><button class="linkbtn" data-act="tastenext" data-skip="1">Skip</button></header>
+      <div class="tasteprog"><i style="width:${((step + 1) / TASTE_STEPS.length) * 100}%"></i></div>
+      <div class="tastebody enter-${S.taste.dir > 0 ? 'fwd' : 'back'}">
+        <h1 class="tasteq">${esc(q.q)}</h1><p class="s tastehint">${q.single ? 'Choose one' : 'Choose as many as you like'}</p>
+        <div class="tasteopts${q.single ? ' single' : ''}">${opts}</div>
+        ${q.notes ? `<label class="tastenotes"><span class="eyebrow">Anything else?</span>
+          <textarea id="taste-notes" rows="3" data-act="tastenotes" placeholder="Dietary needs, who you travel with, things you love or avoid">${esc(p.notes || '')}</textarea></label>` : ''}
+      </div>
+      <div class="tastefoot"><button class="btn wide" data-act="tastenext">${last ? 'Save my taste' : 'Continue'}</button></div></div>`;
+  },
+
   async map() {
     const [trips, places] = await Promise.all([cachedTrips(), cachedPlaces()]);
     if (!S.mapTrip || (S.mapTrip !== 'all' && !trips.some((t) => t.id === S.mapTrip))) S.mapTrip = trips[0] ? trips[0].id : 'all';
@@ -854,6 +1174,7 @@ const VIEWS = {
 
   async settings() {
     if (!S.config) { S.config = await api('/v1/config'); configureMaps({ googleMapsKey: S.config.google_maps_key }); }
+    if (!S.profile) await loadProfile().catch(() => {});
     const origin = location.origin;
     const key = getKey();
     const geocoder = { google: 'Google Places', openstreetmap: 'OpenStreetMap', none: 'Off' }[S.config.geocoder] || S.config.geocoder;
@@ -867,6 +1188,11 @@ const VIEWS = {
       on: 'You’ll get a notification when each shared reel’s places are saved.',
     }[push];
     return `${navbar('Settings')}<h1 class="largetitle" data-anchor>Settings</h1>
+
+      <div class="section"><div class="section-h">Personal</div><div class="group tiles">
+        <a class="row" href="#/taste">${tile('gold', 'sparkle')}<span class="main"><span class="t">Your travel taste</span>
+          <span class="s">${esc(tasteSummary(S.profile) || 'Tailors your edits, briefings and concierge')}</span></span>${ICON.chev}</a>
+      </div></div>
 
       <div class="section"><div class="section-h">Notifications</div><div class="group tiles">
         <label class="row" for="push-toggle">${tile('red', 'bell')}<span class="main"><span class="t">Import notifications</span></span>
@@ -1617,6 +1943,56 @@ async function onAction(act, el) {
     case 'sharetrip': shareMenu(S.trip[el.dataset.id]); return;
     case 'editday': S.editDay = !S.editDay; render(); return;
     case 'mode': setTravelMode(el.dataset.mode); render(); return;
+    case 'dismissinvite': try { localStorage.setItem('tripit.tasteInvite', 'no'); } catch { /* fine */ } render(); return;
+    case 'curate': await curate(el.dataset.id); return;
+    case 'briefrefresh': {
+      const r = route();
+      const trip = S.trip[r.id];
+      if (!trip) return;
+      const active = activeTrip([trip]);
+      const day = Math.min(Math.max(1, Number(r.params.get('day')) || (active ? active.day : 1)), trip.day_count);
+      const date = active && active.day === day ? isoDate(new Date()) : null;
+      el.classList.add('spinning');
+      await loadBriefing(trip.id, day, date, `${trip.id}:${day}:${date || ''}`, true);
+      return;
+    }
+    case 'chatprompt': await sendChat(el.dataset.q); return;
+    case 'chatnew': writeChat(S.chatTrip, []); render(); return;
+    case 'chattrip': S.chatTrip = el.dataset.id || null; render(); return;
+    case 'chatapply': await applyChatActions(Number(el.dataset.index)); return;
+    case 'chatdismiss': {
+      const msgs = readChat(S.chatTrip);
+      if (msgs[Number(el.dataset.index)]) msgs[Number(el.dataset.index)].dismissed = true;
+      writeChat(S.chatTrip, msgs);
+      renderChatLog();
+      return;
+    }
+    case 'tastepick': {
+      const { p, step } = S.taste;
+      const q = TASTE_STEPS[step];
+      const v = el.dataset.value;
+      if (q.single) p[q.key] = p[q.key] === v ? null : v;
+      else p[q.key] = (p[q.key] || []).includes(v) ? p[q.key].filter((x) => x !== v) : [...(p[q.key] || []), v];
+      render();
+      return;
+    }
+    case 'tasteback':
+      if (S.taste && S.taste.step > 0) { S.taste.step--; S.taste.dir = -1; render(); return; }
+      S.taste = null;
+      if (S.navigations > 0) history.back(); else go('#/settings');
+      return;
+    case 'tastenext': {
+      if (S.taste.step < TASTE_STEPS.length - 1) { S.taste.step++; S.taste.dir = 1; render(); return; }
+      const notes = $('#taste-notes');
+      if (notes) S.taste.p.notes = notes.value.trim() || null;
+      const { food, interests, pace, budget, mornings } = S.taste.p;
+      S.profile = await api('/v1/profile', { method: 'PUT', body: { food: food || [], interests: interests || [], pace, budget, mornings, notes: S.taste.p.notes } });
+      fetchedAt.profile = Date.now();
+      S.taste = null;
+      toast('Your taste is saved');
+      if (S.navigations > 0) history.back(); else go('#/');
+      return;
+    }
     case 'star': {
       const place = allPlaces().find((x) => x.id === el.dataset.id);
       await patchPlace(el.dataset.id, { must_do: !place.must_do });
@@ -1814,12 +2190,22 @@ document.addEventListener('input', (ev) => {
   const el = ev.target;
   if (el.dataset && ['notes', 'prefs'].includes(el.dataset.act)) onAction(el.dataset.act, el);
   if (el.dataset && el.dataset.act === 'addinput') addInputChanged(el.value);
+  if (el.dataset && el.dataset.act === 'tastenotes' && S.taste) S.taste.p.notes = el.value;
+  if (el.id === 'chat-input') { el.style.height = 'auto'; el.style.height = `${Math.min(el.scrollHeight, 140)}px`; }
 });
 
 document.addEventListener('submit', async (ev) => {
   const form = ev.target.closest('[data-form]');
   if (!form) return;
   ev.preventDefault();
+  if (form.dataset.form === 'chat') {
+    const input = $('#chat-input');
+    const text = input.value;
+    input.value = '';
+    input.style.height = 'auto';
+    await sendChat(text);
+    return;
+  }
   if (form.dataset.form === 'locate') {
     await locate(form.dataset.id, new FormData(form).get('q'));
   } else if (form.dataset.form === 'setkey') {
@@ -1837,6 +2223,11 @@ document.addEventListener('submit', async (ev) => {
 });
 
 document.addEventListener('keydown', (ev) => {
+  if (ev.key === 'Enter' && !ev.shiftKey && !ev.isComposing && ev.target.id === 'chat-input') {
+    ev.preventDefault();
+    ev.target.form.requestSubmit();
+    return;
+  }
   if (ev.key === 'Escape' && S.sheet) closeSheet();
   if (S.sheet && S.sheet.type === 'photos' && (ev.key === 'ArrowRight' || ev.key === 'ArrowLeft')) {
     const n = S.sheet.place.photos.length;

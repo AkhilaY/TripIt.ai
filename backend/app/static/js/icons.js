@@ -1,6 +1,6 @@
 // Simplified SF Symbols-style icons.
 const sv = (d, extra = '') =>
-  `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" ${extra}>${d}</svg>`;
+  `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" ${extra}>${d}</svg>`;
 const P = (d) => `<path d="${d}"/>`;
 
 export const ICON = {
@@ -54,6 +54,9 @@ export const ICON = {
   tag: sv(P('M3 12V4h8l10 10-8 8z') + '<circle cx="7.5" cy="8.5" r="1.3"/>'),
   signout: sv(P('M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 16l-4-4 4-4M6 12h10')),
   route: sv('<circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="6" r="2.5"/>' + P('M8.5 18H16a3 3 0 0 0 0-6H8a3 3 0 0 1 0-6h7.5')),
+  concierge: sv(P('M3.5 18.5h17M5 18.5a7 7 0 0 1 14 0M12 9.5V7.5M10 7.5h4')),
+  send: sv(P('M12 19V5M6 11l6-6 6 6'), 'stroke-width="2"'),
+  book: sv(P('M5 4.5h10a3 3 0 0 1 3 3v12H8a3 3 0 0 1-3-3zM5 16.5a3 3 0 0 1 3-3h10')),
   bell: sv(P('M6 9a6 6 0 0 1 12 0c0 6 2.5 8 2.5 8h-17S6 15 6 9zM10 20.5a2.2 2.2 0 0 0 4 0')),
   starO: sv(P('M12 2.8l2.8 5.9 6.4.8-4.7 4.4 1.2 6.4L12 17.1l-5.7 3.2 1.2-6.4-4.7-4.4 6.4-.8z')),
   flame: '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2.5c.6 3.2-1.6 5.1-3.2 7.2C7.6 11.3 7 12.8 7 14.5a5 5 0 0 0 10 0c0-1.9-.8-3.5-1.9-4.7.1 1.4-.4 2.6-1.4 3.2.4-3.6-.6-7.4-1.7-10.5z"/></svg>',

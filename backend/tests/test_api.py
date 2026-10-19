@@ -12,6 +12,7 @@ from app.geocode import GeoMatch, GooglePlacesGeocoder, NominatimGeocoder
 from app.jobs import JobStore
 from app.library import Library
 from app.llm import ClaudeService, _sanitize_plan
+from app.concierge import Curator
 from app.main import app, notify_import
 from app.media import DownloadedReel, UnsupportedURLError, find_url, platform_for
 from app.models import (
@@ -142,6 +143,7 @@ def client(monkeypatch, tmp_path):
     app.state.router = Router(db, settings)
     app.state.photos = photo_store
     app.state.push = Push(db, tmp_path / "vapid.pem", client=httpx.AsyncClient(transport=httpx.MockTransport(push_handler)))
+    app.state.curator = Curator(db, claude)
 
     with TestClient(app) as c:
         c.messages = messages
@@ -151,7 +153,7 @@ def client(monkeypatch, tmp_path):
         c.uploads = tmp_path / "uploads"
         yield c
     app.dependency_overrides.clear()
-    for attr in ("db", "store", "claude", "library", "pipeline", "router", "photos", "push"):
+    for attr in ("db", "store", "claude", "library", "pipeline", "router", "photos", "push", "curator"):
         delattr(app.state, attr)
 
 
@@ -401,7 +403,9 @@ def test_output_schemas_are_accepted_by_sdk():
     from anthropic.lib._parse._transform import transform_schema
     from pydantic import TypeAdapter
 
-    for model in (ExtractionResult, PlanResult):
+    from app.models import BriefingText, ConciergeReply, EditsResult
+
+    for model in (ExtractionResult, PlanResult, EditsResult, ConciergeReply, BriefingText):
         schema = transform_schema(TypeAdapter(model).json_schema())
         assert schema["additionalProperties"] is False
 
@@ -1109,3 +1113,107 @@ async def test_place_search_parsing_google_and_osm():
 
     assert google_category(["ice_cream_shop", "store"]) == "dessert" and google_category(["unknown"]) == "other"
     assert osm_category("shop", "shoes") == "shopping" and osm_category("tourism", "hotel") == "stay"
+
+
+# ---------- Taste profile, edits, concierge, briefings ----------
+
+
+def test_taste_profile_round_trip(client):
+    assert client.get("/v1/profile", headers=H).json()["pace"] is None
+    r = client.put("/v1/profile", json={"pace": "slow", "budget": "splurge", "food": ["Fine dining", " "], "interests": ["Design"],
+                                        "mornings": "late", "notes": "Vegetarian"}, headers=H)
+    assert r.status_code == 200 and r.json()["food"] == ["Fine dining"] and r.json()["updated_at"]
+    assert client.get("/v1/profile", headers=H).json()["budget"] == "splurge"
+    assert client.put("/v1/profile", json={"pace": "sprint"}, headers=H).status_code == 422
+
+
+def test_curated_edits_with_claude_and_offline(client):
+    from app.models import CuratedEdit, EditEntry, EditsResult
+
+    job = import_reel(client)
+    trip = client.get(f"/v1/trips/{job['trip_id']}", headers=H).json()
+    ids = [p["id"] for p in trip["places"]]
+    client.put("/v1/profile", json={"pace": "slow", "food": ["Pizza"]}, headers=H)
+    client.messages.outputs[EditsResult] = EditsResult(edits=[
+        CuratedEdit(title="The Slice Edit", dek="Three pies worth the queue.",
+                    entries=[EditEntry(place_id=i, note="Classic.") for i in ids] + [EditEntry(place_id="ghost", note="x")]),
+        CuratedEdit(title="Too Short", dek="One place.", entries=[EditEntry(place_id=ids[0], note="Only")]),
+    ])
+    assert client.get(f"/v1/trips/{job['trip_id']}/edits", headers=H).json()["curated_by"] is None
+    edits = client.post(f"/v1/trips/{job['trip_id']}/edits", headers=H).json()
+    assert edits["curated_by"] == "claude" and len(edits["edits"]) == 1
+    assert [e["place_id"] for e in edits["edits"][0]["entries"]] == ids  # unknown ids dropped
+    prompt = client.messages.calls[-1]["messages"][0]["content"][0]["text"]
+    assert '"pace": "slow and savoured, few stops"' in prompt and ids[0] in prompt
+    assert client.get("/v1/edits", headers=H).json()[0]["trip_id"] == job["trip_id"]
+
+    # Adding a place marks the edits stale; without Claude the rules-based edits take over.
+    client.post("/v1/places", json={"name": "Levain Bakery", "trip_id": job["trip_id"], "category": "dessert"}, headers=H)
+    assert client.get(f"/v1/trips/{job['trip_id']}/edits", headers=H).json()["stale"] is True
+    client.messages.stop_reason = "refusal"
+    client.patch(f"/v1/places/{ids[0]}", json={"must_do": True}, headers=H)
+    edits = client.post(f"/v1/trips/{job['trip_id']}/edits", headers=H).json()
+    assert edits["curated_by"] == "offline" and edits["stale"] is False
+    titles = [e["title"] for e in edits["edits"]]
+    assert "The Must-Do Edit" in titles and "The Table" in titles
+
+    client.delete(f"/v1/places/{ids[1]}", headers=H)
+    client.delete(f"/v1/places/{ids[2]}", headers=H)
+    small = client.post("/v1/places", json={"name": "X", "city": "Oslo"}, headers=H).json()["place"]["trip_id"]
+    assert client.post(f"/v1/trips/{small}/edits", headers=H).status_code == 422
+
+
+def test_concierge_reply_is_checked_before_reaching_the_app(client):
+    from app.models import ConciergeReply, ProposedAction
+
+    job = import_reel(client)
+    trip = client.get(f"/v1/trips/{job['trip_id']}", headers=H).json()
+    lucali = next(p["id"] for p in trip["places"] if p["name"] == "Lucali")
+    act = lambda **kw: ProposedAction(**{"day": None, "index": None, "value": None, "time": None, "label": "x", **kw})
+    client.messages.outputs[ConciergeReply] = ConciergeReply(
+        reply="Lucali is the one. Book for 5 pm.", place_ids=[lucali, "ghost", lucali],
+        actions=[act(type="set_time", place_id=lucali, time="17:00", label="Set Lucali for 5 PM"),
+                 act(type="set_time", place_id=lucali, time="5pm"),
+                 act(type="move", place_id=lucali, day=99),
+                 act(type="must_do", place_id="ghost", value=True),
+                 act(type="must_do", place_id=lucali, value=None)])
+    r = client.post("/v1/concierge", json={
+        "trip_id": job["trip_id"], "local_time": "2026-10-19T14:05", "latitude": 40.73, "longitude": -74.0,
+        "messages": [{"role": "assistant", "content": "Hello"}, {"role": "user", "content": "Where for dinner?"}],
+    }, headers=H)
+    body = r.json()
+    assert r.status_code == 200 and body["place_ids"] == [lucali]
+    assert [a["label"] for a in body["actions"]] == ["Set Lucali for 5 PM"]
+    call = client.messages.calls[-1]
+    assert call["messages"] == [{"role": "user", "content": "Where for dinner?"}]
+    assert call["output_config"]["effort"] == "low"
+    assert '"weekday": "Monday"' in call["system"] and "nearest_saved_places" in call["system"]
+
+    assert client.post("/v1/concierge", json={"messages": [{"role": "assistant", "content": "hi"}]}, headers=H).status_code == 502
+    assert client.post("/v1/concierge", json={"trip_id": "nope", "messages": [{"role": "user", "content": "hi"}]}, headers=H).status_code == 404
+
+
+def test_daily_briefing_cached_and_offline(client):
+    from app.models import BriefingText
+
+    job = import_reel(client)
+    plan = client.post(f"/v1/trips/{job['trip_id']}/plan", json={"days": 1, "start_date": "2026-10-19"}, headers=H).json()
+    joes = next(p for p in plan["places"] if p["name"] == "Joe's Pizza")
+    client.patch(f"/v1/places/{joes['id']}", json={"start_time": "19:30"}, headers=H)
+
+    client.messages.outputs[BriefingText] = BriefingText(headline="Pizza, then more pizza", points=["Start at Joe's.", " ", "Book Lucali."])
+    url = f"/v1/trips/{job['trip_id']}/days/1/briefing"
+    b = client.post(url, json={"local_date": "2026-10-19"}, headers=H).json()
+    assert b["curated_by"] == "claude" and b["points"] == ["Start at Joe's.", "Book Lucali."]
+    facts = client.messages.calls[-1]["messages"][0]["content"][0]["text"]
+    assert '"weekday": "Monday"' in facts and '"reservation": true' in facts and "7:30 PM" in facts
+
+    calls = len(client.messages.calls)
+    assert client.post(url, json={"local_date": "2026-10-19"}, headers=H).json()["headline"] == "Pizza, then more pizza"
+    assert len(client.messages.calls) == calls  # cached
+
+    client.messages.stop_reason = "refusal"
+    offline = client.post(url, json={"local_date": "2026-10-19", "refresh": True}, headers=H).json()
+    assert offline["curated_by"] == "offline" and offline["points"][0].startswith("Start with")
+    assert any("confirm the booking" in p for p in offline["points"])
+    assert client.post(f"/v1/trips/{job['trip_id']}/days/5/briefing", json={}, headers=H).status_code == 404

@@ -12,6 +12,8 @@ the server call into its own network.
 
 import asyncio
 import contextlib
+import time
+from collections import OrderedDict
 import ipaddress
 import json
 import logging
@@ -101,11 +103,20 @@ class SafeFetcher:
     """GET for public web pages only: http(s) on the usual ports, public IPs, a few redirects, size limits."""
 
     def __init__(self, client: Optional[httpx.AsyncClient] = None,
-                 resolver: Callable[[str], Awaitable[list[str]]] = _resolve):
+                 resolver: Callable[[str], Awaitable[list[str]]] = _resolve, min_interval: float = 0.5,
+                 retry_cap: float = 8.0, cache_seconds: float = 600.0):
         self.client = client or httpx.AsyncClient(
             timeout=httpx.Timeout(12.0, connect=5.0), headers=BROWSER_HEADERS)
         self._resolve = resolver
         self.failures: dict[str, str] = {}  # url -> why the last fetch failed, for the lookup's trace
+        # Be gentle with each site: one request at a time per host with a pause between, a retry when a site says
+        # "slow down", and a short memory of pages already fetched, so trying again doesn't hammer it.
+        self.min_interval = min_interval
+        self.retry_cap = retry_cap
+        self.cache_seconds = cache_seconds
+        self._gates: dict[str, asyncio.Lock] = {}
+        self._last: dict[str, float] = {}
+        self._cache: "OrderedDict[str, tuple[float, Fetched]]" = OrderedDict()
 
     async def allowed(self, url: str) -> bool:
         try:
@@ -125,18 +136,48 @@ class SafeFetcher:
         return bool(addresses) and all(is_public_address(a) for a in addresses)
 
     async def get(self, url: str, max_bytes: int) -> Optional[Fetched]:
+        hit = self._cache.get(url)
+        if hit and time.monotonic() - hit[0] < self.cache_seconds and (len(hit[1].body) <= max_bytes):
+            return hit[1]
+        got = await self._get(url, max_bytes)
+        if got is not None and not got.truncated and len(got.body) <= 2_000_000:
+            self._cache[url] = (time.monotonic(), got)
+            while len(self._cache) > 40:
+                self._cache.popitem(last=False)
+        return got
+
+    async def _pace(self, url: str) -> None:
+        """One request at a time per host, with a pause between them."""
+        host = urlsplit(url).hostname or ""
+        gate = self._gates.setdefault(host, asyncio.Lock())
+        async with gate:
+            wait = self.min_interval - (time.monotonic() - self._last.get(host, 0.0))
+            if wait > 0:
+                await asyncio.sleep(wait)
+            self._last[host] = time.monotonic()
+
+    async def _get(self, url: str, max_bytes: int, attempt: int = 0) -> Optional[Fetched]:
         first = url
         for _ in range(MAX_REDIRECTS + 1):
             if not await self.allowed(url):
                 self.failures[first] = "not a public web address"
                 return None
+            await self._pace(url)
             try:
                 async with self.client.stream("GET", url, follow_redirects=False) as response:
                     if response.is_redirect:
                         url = urljoin(url, response.headers.get("location", ""))
                         continue
+                    if response.status_code in (429, 503) and attempt == 0:
+                        try:
+                            pause = float(response.headers.get("retry-after", "3"))
+                        except ValueError:
+                            pause = 3.0
+                        await asyncio.sleep(min(max(pause, 0.0), self.retry_cap))
+                        return await self._get(first, max_bytes, attempt=1)
                     if response.status_code != 200:
-                        self.failures[first] = f"the site answered HTTP {response.status_code}"
+                        self.failures[first] = (f"the site answered HTTP {response.status_code}"
+                                                + (" (it is limiting requests; try again in a few minutes)" if response.status_code == 429 else ""))
                         return None
                     kind = response.headers.get("content-type", "").split(";")[0].strip().lower()
                     body = bytearray()
@@ -402,6 +443,19 @@ class MenuService:
                               kind, source)
         else:
             self.db.save_menu(place.id, "none", {"trace": trace}, None, None)
+        return self.stored(place.id)
+
+    async def read_upload(self, place: Place, images: list[bytes], pdfs: list[bytes]) -> Optional[PlaceMenu]:
+        """A menu the person photographed or downloaded: for sites the server can't read. None when it holds no menu."""
+        if self.claude is None:
+            raise ClaudeError("Claude isn't configured on the server")
+        materials = [Material("image", f"Photo {i}", "", data=d, media_type="image/jpeg") for i, d in enumerate(images, start=1)]
+        materials += [Material("pdf", f"PDF {i}", "", data=d, media_type="application/pdf") for i, d in enumerate(pdfs, start=1)]
+        result = clean_menu(await self.claude.extract_menu(place, materials, from_photos=bool(images)))
+        if not result.found:
+            return None
+        self.db.save_menu(place.id, "found", {"sections": [s.model_dump() for s in result.sections], "notes": result.notes,
+                                              "trace": ["Read from a photo or PDF you added"]}, "upload", None)
         return self.stored(place.id)
 
     async def _find_website(self, place: Place) -> Optional[str]:

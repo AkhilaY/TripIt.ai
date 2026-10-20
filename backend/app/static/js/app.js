@@ -1472,7 +1472,8 @@ async function menuSection(p) {
     return `<div class="empty menuwait"><span class="spinner big"></span><h3>Looking for the menu</h3>
       <p>Checking ${site ? 'the website' : 'what’s online'} and reading it for you. This can take up to a minute.</p></div>`;
   }
-  const siteBtn = `<button class="linkbtn" data-act="menuwebsite" data-id="${p.id}">${site ? 'Use a different website' : 'Add the restaurant’s website'}</button>`;
+  const siteBtn = `<button class="linkbtn" data-act="menuwebsite" data-id="${p.id}">${site ? 'Use a different website' : 'Add the restaurant’s website'}</button>
+    <button class="linkbtn" data-act="menuupload" data-id="${p.id}">Add a photo or PDF of the menu</button>`;
   if (m.status === 'unknown') {
     return emptyState('accent', 'book', 'See the menu',
       `We’ll look for it ${site ? 'on the website' : 'online'} and lay it out neatly here.`,
@@ -1485,7 +1486,7 @@ async function menuSection(p) {
       ${m.trace && m.trace.length ? `<div class="section"><div class="section-h">What we tried</div><div class="group"><div class="notecard"><ul class="trace">${m.trace.map((t) => `<li>${esc(t)}</li>`).join('')}</ul></div></div></div>` : ''}`;
   }
   const host = (() => { try { return new URL(m.source_url).hostname.replace(/^www\./, ''); } catch { return ''; } })();
-  const source = m.source_kind === 'photos'
+  const source = m.source_kind === 'upload' ? 'From the photo or PDF you added' : m.source_kind === 'photos'
     ? 'Read from photos on Google Maps'
     : `From ${host && safeUrl(m.source_url) ? `<a href="${esc(m.source_url)}" target="_blank" rel="noopener">${esc(host)}</a>` : 'the website'}`;
   const present = Object.keys(DIETS).filter((tag) => m.sections.some((s) => s.items.some((i) => i.tags.includes(tag))));
@@ -1502,7 +1503,45 @@ async function menuSection(p) {
       <div class="group menu">${s.items.map((i) => `<div class="row menuitem"><span class="main"><span class="t">${esc(i.name)}${i.tags.map((tag) => `<span class="mtag" title="${DIETS[tag]}">${esc(DIETS[tag])}</span>`).join('')}</span>
         ${i.description ? `<span class="s">${esc(i.description)}</span>` : ''}</span>${i.price ? `<span class="price">${esc(i.price)}</span>` : ''}</div>`).join('')}</div></div>`).join('')
       || '<div class="section"><div class="section-f">Nothing on the menu matches that filter.</div></div>'}
-    <div class="section"><div class="section-f">Menus change. Check with the restaurant for today’s dishes and prices.${m.source_kind === 'photos' ? ' Read from photos, so some items may be missing or misread.' : ''}</div></div>`;
+    <div class="section"><div class="section-f">Menus change. Check with the restaurant for today’s dishes and prices.${m.source_kind === 'photos' || m.source_kind === 'upload' ? ' Read from photos, so some items may be missing or misread.' : ''}</div>
+      <button class="linkbtn" data-act="menuupload" data-id="${p.id}">Wrong or missing dishes? Add a photo or PDF of the menu</button></div>`;
+}
+
+const fileToBase64 = (file) => new Promise((resolve, reject) => {
+  const reader = new FileReader();
+  reader.onload = () => resolve(String(reader.result).split(',')[1] || '');
+  reader.onerror = () => reject(new Error(`Couldn’t read ${file.name || 'that file'}`));
+  reader.readAsDataURL(file);
+});
+
+/** For sites the server can't read: photos or a PDF of the menu, picked on the phone. */
+function pickMenuFiles(id) {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'image/*,application/pdf';
+  input.multiple = true;
+  input.onchange = async () => {
+    const files = [...input.files];
+    if (!files.length) return;
+    S.menuBusy[id] = true;
+    render();
+    try {
+      const images = [];
+      const pdfs = [];
+      for (const f of files) {
+        if (f.type === 'application/pdf' || /\.pdf$/i.test(f.name)) { if (pdfs.length < 2) pdfs.push(await fileToBase64(f)); }
+        else if (images.length < 6) images.push(await toJpegDataUrl(f));
+      }
+      S.menu[id] = await api(`/v1/places/${id}/menu/upload`, { method: 'POST', body: { images, pdfs } });
+      toast('Menu added');
+    } catch (e) {
+      toast(e.message, true);
+    } finally {
+      delete S.menuBusy[id];
+      render();
+    }
+  };
+  input.click();
 }
 
 async function runFindMenu(id, refresh) {
@@ -2844,6 +2883,7 @@ async function onAction(act, el) {
       return;
     }
     case 'findmenu': await runFindMenu(el.dataset.id, el.dataset.refresh === '1'); return;
+    case 'menuupload': pickMenuFiles(el.dataset.id); return;
     case 'menuwebsite': {
       const p = findAnyPlace(el.dataset.id);
       const st = { text: p.website || '' };

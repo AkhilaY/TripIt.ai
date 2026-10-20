@@ -195,7 +195,7 @@ def client(monkeypatch, tmp_path):
         return httpx.Response(200, json={"daily": daily})
 
     app.state.packing = PackingService(db, claude, Weather(settings, client=httpx.AsyncClient(transport=httpx.MockTransport(weather_handler))), library)
-    app.state.menus = MenuService(db, claude, SafeFetcher(client=httpx.AsyncClient(transport=httpx.MockTransport(web_handler)), resolver=resolver),
+    app.state.menus = MenuService(db, claude, SafeFetcher(client=httpx.AsyncClient(transport=httpx.MockTransport(web_handler)), resolver=resolver, min_interval=0, retry_cap=0, cache_seconds=0),
                                   geocoder, settings)
 
     with TestClient(app) as c:
@@ -1922,6 +1922,68 @@ def test_place_website_can_be_set_by_hand(client):
     for bad in ("javascript:alert(1)", "not a site", "ftp://x.test"):
         assert client.patch(f"/v1/places/{pid}", json={"website": bad}, headers=H).status_code == 422, bad
     assert client.patch(f"/v1/places/{pid}", json={"website": ""}, headers=H).json()["website"] is None
+
+
+def test_menu_from_a_photo_or_pdf_the_person_adds(client):
+    import base64
+
+    pid = menu_place(client)
+    jpeg = "data:image/jpeg;base64," + base64.b64encode(b"\xff\xd8\xff menu").decode()
+    pdf = base64.b64encode(b"%PDF-1.4 menu").decode()
+    client.messages.outputs[MenuResult] = MENU_RESULT
+    menu = client.post(f"/v1/places/{pid}/menu/upload", json={"images": [jpeg], "pdfs": [pdf]}, headers=H).json()
+    assert menu["status"] == "found" and menu["source_kind"] == "upload" and menu["trace"] == ["Read from a photo or PDF you added"]
+    blocks = client.messages.calls[-1]["messages"][0]["content"]
+    assert [b["type"] for b in blocks].count("image") == 1 and [b["type"] for b in blocks].count("document") == 1
+    assert client.get(f"/v1/places/{pid}/menu", headers=H).json()["sections"][0]["title"] == "Slices"  # saved like any menu
+
+    client.messages.outputs[MenuResult] = MenuResult(found=False, sections=[], notes=None)
+    r = client.post(f"/v1/places/{pid}/menu/upload", json={"images": [jpeg]}, headers=H)
+    assert r.status_code == 422 and "clearer photo" in r.json()["detail"]
+    assert client.get(f"/v1/places/{pid}/menu", headers=H).json()["status"] == "found"  # the earlier menu isn't lost
+
+    for bad in ({}, {"pdfs": ["!!!"]}, {"pdfs": [base64.b64encode(b"not a pdf").decode()]}, {"images": [base64.b64encode(b"GIF89a").decode()]}):
+        assert client.post(f"/v1/places/{pid}/menu/upload", json=bad, headers=H).status_code == 422, bad
+    assert client.post("/v1/places/nope/menu/upload", json={"images": [jpeg]}, headers=H).status_code == 404
+    client.messages.stop_reason = "refusal"
+    assert client.post(f"/v1/places/{pid}/menu/upload", json={"images": [jpeg]}, headers=H).status_code == 502
+    client.messages.stop_reason = "end_turn"
+    client.patch(f"/v1/places/{pid}", json={"category": "stay"}, headers=H)
+    assert client.post(f"/v1/places/{pid}/menu/upload", json={"images": [jpeg]}, headers=H).status_code == 422
+
+
+async def test_fetcher_is_gentle_with_websites():
+    import time
+
+    seen = []
+
+    def handler(request):
+        seen.append(time.monotonic())
+        if request.url.path == "/busy":
+            return httpx.Response(429, headers={"retry-after": "0"}) if len(seen) == 1 else httpx.Response(200, content=b"ok", headers={"content-type": "text/html"})
+        if request.url.path == "/blocked":
+            return httpx.Response(429, headers={"retry-after": "0"})
+        return httpx.Response(200, content=b"page", headers={"content-type": "text/html"})
+
+    async def resolver(host):
+        return ["93.184.216.34"]
+
+    fetcher = SafeFetcher(client=httpx.AsyncClient(transport=httpx.MockTransport(handler)), resolver=resolver, min_interval=0.05, retry_cap=0.1)
+    assert (await fetcher.get("https://site.test/busy", 1000)).body == b"ok"  # told to slow down once, tried again
+    assert len(seen) == 2
+
+    assert await fetcher.get("https://site.test/blocked", 1000) is None
+    assert "limiting requests" in fetcher.failures["https://site.test/blocked"]
+
+    before = len(seen)
+    await fetcher.get("https://site.test/a", 1000)
+    await fetcher.get("https://site.test/a", 1000)  # remembered: the site isn't asked again
+    assert len(seen) == before + 1
+
+    start = time.monotonic()
+    import asyncio
+    await asyncio.gather(*(fetcher.get(f"https://site.test/p{i}", 1000) for i in range(4)))  # at once, but paced per site
+    assert time.monotonic() - start >= 0.15 and all(b - a >= 0.04 for a, b in zip(seen[-4:], seen[-3:]))
 
 
 def test_menu_page_named_in_structured_data(client):

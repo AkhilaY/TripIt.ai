@@ -53,6 +53,7 @@ from .models import (
     JobStatus,
     LocateRequest,
     MenuRequest,
+    MenuUploadRequest,
     PlaceMenu,
     MoveRequest,
     PackingItemInput,
@@ -852,6 +853,34 @@ async def find_reservation_link(place_id: str, request: Request) -> Place:
         reserve_checked_at=datetime.now(timezone.utc),
     )
     return _db(request).get_place(place_id)
+
+
+@app.post("/v1/places/{place_id}/menu/upload", response_model=PlaceMenu, dependencies=[Auth])
+async def upload_menu(place_id: str, body: MenuUploadRequest, request: Request) -> PlaceMenu:
+    """Reads a menu from photos or PDFs the person adds, for places whose website the server can't read."""
+    place = _place_or_404(request, place_id)
+    if place.category.value not in MENU_CATEGORIES:
+        raise HTTPException(status_code=422, detail="Menus are for restaurants, cafés, bars and sweet shops")
+    if not body.images and not body.pdfs:
+        raise HTTPException(status_code=422, detail="Add a photo or a PDF of the menu")
+    images = _decode_images(body.images)
+    pdfs = []
+    for item in body.pdfs:
+        data = item.split(",", 1)[1] if item.startswith("data:") else item
+        try:
+            raw = base64.b64decode(data, validate=True)
+        except (binascii.Error, ValueError):
+            raise HTTPException(status_code=422, detail="One of the PDFs couldn't be read")
+        if len(raw) > 6 * 1024 * 1024 or not raw.startswith(b"%PDF"):
+            raise HTTPException(status_code=422, detail="PDFs must be real PDF files under 6 MB")
+        pdfs.append(raw)
+    try:
+        menu = await request.app.state.menus.read_upload(place, images, pdfs)
+    except ClaudeError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    if menu is None:
+        raise HTTPException(status_code=422, detail="Couldn't find a menu in that. Try a clearer photo of the menu itself.")
+    return menu
 
 
 @app.get("/v1/places/{place_id}/menu", response_model=PlaceMenu, dependencies=[Auth])

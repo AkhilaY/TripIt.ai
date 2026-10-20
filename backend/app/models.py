@@ -319,7 +319,7 @@ class PlaceMenu(BaseModel):
     status: Literal["unknown", "found", "none"] = "unknown"  # unknown = never looked for
     sections: list[MenuSection] = []
     notes: Optional[str] = None
-    source_kind: Optional[Literal["website", "photos"]] = None
+    source_kind: Optional[Literal["website", "photos", "upload"]] = None
     source_url: Optional[str] = None  # the page or file the menu was read from
     fetched_at: Optional[datetime] = None
     trace: list[str] = []  # what the last lookup tried, so a miss can be understood
@@ -327,6 +327,11 @@ class PlaceMenu(BaseModel):
 
 class PickedLinks(BaseModel):
     numbers: list[int] = Field(description="The numbers of the links to open, best first, at most 6.")
+
+
+class MenuUploadRequest(BaseModel):
+    images: list[str] = Field(default=[], max_length=6, description="Base64 JPEGs (data: URLs are fine).")
+    pdfs: list[str] = Field(default=[], max_length=2, description="Base64 PDF files.")
 
 
 class MenuRequest(BaseModel):

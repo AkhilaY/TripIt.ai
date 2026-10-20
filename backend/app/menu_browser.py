@@ -247,4 +247,6 @@ class BrowserRenderer:
                 except Exception:
                     break
         self.last_note += f"; clicked through, read {len(materials)} item(s), saw {len(links)} link(s)"
+        if len(links) <= 2:
+            self.last_note += " (the page looked almost empty; the site may be blocking automated visits)"
         return materials, list(links.items())

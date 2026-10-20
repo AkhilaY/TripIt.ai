@@ -47,7 +47,9 @@ HTML_BYTES = 2_000_000
 PDF_BYTES = 5_000_000
 IMAGE_BYTES = 3_500_000
 MAX_CANDIDATES = 3
-MAX_PDFS = 2
+MAX_PDFS = 6  # a restaurant can have food, lunch, dessert, wine and cocktail menus as separate files
+MAX_PAGES = 3
+PICK_FROM = 40  # links offered to Claude when there are too many menu-like ones to read them all
 MAX_IMAGES = 6
 MAX_TEXT_CHARS = 40_000
 PAGE_TEXT_CHARS = 14_000
@@ -55,7 +57,9 @@ IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
 
 STRONG = re.compile(r"menu|menú|carte|speisekarte", re.I)
 WEAK = re.compile(r"\b(food|drinks?|dinner|lunch|brunch|breakfast|cocktails?|wine|dessert|beverages?|eat)\b", re.I)
-NOISE = re.compile(r"gift|career|jobs?|privacy|terms|cookie|catering|events?|private|reserv|contact|about|press|login|cart|shop|allerg", re.I)
+NOISE = re.compile(r"privacy|terms|cookie|reserv|contact|about|cart\b|shop|allerg", re.I)
+# Pages that are about something other than the everyday menu: pulled down harder.
+OFF_MENU = re.compile(r"gift|career|jobs?|press|login|catering|events?|private|festive|christmas|new year|nye|valentine|easter|diwali|thanksgiving", re.I)
 PRICE = re.compile(r"(?:[$€£¥]\s?\d|\d\s?[$€£¥]|\b\d{1,3}[.,]\d{2}\b)")
 
 
@@ -243,10 +247,12 @@ def score_link(url: str, text: str) -> int:
         score += 2
     if WEAK.search(path):
         score += 1
-    if score and path.lower().endswith(".pdf"):
-        score += 2
+    if path.lower().endswith(".pdf"):
+        score += 3  # a PDF on a restaurant's site is nearly always a menu, whatever it's called
     if NOISE.search(text) or NOISE.search(path):
         score -= 3
+    if OFF_MENU.search(text) or OFF_MENU.search(path):
+        score -= 6
     return score
 
 
@@ -355,7 +361,9 @@ class MenuService:
             log.info("Menu for %s: Google photos %s", place.name, "had it" if kind == "photos" else "had none")
         if (result is None or not result.found) and website and self.renderer is not None:
             # Last resort: open the site in a browser and click through to the menu, like a person would.
-            materials = await self.renderer.capture(website)
+            materials, links = await self.renderer.capture(website)
+            if links:  # the pop-up or tab it opened is often a list of PDFs: read the ones that are this restaurant's menus
+                materials += await self._read_links(await self._choose_links(links, place.name, website))
             log.info("Menu for %s: browser visit gathered %d item(s)", place.name, len(materials))
             if materials:
                 result = clean_menu(await self.claude.extract_menu(place, materials, from_photos=False))
@@ -392,6 +400,53 @@ class MenuService:
                 return m.url
         return fallback
 
+    async def _choose_links(self, links: list[tuple[str, str]], name: str, here: str) -> list[tuple[str, str]]:
+        """(address, link text) for the links most likely to be this restaurant's menus. With many candidates (a
+        site listing a dozen PDFs) Claude picks the main ones; otherwise the best-scored are all taken."""
+        words = name_words(name)
+        scored: dict[str, tuple[int, str]] = {}
+        for url, text in links:
+            if not url.lower().startswith(("http://", "https://")) or url.split("#")[0] == here.split("#")[0]:
+                continue
+            score = score_link(url, text)
+            if score > 0 and words and mentions(words, url, text):
+                score += 5
+            if score > 0 and score > scored.get(url, (0, ""))[0]:
+                scored[url] = (score, text)
+        ranked = sorted(scored.items(), key=lambda kv: -kv[1][0])
+        if len(ranked) <= MAX_PDFS + MAX_PAGES - 1:
+            return [(u, t) for u, (_, t) in ranked]
+        top = ranked[:PICK_FROM]
+        if self.claude is not None:
+            try:
+                picked = await self.claude.pick_menu_links(name or "this restaurant", [(t, u) for u, (_, t) in top])
+                if picked:
+                    return [(top[i][0], top[i][1][1]) for i in picked]
+            except ClaudeError as e:
+                log.info("Picking menu links failed, using the best-scored: %s", e)
+        return [(u, t) for u, (_, t) in top[:MAX_PDFS]]
+
+    async def _read_links(self, chosen: list[tuple[str, str]]) -> list[Material]:
+        """Downloads menu links found by the browser: PDFs and images as they are, pages as text."""
+        out: list[Material] = []
+        pdfs = images = pages = 0
+        for (url, text), got in zip(chosen, await asyncio.gather(*(self.fetcher.get(u, PDF_BYTES) for u, _ in chosen))):
+            if got is None:
+                continue
+            label = text or "menu"
+            if got.content_type == "application/pdf" and not got.truncated and pdfs < MAX_PDFS:
+                pdfs += 1
+                out.append(Material("pdf", f"Menu PDF: {label}", got.url, data=got.body, media_type="application/pdf"))
+            elif got.content_type in IMAGE_TYPES and not got.truncated and len(got.body) <= IMAGE_BYTES and images < MAX_IMAGES:
+                images += 1
+                out.append(Material("image", f"Menu image: {label}", got.url, data=got.body, media_type=got.content_type))
+            elif "html" in got.content_type and pages < MAX_PAGES:
+                text_ = parse_page(got.url, got.body).text[:PAGE_TEXT_CHARS]
+                if len(text_) >= 60:
+                    pages += 1
+                    out.append(Material("text", f"Web page: {label}", got.url, text=text_))
+        return out
+
     async def gather_website(self, website: str, name: str = "") -> list[Material]:
         home = await self.fetcher.get(website, HTML_BYTES)
         if home is None:
@@ -406,7 +461,9 @@ class MenuService:
         pages = [parse_page(home.url, home.body)]
         materials: list[Material] = []
         pdfs = images = 0
-        candidates = candidate_links(pages[0], name=name)
+        chosen = await self._choose_links(pages[0].links, name, home.url)
+        candidates = [u for u, _ in chosen]
+        link_text = dict((u, t) for u, t in chosen if t)
         for blob in pages[0].jsonld:  # a site can name its menu page in its structured data
             for url in re.findall(r'"hasMenu"\s*:\s*(?:\{[^{}]*?"url"\s*:\s*)?"(https?://[^"]+)"', blob)[:2]:
                 if url not in candidates:
@@ -428,6 +485,7 @@ class MenuService:
             # A site for several restaurants: this restaurant's own page comes first, and its menu beats the others'.
             host = (urlsplit(home.url).hostname or "").removeprefix("www.")
             venues = [u for u, t in pages[0].links if u.startswith(("http://", "https://")) and mentions(words, u, t)
+                      and not urlsplit(u).path.lower().endswith((".pdf", ".jpg", ".jpeg", ".png", ".webp"))
                       and (urlsplit(u).hostname or "").removeprefix("www.") == host and u.rstrip("/") != home.url.rstrip("/")]
             venues = list(dict.fromkeys(venues))[:2]
             own: list = []
@@ -448,11 +506,11 @@ class MenuService:
                 continue
             if got.content_type == "application/pdf" and pdfs < MAX_PDFS:
                 pdfs += 1
-                materials.append(Material("pdf", f"Menu PDF {pdfs}", got.url, data=got.body, media_type="application/pdf"))
+                materials.append(Material("pdf", f"Menu PDF: {link_text.get(got.url) or pdfs}", got.url, data=got.body, media_type="application/pdf"))
             elif got.content_type in IMAGE_TYPES and images < MAX_IMAGES and len(got.body) <= IMAGE_BYTES:
                 images += 1
-                materials.append(Material("image", f"Menu image {images}", got.url, data=got.body, media_type=got.content_type))
-            elif "html" in got.content_type:
+                materials.append(Material("image", f"Menu image: {link_text.get(got.url) or images}", got.url, data=got.body, media_type=got.content_type))
+            elif "html" in got.content_type and len(pages) <= MAX_PAGES:
                 pages.append(parse_page(got.url, got.body))
 
         # The home page counts when it has no menu page to point to, or is itself full of prices.

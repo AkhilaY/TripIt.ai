@@ -42,6 +42,8 @@ FIND_TARGETS = """() => {
   });
   return out;
 }"""
+ALL_LINKS = """() => Array.from(document.querySelectorAll('a[href]')).slice(0, 400).map((a) =>
+  [a.href, (a.innerText || a.getAttribute('aria-label') || a.title || '').replace(/\\s+/g, ' ').trim().slice(0, 80)])"""
 PAGE_TEXT = "() => (document.body ? document.body.innerText : '')"
 SCROLL = """async () => {
   const limit = Math.min(document.body.scrollHeight, 6000);
@@ -69,10 +71,11 @@ class BrowserRenderer:
         self.executable = executable or None
         self._busy = asyncio.Semaphore(1)
 
-    async def capture(self, website: str) -> list[Material]:
-        """Page text and screenshots from the website's menu, or an empty list."""
+    async def capture(self, website: str) -> tuple[list[Material], list[tuple[str, str]]]:
+        """(page text and screenshots from the website's menu, every link seen along the way). A pop-up listing
+        menus as PDFs yields its links here, for the caller to download."""
         if not await self.fetcher.allowed(website):
-            return []
+            return [], []
         async with self._busy:
             try:
                 return await asyncio.wait_for(self._capture(website), timeout=TOTAL_TIMEOUT)
@@ -80,9 +83,9 @@ class BrowserRenderer:
                 log.info("Browser visit to %s timed out", website)
             except Exception as e:  # a broken site or browser must never break the menu lookup
                 log.warning("Browser visit to %s failed: %s", website, e)
-        return []
+        return [], []
 
-    async def _capture(self, website: str) -> list[Material]:
+    async def _capture(self, website: str) -> tuple[list[Material], list[tuple[str, str]]]:
         from playwright.async_api import async_playwright
 
         async with async_playwright() as pw:
@@ -139,6 +142,16 @@ class BrowserRenderer:
                 parts.append(text)
         return "\n\n".join(parts)
 
+    async def _links(self, page) -> list[tuple[str, str]]:
+        out = []
+        for frame in page.frames:
+            try:
+                found = await frame.evaluate(ALL_LINKS)
+            except Exception:
+                continue
+            out.extend((href, text) for href, text in found if href.lower().startswith(("http://", "https://")))
+        return out
+
     async def _screenshots(self, page, label: str, url: str, limit: int) -> list[Material]:
         try:
             await page.evaluate(SCROLL)
@@ -175,17 +188,24 @@ class BrowserRenderer:
                 scored.append((score + (2 if not href else 0), t))  # tabs and buttons that show a menu in place
         return [t for _, t in sorted(scored, key=lambda x: -x[0])[:MAX_STEPS]]
 
-    async def _walk(self, page, website: str) -> list[Material]:
+    async def _walk(self, page, website: str) -> tuple[list[Material], list[tuple[str, str]]]:
         await page.goto(website, wait_until="domcontentloaded")
         await self._settle(page)
         await self._dismiss_banner(page)
         home = page.url
         materials: list[Material] = []
+        links: dict[str, str] = {}
         used = 0
+
+        async def note_links() -> None:
+            for href, text in await self._links(page):
+                if href not in links or (text and not links[href]):
+                    links[href] = text
 
         async def take(label: str) -> bool:
             """Adds what's on screen; returns True when it looks like a menu."""
             nonlocal used
+            await note_links()
             text = (await self._page_text(page))[:PAGE_TEXT_CHARS]
             menu_like = looks_like_menu(text)
             if len(text) >= 60 and used + len(text) <= MAX_TEXT_CHARS:
@@ -198,7 +218,7 @@ class BrowserRenderer:
 
         targets = await self._targets(page, home)
         if await take("Home page") and not targets:
-            return materials
+            return materials, list(links.items())
         for t in targets:
             try:
                 if t["href"] and urlsplit(t["href"]).scheme in ("http", "https") and t["href"].split("#")[0] != home.split("#")[0]:
@@ -220,4 +240,4 @@ class BrowserRenderer:
                     await self._targets(page, home)
                 except Exception:
                     break
-        return materials
+        return materials, list(links.items())

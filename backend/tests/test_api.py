@@ -20,6 +20,7 @@ from app.concierge import Curator
 from app.main import app, notify_import
 from app.media import DownloadedReel, UnsupportedURLError, find_url, platform_for
 from app.models import (
+    PickedLinks,
     PackingDraftItem,
     PackingResult,
     BookingDraft,
@@ -72,6 +73,8 @@ class FakeMessages:
         parsed = self.outputs.get(kwargs["output_format"])
         if isinstance(parsed, list):  # one result per call, in order
             parsed = parsed.pop(0)
+        if callable(parsed):  # decides from the request
+            parsed = parsed(kwargs)
         if isinstance(parsed, Exception):
             raise parsed
         return SimpleNamespace(parsed_output=parsed, stop_reason=self.stop_reason)
@@ -1824,6 +1827,66 @@ def test_menu_on_a_site_for_several_restaurants(client):
     assert [b["type"] for b in blocks].count("document") == 1 and "Trattoria menu" not in str(blocks)  # not another restaurant's menu
 
 
+GROUP_LINKS = ["A La Carte", "Lunch", "Dessert", "Tasting Menu", "Wine List", "Gymkhana Drinks Menu", "42 Cocktail Lounge Menu",
+               "The Vaults Lunch", "The Vaults & 42 Feast Menu", "Festive Lunch", "Diwali & Festive Tasting Menu", "New Year's Eve Dinner"]
+MAIN_MENUS = {"A La Carte", "Lunch", "Dessert", "Tasting Menu", "Wine List", "Gymkhana Drinks Menu"}
+
+
+def test_menus_listed_as_many_pdfs_are_chosen_by_claude(client):
+    pid = menu_place(client)
+    app.state.db.update_place(pid, name="Gymkhana")
+    slug = lambda t: "".join(c for c in t.lower() if c.isalnum() or c == " ").replace(" ", "-")
+    html = "<html><body><h1>Gymkhana</h1>" + "".join(f'<a href="/files/{slug(t)}.pdf">{t}</a>' for t in GROUP_LINKS) + "</body></html>"
+    serve(client, "https://joes.test/", html.encode())
+    for t in GROUP_LINKS:
+        serve(client, f"https://joes.test/files/{slug(t)}.pdf", b"%PDF-1.4 " + t.encode(), "application/pdf")
+
+    def pick(kwargs):
+        lines = kwargs["messages"][0]["content"][0]["text"].splitlines()
+        wanted = [int(line.split(".", 1)[0]) for line in lines if line.split(".", 1)[0].isdigit() and line.split(". ", 1)[1].split(" — ")[0] in MAIN_MENUS]
+        return PickedLinks(numbers=wanted)
+
+    client.messages.outputs[PickedLinks] = pick
+    client.messages.outputs[MenuResult] = MENU_RESULT
+    menu = client.post(f"/v1/places/{pid}/menu", json={}, headers=H).json()
+    assert menu["status"] == "found"
+    asked = [u for u in client.web_log if u.endswith(".pdf")]
+    assert {u.rsplit("/", 1)[1] for u in asked} == {f"{slug(t)}.pdf" for t in MAIN_MENUS}  # only the chosen menus were downloaded
+    blocks = client.messages.calls[-1]["messages"][0]["content"]
+    labels = [b["text"] for b in blocks if b["type"] == "text" and b["text"].startswith("[Menu PDF")]
+    assert any("Menu PDF: Wine List" in l for l in labels) and any("Menu PDF: A La Carte" in l for l in labels)
+    assert [b["type"] for b in blocks].count("document") == 6
+
+    # If Claude's choice is unusable the best-scored links are used instead.
+    client.web_log.clear()
+    client.messages.outputs[PickedLinks] = PickedLinks(numbers=[99])
+    client.messages.outputs[MenuResult] = MENU_RESULT
+    assert client.post(f"/v1/places/{pid}/menu", json={"refresh": True}, headers=H).json()["status"] == "found"
+    assert 1 <= len([u for u in client.web_log if u.endswith(".pdf")]) <= 6
+
+
+def test_browser_finds_a_popup_of_menu_pdfs(client):
+    pid = menu_place(client)
+    serve(client, "https://joes.test/", b"<html><body><div id=app></div></body></html>")
+    serve(client, "https://joes.test/files/a-la-carte.pdf", b"%PDF-1.4 carte", "application/pdf")
+    serve(client, "https://joes.test/files/wine-list.pdf", b"%PDF-1.4 wine", "application/pdf")
+    serve(client, "https://joes.test/files/private-dining-lunch.pdf", b"%PDF-1.4 private", "application/pdf")
+
+    class Rendered:
+        async def capture(self, website):
+            return [Material("text", "After opening 'Menus' (text)", "https://joes.test/#menus", text="CLUB MENUS DAILY A La Carte Lunch DRINKS Wine List PRIVATE DINING")], [
+                ("https://joes.test/files/a-la-carte.pdf", "A La Carte"), ("https://joes.test/files/wine-list.pdf", "Wine List"),
+                ("https://joes.test/files/private-dining-lunch.pdf", "Private Dining Lunch"), ("https://joes.test/gift", "Gift cards")]
+
+    app.state.menus.renderer = Rendered()
+    client.messages.outputs[MenuResult] = [MENU_RESULT]
+    menu = client.post(f"/v1/places/{pid}/menu", json={}, headers=H).json()
+    assert menu["status"] == "found" and menu["source_kind"] == "website"
+    blocks = client.messages.calls[-1]["messages"][0]["content"]
+    assert [b["type"] for b in blocks].count("document") == 2  # the private dining menu is a "noise" link
+    assert not any("private-dining" in u or "gift" in u for u in client.web_log)
+
+
 def test_menu_page_named_in_structured_data(client):
     pid = menu_place(client)
     serve(client, "https://joes.test/", b'<html><head><script type="application/ld+json">{"@type": "Restaurant", "hasMenu": "https://joes.test/carta-del-dia"}</script></head>'
@@ -1853,8 +1916,8 @@ def test_menu_browser_is_the_last_resort(client):
     class Rendered:
         async def capture(self, website):
             calls.append(website)
-            return [Material("text", "After opening 'Menu' (text)", "https://joes.test/#menu", text="Plain slice $4.00\nPepperoni slice $4.50\nSicilian $5.00\nKnots $3.00\nPie $22.00"),
-                    Material("image", "After opening 'Menu', part 1", "https://joes.test/#menu", data=b"\xff\xd8\xff", media_type="image/jpeg")]
+            return ([Material("text", "After opening 'Menu' (text)", "https://joes.test/#menu", text="Plain slice $4.00\nPepperoni slice $4.50\nSicilian $5.00\nKnots $3.00\nPie $22.00"),
+                     Material("image", "After opening 'Menu', part 1", "https://joes.test/#menu", data=b"\xff\xd8\xff", media_type="image/jpeg")], [])
 
     app.state.menus.renderer = Rendered()
     client.messages.outputs[MenuResult] = [MENU_RESULT]  # the empty page gives Claude nothing to read, so it is asked once
@@ -1873,7 +1936,7 @@ def test_menu_browser_is_the_last_resort(client):
 
     class Broken:
         async def capture(self, website):
-            return []
+            return [], []
 
     app.state.menus.renderer = Broken()
     serve(client, "https://joes.test/", b"<html><body><div id=app></div></body></html>")
@@ -1934,12 +1997,13 @@ async def test_browser_clicks_through_to_a_javascript_menu():
 
         fetcher.allowed = allowed
         renderer = BrowserRenderer(fetcher, chromium_for_tests())
-        materials = await renderer.capture(f"http://127.0.0.1:{site.server_port}/")
+        materials, links = await renderer.capture(f"http://127.0.0.1:{site.server_port}/")
         text = " ".join(m.text or "" for m in materials if m.kind == "text")
         assert "Margherita $14" in text and "Tiramisu $9" in text  # drawn after the click
         assert any("Menu" in m.label for m in materials)
         assert not any(port == secret.server_port for port, _ in hits)  # the page's request to another address was blocked
-        assert await renderer.capture("http://10.0.0.5/") == []  # refused up front
+        assert any(text == "Gift cards" for _, text in links)  # every link it saw is handed back
+        assert await renderer.capture("http://10.0.0.5/") == ([], [])  # refused up front
     finally:
         for server in (site, secret):
             server.shutdown()

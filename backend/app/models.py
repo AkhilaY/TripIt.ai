@@ -324,6 +324,10 @@ class PlaceMenu(BaseModel):
     fetched_at: Optional[datetime] = None
 
 
+class PickedLinks(BaseModel):
+    numbers: list[int] = Field(description="The numbers of the links to open, best first, at most 6.")
+
+
 class MenuRequest(BaseModel):
     refresh: bool = False
 

@@ -1808,6 +1808,22 @@ def test_menu_found_at_the_usual_address_when_no_link_leads_there(client):
     assert any(u.endswith("/menu") for u in client.web_log)
 
 
+def test_menu_on_a_site_for_several_restaurants(client):
+    app.state.db  # (fixture wiring)
+    pid = menu_place(client, website="https://group.test/")
+    app.state.db.update_place(pid, name="Joe's Pizza")
+    serve(client, "https://group.test/", b'<html><body><h1>The Group</h1><nav><a href="/trattoria/menus">Menus</a><a href="/joes-pizza">Joe\'s Pizza</a>'
+          b'<a href="/trattoria">Trattoria</a></nav><p>Welcome to the group, with restaurants across the city and beyond.</p></body></html>')
+    serve(client, "https://group.test/trattoria/menus", b"<html><body>Trattoria menu: Risotto $18.00 Veal $26.00 Pasta $15.00 Tiramisu $9.00 Gelato $7.00</body></html>")
+    serve(client, "https://group.test/joes-pizza", b'<html><body><h1>Joe\'s Pizza</h1><a href="/joes-pizza/our-menu.pdf">Download our menu</a><p>Pizza by the slice since 1975.</p></body></html>')
+    serve(client, "https://group.test/joes-pizza/our-menu.pdf", b"%PDF-1.4 fake", "application/pdf")
+    client.messages.outputs[MenuResult] = MENU_RESULT
+    menu = client.post(f"/v1/places/{pid}/menu", json={}, headers=H).json()
+    assert menu["status"] == "found" and menu["source_url"] == "https://group.test/joes-pizza/our-menu.pdf"
+    blocks = client.messages.calls[-1]["messages"][0]["content"]
+    assert [b["type"] for b in blocks].count("document") == 1 and "Trattoria menu" not in str(blocks)  # not another restaurant's menu
+
+
 def test_menu_page_named_in_structured_data(client):
     pid = menu_place(client)
     serve(client, "https://joes.test/", b'<html><head><script type="application/ld+json">{"@type": "Restaurant", "hasMenu": "https://joes.test/carta-del-dia"}</script></head>'

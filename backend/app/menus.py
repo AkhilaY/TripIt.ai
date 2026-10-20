@@ -250,12 +250,29 @@ def score_link(url: str, text: str) -> int:
     return score
 
 
-def candidate_links(page: Page, limit: int = MAX_CANDIDATES) -> list[str]:
+STOP_WORDS = {"the", "restaurant", "restaurants", "bar", "cafe", "café", "and", "kitchen", "grill", "london", "new", "york"}
+
+
+def name_words(name: str) -> list[str]:
+    return [w for w in re.findall(r"[a-z0-9À-ÿ']+", name.lower()) if len(w) >= 4 and w not in STOP_WORDS]
+
+
+def mentions(words: list[str], url: str, text: str) -> bool:
+    haystack = f"{text} {unquote(urlsplit(url).path)}".lower().replace("-", " ").replace("_", " ")
+    return any(w in haystack for w in words)
+
+
+def candidate_links(page: Page, limit: int = MAX_CANDIDATES, name: str = "") -> list[str]:
+    """Links that probably lead to a menu. On a site that covers several restaurants, the ones that mention this
+    restaurant's name come first."""
+    words = name_words(name)
     best: dict[str, int] = {}
     for url, text in page.links:
         if url == page.url or not url.lower().startswith(("http://", "https://")):
             continue
         score = score_link(url, text)
+        if score > 0 and words and mentions(words, url, text):
+            score += 5
         if score > 0 and score > best.get(url, 0):
             best[url] = score
     return [u for u, _ in sorted(best.items(), key=lambda kv: -kv[1])[:limit]]
@@ -319,7 +336,7 @@ class MenuService:
 
         website = place.website or await self._find_website(place)
         if website:
-            materials = await self.gather_website(website)
+            materials = await self.gather_website(website, place.name)
             log.info("Menu for %s: %d item(s) read from the website's pages", place.name, len(materials))
             if materials:
                 result = clean_menu(await self.claude.extract_menu(place, materials, from_photos=False))
@@ -375,7 +392,7 @@ class MenuService:
                 return m.url
         return fallback
 
-    async def gather_website(self, website: str) -> list[Material]:
+    async def gather_website(self, website: str, name: str = "") -> list[Material]:
         home = await self.fetcher.get(website, HTML_BYTES)
         if home is None:
             return []
@@ -389,7 +406,7 @@ class MenuService:
         pages = [parse_page(home.url, home.body)]
         materials: list[Material] = []
         pdfs = images = 0
-        candidates = candidate_links(pages[0])
+        candidates = candidate_links(pages[0], name=name)
         for blob in pages[0].jsonld:  # a site can name its menu page in its structured data
             for url in re.findall(r'"hasMenu"\s*:\s*(?:\{[^{}]*?"url"\s*:\s*)?"(https?://[^"]+)"', blob)[:2]:
                 if url not in candidates:
@@ -404,6 +421,28 @@ class MenuService:
             for got in await asyncio.gather(*(self.fetcher.get(url, PDF_BYTES) for url in probes)):
                 if got is not None and not (got.content_type == "text/html" and got.body[:4000] == home.body[:4000]):
                     fetched.append(got)
+        words = name_words(name)
+        menuish = lambda g: bool(g and (g.content_type == "application/pdf" or g.content_type in IMAGE_TYPES
+                                        or ("html" in g.content_type and looks_like_menu(parse_page(g.url, g.body).text))))
+        if words:
+            # A site for several restaurants: this restaurant's own page comes first, and its menu beats the others'.
+            host = (urlsplit(home.url).hostname or "").removeprefix("www.")
+            venues = [u for u, t in pages[0].links if u.startswith(("http://", "https://")) and mentions(words, u, t)
+                      and (urlsplit(u).hostname or "").removeprefix("www.") == host and u.rstrip("/") != home.url.rstrip("/")]
+            venues = list(dict.fromkeys(venues))[:2]
+            own: list = []
+            own_pages: list[Page] = []
+            for venue in await asyncio.gather(*(self.fetcher.get(u, HTML_BYTES) for u in venues)):
+                if venue is None or "html" not in venue.content_type:
+                    continue
+                page = parse_page(venue.url, venue.body)
+                own_pages.append(page)
+                own.append(venue)
+                deeper = [u for u in candidate_links(page, name=name) if u != venue.url]
+                own.extend(await asyncio.gather(*(self.fetcher.get(u, PDF_BYTES) for u in deeper)))
+            if any(menuish(g) for g in own):
+                fetched = own
+                pages = pages[:1] + own_pages
         for got in fetched:
             if got is None or got.truncated and "html" not in got.content_type:
                 continue

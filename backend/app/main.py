@@ -34,6 +34,7 @@ from .maplinks import resolve as resolve_map_link
 from .media import UnsupportedURLError, find_url, platform_for
 from .models import (
     AddFromLinkRequest,
+    AddToDayRequest,
     AddPlaceRequest,
     AddPlaceResult,
     BriefingRequest,
@@ -59,6 +60,7 @@ from .models import (
     ReorderRequest,
     ScreenshotJobRequest,
     SearchPlacesRequest,
+    TidyRequest,
     ShareLink,
     Trip,
     TasteProfile,
@@ -321,6 +323,31 @@ async def move_in_itinerary(trip_id: str, body: MoveRequest, request: Request) -
     return _trip_or_404(request, trip_id)
 
 
+@app.post("/v1/trips/{trip_id}/add-to-day", response_model=TripDetail, dependencies=[Auth])
+async def add_to_day(trip_id: str, body: AddToDayRequest, request: Request) -> TripDetail:
+    """Builds the itinerary by hand: puts the chosen places at the end of a day (a new day when none is given)."""
+    trip = _trip_or_404(request, trip_id)
+    known = {p.id for p in trip.places}
+    if any(pid not in known for pid in body.place_ids):
+        raise HTTPException(status_code=422, detail="Pick places from one trip")
+    try:
+        _library(request).add_to_day(trip_id, body.place_ids, body.day)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    return _trip_or_404(request, trip_id)
+
+
+@app.post("/v1/trips/{trip_id}/tidy", response_model=TripDetail, dependencies=[Auth])
+async def tidy_trip(trip_id: str, body: TidyRequest, request: Request) -> TripDetail:
+    """Optional AI pass over a hand-built itinerary: orders stops, suggests times, follows an instruction."""
+    _trip_or_404(request, trip_id)
+    try:
+        await _library(request).tidy_trip(trip_id, body.instruction, request.app.state.claude)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    return _trip_or_404(request, trip_id)
+
+
 @app.post("/v1/trips/{trip_id}/refresh-details", response_model=TripDetail, dependencies=[Auth])
 async def refresh_details(trip_id: str, request: Request) -> TripDetail:
     """Looks up opening hours (and missing pins) for places that haven't been checked yet."""
@@ -385,7 +412,7 @@ def _public_trip(trip: TripDetail, settings: Settings) -> dict:
     """What a shared link shows: everything but your own notes."""
     data = trip.model_dump(mode="json", exclude={"share_token"})
     for p in data["places"]:
-        for key in ("user_notes", "hours_checked_at", "photos_checked_at"):
+        for key in ("user_notes", "hours_checked_at", "photos_checked_at", "rating_checked_at"):
             p.pop(key, None)
     data["reels"] = [
         {k: r[k] for k in ("id", "url", "platform", "title", "creator")}

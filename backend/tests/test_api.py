@@ -95,7 +95,8 @@ class FakeGeocoder:
             lat, lon = self.COORDS[name]
             from app.hours import parse_osm
             return GeoMatch(name=name, latitude=lat, longitude=lon, address="Somewhere St",
-                            hours=parse_osm("Mo-Fr 11:00-23:00; Sa-Su 10:00-02:00"))
+                            hours=parse_osm("Mo-Fr 11:00-23:00; Sa-Su 10:00-02:00"),
+                            rating=4.6 if name == "Joe's Pizza" else None, rating_count=1200 if name == "Joe's Pizza" else None)
         return None
 
 
@@ -810,6 +811,103 @@ def test_move_between_days(client):
     other = client.post("/v1/places", json={"name": "Elsewhere", "city": "Paris"}, headers=H).json()["place"]
     r = client.post(f"/v1/trips/{job['trip_id']}/move", json={"place_id": other["id"], "day": 1}, headers=H)
     assert r.status_code == 404
+
+
+def test_ratings_saved_on_import(client):
+    job = import_reel(client)
+    trip = client.get(f"/v1/trips/{job['trip_id']}", headers=H).json()
+    joes = next(p for p in trip["places"] if p["name"] == "Joe's Pizza")
+    assert joes["rating"] == 4.6 and joes["rating_count"] == 1200 and joes["rating_checked_at"] is not None
+    prince = next(p for p in trip["places"] if p["name"] == "Prince Street Pizza")
+    assert prince["rating"] is None  # found, but Google had no rating
+    # Lucali wasn't found at all; a refresh marks it as checked so it isn't looked up again every time.
+    refreshed = client.post(f"/v1/trips/{job['trip_id']}/refresh-details", headers=H).json()
+    lucali = next(p for p in refreshed["places"] if p["name"] == "Lucali")
+    assert lucali["rating"] is None and lucali["rating_checked_at"] is not None
+
+
+def test_ratings_backfilled_for_places_saved_earlier(client):
+    job = import_reel(client)
+    joes = next(p for p in client.get(f"/v1/trips/{job['trip_id']}", headers=H).json()["places"] if p["name"] == "Joe's Pizza")
+    app.state.db.update_place(joes["id"], rating=None, rating_count=None, rating_checked_at=None)  # saved before ratings existed
+    refreshed = client.post(f"/v1/trips/{job['trip_id']}/refresh-details", headers=H).json()
+    assert next(p for p in refreshed["places"] if p["id"] == joes["id"])["rating"] == 4.6
+
+
+def test_add_to_day_builds_itinerary_by_hand(client):
+    job = import_reel(client)
+    trip_id = job["trip_id"]
+    ids = {p["name"]: p["id"] for p in client.get(f"/v1/trips/{trip_id}", headers=H).json()["places"]}
+
+    trip = client.post(f"/v1/trips/{trip_id}/add-to-day", json={"place_ids": [ids["Lucali"], ids["Joe's Pizza"]]}, headers=H).json()
+    assert trip["day_count"] == 1  # no day given: a new day at the end
+    day1 = sorted((p for p in trip["places"] if p["day_number"] == 1), key=lambda p: p["day_order"])
+    assert [p["name"] for p in day1] == ["Lucali", "Joe's Pizza"]  # in the order they were picked
+
+    # Adding to an existing day appends, and places already on it stay where they are.
+    trip = client.post(f"/v1/trips/{trip_id}/add-to-day",
+                       json={"place_ids": [ids["Joe's Pizza"], ids["Prince Street Pizza"]], "day": 1}, headers=H).json()
+    day1 = sorted((p for p in trip["places"] if p["day_number"] == 1), key=lambda p: p["day_order"])
+    assert [p["name"] for p in day1] == ["Lucali", "Joe's Pizza", "Prince Street Pizza"]
+
+    # A new day, moving a place off the day it was on.
+    trip = client.post(f"/v1/trips/{trip_id}/add-to-day", json={"place_ids": [ids["Lucali"]]}, headers=H).json()
+    assert trip["day_count"] == 2
+    assert next(p for p in trip["places"] if p["name"] == "Lucali")["day_number"] == 2
+    orders = sorted(p["day_order"] for p in trip["places"] if p["day_number"] == 1)
+    assert orders == [0, 1]
+
+    other = client.post("/v1/places", json={"name": "Elsewhere", "city": "Paris"}, headers=H).json()["place"]
+    assert client.post(f"/v1/trips/{trip_id}/add-to-day", json={"place_ids": [other["id"]]}, headers=H).status_code == 422
+    assert client.post(f"/v1/trips/{trip_id}/add-to-day", json={"place_ids": []}, headers=H).status_code == 422
+    assert client.post(f"/v1/trips/{trip_id}/add-to-day", json={"place_ids": [ids["Lucali"]], "day": 22}, headers=H).status_code == 422
+
+
+def test_tidy_with_claude_keeps_days_and_follows_instruction(client):
+    job = import_reel(client)
+    trip_id = job["trip_id"]
+    ids = {p["name"]: p["id"] for p in client.get(f"/v1/trips/{trip_id}", headers=H).json()["places"]}
+    assert client.post(f"/v1/trips/{trip_id}/tidy", json={}, headers=H).status_code == 422  # nothing on a day yet
+
+    client.post(f"/v1/trips/{trip_id}/add-to-day", json={"place_ids": [ids["Lucali"], ids["Joe's Pizza"]]}, headers=H)
+    client.post(f"/v1/trips/{trip_id}/add-to-day", json={"place_ids": [ids["Prince Street Pizza"]]}, headers=H)
+    client.messages.outputs[PlanResult] = PlanResult(
+        days=[
+            PlannedDay(day_number=1, title="Pizza crawl", stops=[
+                PlannedStop(place_id=ids["Joe's Pizza"], time_of_day="lunch", note="Plain slice"),
+                PlannedStop(place_id=ids["Lucali"], time_of_day="dinner", note=None),
+            ]),
+            PlannedDay(day_number=2, title="Nolita", stops=[
+                PlannedStop(place_id=ids["Prince Street Pizza"], time_of_day="afternoon", note=None),
+            ]),
+        ],
+        unscheduled_place_ids=[],
+        notes=None,
+    )
+    trip = client.post(f"/v1/trips/{trip_id}/tidy", json={"instruction": "pizza for lunch"}, headers=H).json()
+    sent = client.messages.calls[-1]
+    payload = sent["messages"][0]["content"][0]["text"]
+    assert "pizza for lunch" in payload and '"current_day": 1' in payload
+    assert "current_day" in sent["system"]
+    day1 = sorted((p for p in trip["places"] if p["day_number"] == 1), key=lambda p: p["day_order"])
+    assert [p["name"] for p in day1] == ["Joe's Pizza", "Lucali"]
+    assert day1[0]["day_note"] == "Plain slice" and day1[0]["time_of_day"] == "lunch"
+    assert trip["day_titles"] == ["Pizza crawl", "Nolita"] and trip["planned_by"] == "claude"
+
+
+def test_tidy_falls_back_to_offline_ordering(client):
+    job = import_reel(client)
+    trip_id = job["trip_id"]
+    ids = {p["name"]: p["id"] for p in client.get(f"/v1/trips/{trip_id}", headers=H).json()["places"]}
+    client.post(f"/v1/trips/{trip_id}/add-to-day", json={"place_ids": [ids["Lucali"], ids["Joe's Pizza"], ids["Prince Street Pizza"]]}, headers=H)
+    client.patch(f"/v1/places/{ids['Lucali']}", json={"start_time": "13:00"}, headers=H)
+    client.patch(f"/v1/places/{ids['Prince Street Pizza']}", json={"start_time": "09:30"}, headers=H)
+    client.messages.stop_reason = "refusal"
+    trip = client.post(f"/v1/trips/{trip_id}/tidy", json={}, headers=H).json()
+    assert trip["planned_by"] == "offline"
+    day1 = sorted((p for p in trip["places"] if p["day_number"] == 1), key=lambda p: p["day_order"])
+    assert [p["name"] for p in day1][0] == "Prince Street Pizza"  # the 09:30 booking comes first
+    assert next(p for p in day1 if p["name"] == "Lucali")["time_of_day"] == "lunch"  # 13:00
 
 
 # ---------- Adding places without a reel ----------

@@ -100,6 +100,9 @@ const S = {
   chatTrip: undefined,  // trip the concierge is talking about (null = all trips)
   chatBusy: false,
   taste: null,          // onboarding draft: {step, p}
+  home: null,           // home filters: {tab, cat, sort, trip, starred}
+  sel: { on: false, picked: new Set() }, // multi-select for building an itinerary
+  pos: null,            // {at, latitude, longitude} for "closest to me"
 };
 
 const view = $('#view');
@@ -220,6 +223,7 @@ async function render({ quiet = false } = {}) {
   const token = ++renderToken;
   const key = location.hash;
   if (!quiet) navigating = token;
+  if (!quiet && key !== lastKey) { if (S.sel.keep) S.sel.keep = false; else resetSel(); }
   try {
     await paint(r, token, key, quiet);
   } finally {
@@ -395,10 +399,93 @@ function thumb(p, size = 56) {
     ? `<img src="${esc(photoUrl(photo, 240))}" alt="" loading="lazy" decoding="async" onerror="this.remove()">` : ''}</span>`;
 }
 const isNew = (p) => (S.newIds.has(p.id) ? '<span class="chip-new">NEW</span>' : '');
-const starMark = (p) => (p.must_do ? `<span class="star-inline" title="Must-do" aria-label="Must-do">${ICON.star}</span>` : '');
+const starMark = (p) => (p.must_do ? `<span class="star-inline" title="Starred" aria-label="Starred">${ICON.star}</span>` : '');
 const hotChip = (p) => (p.mention_count >= 2 ? `<span class="hot" title="Recommended in ${p.mention_count} saved reels">${ICON.flame}${p.mention_count} reels</span>` : '');
-/** Must-dos first, then places more reels recommend; otherwise keeps the saved order. */
+/** Starred places first, then places more reels recommend; otherwise keeps the saved order. */
 const byPriority = (a, b) => (b.must_do - a.must_do) || ((b.mention_count || 0) - (a.mention_count || 0));
+
+// ---------- Filters, sorting and starring (home "Places") ----------
+
+/** The chips on the home screen: friendlier groups of the app's categories. */
+const GROUPS = [
+  { id: 'food', label: 'Food', cats: ['food', 'dessert'] },
+  { id: 'coffee', label: 'Coffee', cats: ['cafe'] },
+  { id: 'drinks', label: 'Drinks', cats: ['drinks', 'nightlife'] },
+  { id: 'stay', label: 'Hotels', cats: ['stay'] },
+  { id: 'shopping', label: 'Shopping', cats: ['shopping'] },
+  { id: 'sights', label: 'Sights', cats: ['attraction', 'nature'] },
+  { id: 'activities', label: 'Activities', cats: ['activity'] },
+  { id: 'other', label: 'Other', cats: ['other'] },
+];
+const GROUP_OF = Object.fromEntries(GROUPS.flatMap((g) => g.cats.map((c) => [c, g.id])));
+
+function meters(lat1, lon1, lat2, lon2) {
+  const rad = Math.PI / 180;
+  const a = Math.sin(((lat2 - lat1) * rad) / 2) ** 2
+    + Math.cos(lat1 * rad) * Math.cos(lat2 * rad) * Math.sin(((lon2 - lon1) * rad) / 2) ** 2;
+  return 6371000 * 2 * Math.asin(Math.sqrt(a));
+}
+const distanceTo = (p) => (S.pos && p.latitude != null && p.longitude != null ? meters(S.pos.latitude, S.pos.longitude, p.latitude, p.longitude) : Infinity);
+const gap = (x, y) => (x === y ? 0 : x - y);
+
+const SORTS = {
+  popular: { label: 'Most popular', cmp: (a, b) => (b.mention_count || 0) - (a.mention_count || 0) || (b.rating || 0) - (a.rating || 0) || (b.rating_count || 0) - (a.rating_count || 0) },
+  name: { label: 'A to Z', cmp: (a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }) },
+  closest: { label: 'Closest to me', cmp: (a, b) => gap(distanceTo(a), distanceTo(b)) },
+  rating: { label: 'Highest rated', cmp: (a, b) => (b.rating || 0) - (a.rating || 0) || (b.rating_count || 0) - (a.rating_count || 0) },
+  recent: { label: 'Recently saved', cmp: (a, b) => String(b.created_at).localeCompare(String(a.created_at)) },
+};
+
+const HOME_KEY = 'tripit.home';
+function loadHome() {
+  const home = { tab: 'trips', cat: 'all', sort: 'popular', trip: 'all', starred: false };
+  try {
+    const saved = JSON.parse(localStorage.getItem(HOME_KEY) || '{}');
+    if (saved.tab === 'places') home.tab = 'places';
+    if (saved.cat === 'all' || GROUPS.some((g) => g.id === saved.cat)) home.cat = saved.cat;
+    if (SORTS[saved.sort] && saved.sort !== 'closest') home.sort = saved.sort; // that one needs a fresh location
+  } catch { /* private mode or bad data: use the defaults */ }
+  return home;
+}
+function saveHome() {
+  try { localStorage.setItem(HOME_KEY, JSON.stringify({ tab: S.home.tab, cat: S.home.cat, sort: S.home.sort })); } catch { /* ignore */ }
+}
+S.home = loadHome();
+
+/** Starred places always come first; the chosen sort orders each half. */
+function sortPlaces(list, sort) {
+  const { cmp } = SORTS[sort] || SORTS.popular;
+  return [...list].sort((a, b) => (Number(b.must_do) - Number(a.must_do)) || cmp(a, b) || a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+}
+
+async function getPosition() {
+  if (S.pos && Date.now() - S.pos.at < 5 * 60 * 1000) return S.pos;
+  if (!navigator.geolocation) throw new ApiError('This browser can’t share your location.', 0);
+  const pos = await new Promise((resolve, reject) => navigator.geolocation.getCurrentPosition(resolve, reject, {
+    enableHighAccuracy: false, timeout: 15000, maximumAge: 5 * 60 * 1000,
+  })).catch((e) => {
+    throw new ApiError(e.code === 1
+      ? 'Location access is off. Allow it for TripIt in Settings → Privacy & Security → Location Services → Safari Websites.'
+      : 'Couldn’t get your location. Try again outside or with Wi-Fi on.', 0);
+  });
+  S.pos = { at: Date.now(), latitude: pos.coords.latitude, longitude: pos.coords.longitude };
+  return S.pos;
+}
+
+const fmtCount = (n) => (n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1).replace(/\.0$/, '')}k` : String(n));
+const ratingChip = (p) => (p.rating ? `<span class="rating" title="Google rating">${ICON.star}${p.rating.toFixed(1)}${p.rating_count ? `<span class="rc">(${fmtCount(p.rating_count)})</span>` : ''}</span>` : '');
+const dayChip = (p) => (p.day_number ? `<span class="daychip">Day ${p.day_number}</span>` : '');
+const starButton = (p) => `<button class="starbtn${p.must_do ? ' on' : ''}" data-act="star" data-id="${p.id}" aria-pressed="${!!p.must_do}"
+  aria-label="${p.must_do ? 'Remove the star from' : 'Star'} ${esc(p.name)}">${p.must_do ? ICON.star : ICON.starO}</button>`;
+
+// Selecting places to build an itinerary by hand.
+const resetSel = () => { S.sel = { on: false, picked: new Set() }; };
+const findAnyPlace = (id) => allPlaces().find((x) => x.id === id) || (S.places || []).find((x) => x.id === id);
+const selTripId = () => {
+  const first = [...S.sel.picked][0];
+  const p = first && findAnyPlace(first);
+  return p ? p.trip_id : null;
+};
 
 function segControl(key, items) {
   const i = Math.max(0, items.findIndex((x) => x.on));
@@ -406,14 +493,23 @@ function segControl(key, items) {
     <span class="seg-thumb" aria-hidden="true"></span><span class="seg-items">${items.map((x) => x.html).join('')}</span></nav>`;
 }
 
-function placeRow(p) {
-  return `<a class="row" href="#/place/${p.id}">
-    ${thumb(p, 56)}
-    <span class="main"><span class="t ${p.visited ? 'strike' : ''}">${esc(p.name)}${starMark(p)}${isNew(p)}${p.latitude == null ? ' <span class="flag" title="Not on the map yet">●</span>' : ''}</span>
-    <span class="s">${esc([p.neighborhood, p.city].filter(Boolean).join(' · '))}${hotChip(p)}</span>
+function placeRow(p, { home = false } = {}) {
+  const sub = [home ? CATS[p.category] : null, p.neighborhood, p.city].filter(Boolean);
+  const dist = home && S.home.sort === 'closest' && S.pos && distanceTo(p) !== Infinity
+    ? `<span class="distchip">${fmtDistance(distanceTo(p))} away</span>` : '';
+  const body = `${thumb(p, 56)}
+    <span class="main"><span class="t ${p.visited ? 'strike' : ''}">${esc(p.name)}${isNew(p)}${p.latitude == null ? ' <span class="flag" title="Not on the map yet">●</span>' : ''}</span>
+    <span class="s">${esc(sub.join(' · '))}${ratingChip(p)}${hotChip(p)}${dayChip(p)}${dist}</span>
     ${p.recommended_items.length ? `<span class="s clip">Try: ${esc(p.recommended_items.join(', '))}</span>` : ''}
-    ${hoursLine(p)}${hereChip(p)}</span>
-    ${ICON.chev}</a>`;
+    ${hoursLine(p)}${hereChip(p)}</span>`;
+  if (S.sel.on) {
+    const picked = S.sel.picked.has(p.id);
+    const tripId = selTripId();
+    const blocked = tripId && p.trip_id !== tripId;
+    return `<button class="row prow sel${picked ? ' picked' : ''}${blocked ? ' blocked' : ''}" data-act="pick" data-id="${p.id}" aria-pressed="${picked}">
+      <span class="check" aria-hidden="true">${picked ? ICON.done : ''}</span>${body}</button>`;
+  }
+  return `<div class="row prow"><a class="rowlink" href="#/place/${p.id}">${body}</a>${starButton(p)}</div>`;
 }
 
 function jobRow(job) {
@@ -540,14 +636,8 @@ function hereTimes(placeId) {
 }
 
 async function locateMe(places) {
-  if (!navigator.geolocation) throw new ApiError('This browser can’t share your location.', 0);
-  const pos = await new Promise((resolve, reject) => navigator.geolocation.getCurrentPosition(resolve, reject, {
-    enableHighAccuracy: false, timeout: 15000, maximumAge: 5 * 60 * 1000,
-  })).catch((e) => {
-    throw new ApiError(e.code === 1
-      ? 'Location access is off. Allow it for TripIt in Settings → Privacy & Security → Location Services → Safari Websites.'
-      : 'Couldn’t get your location. Try again outside or with Wi-Fi on.', 0);
-  });
+  const here = await getPosition();
+  const pos = { coords: here };
   const ids = places.filter(located).map((p) => p.id).slice(0, 50);
   if (!ids.length) throw new ApiError('None of these places are on the map yet.', 0);
   const res = await api('/v1/routes/from', { method: 'POST', body: { latitude: pos.coords.latitude, longitude: pos.coords.longitude, place_ids: ids } });
@@ -877,9 +967,69 @@ if (window.visualViewport) {
 
 const addButton = `<button class="gbtn tint" data-act="add" aria-label="Add a reel">${ICON.plus}</button>`;
 
+/** Trips | Places switch under the home title. */
+const homeSwitch = () => segControl('home', [['trips', 'Trips'], ['places', 'Places']].map(([k, label]) => ({
+  on: S.home.tab === k,
+  html: `<button class="${S.home.tab === k ? 'on' : ''}" data-act="hometab" data-tab="${k}" aria-pressed="${S.home.tab === k}">${label}</button>`,
+})));
+
+async function placesHome(trips) {
+  const places = await cachedPlaces();
+  const h = S.home;
+  if (h.trip !== 'all' && !trips.some((t) => t.id === h.trip)) h.trip = 'all';
+  const tripName = Object.fromEntries(trips.map((t) => [t.id, t.name]));
+  const inTrip = places.filter((p) => h.trip === 'all' || p.trip_id === h.trip);
+  const base = inTrip.filter((p) => !h.starred || p.must_do);
+  const counts = {};
+  base.forEach((p) => { counts[GROUP_OF[p.category] || 'other'] = (counts[GROUP_OF[p.category] || 'other'] || 0) + 1; });
+  if (h.cat !== 'all' && !counts[h.cat]) h.cat = 'all';
+  const list = sortPlaces(base.filter((p) => h.cat === 'all' || (GROUP_OF[p.category] || 'other') === h.cat), h.sort);
+  const starredCount = inTrip.filter((p) => p.must_do).length;
+
+  const chip = (id, label, n, on) => `<button class="fchip${on ? ' on' : ''}" data-act="homecat" data-cat="${id}" aria-pressed="${on}">${label}<span class="n">${n}</span></button>`;
+  const chips = `<div class="fchips" role="group" aria-label="Filter by type">
+    <button class="fchip star${h.starred ? ' on' : ''}" data-act="homestarred" aria-pressed="${h.starred}">${ICON.star}Starred<span class="n">${starredCount}</span></button>
+    ${chip('all', 'All', base.length, h.cat === 'all')}
+    ${GROUPS.filter((g) => counts[g.id]).map((g) => chip(g.id, g.label, counts[g.id], h.cat === g.id)).join('')}</div>`;
+  const controls = `<div class="homectl">
+    ${trips.length > 1 ? `<button class="pillbtn" data-act="hometrip">${esc(h.trip === 'all' ? 'All trips' : tripName[h.trip])}</button>` : ''}
+    <button class="pillbtn" data-act="homesort" aria-label="Sort: ${esc(SORTS[h.sort].label)}">${esc(SORTS[h.sort].label)}</button>
+    <button class="pillbtn${S.sel.on ? ' on' : ''}" data-act="selecttoggle">${S.sel.on ? 'Done' : 'Select'}</button></div>`;
+
+  const group = (items) => `<div class="group thumbs">${items.map((p) => placeRow(p, { home: true })).join('')}</div>`;
+  const starred = list.filter((p) => p.must_do);
+  const rest = list.filter((p) => !p.must_do);
+  let body;
+  if (!places.length) {
+    body = emptyState('accent', 'pin', 'No places yet', 'Places from the reels you save appear here, ready to filter, star and add to an itinerary.',
+      `<button class="btn" data-act="add">${ICON.link}Paste a link</button>`);
+  } else if (!list.length) {
+    body = emptyState('gray', 'pinslash', 'Nothing matches', 'Try another filter.',
+      '<button class="btn tint" data-act="homeclear">Clear filters</button>');
+  } else if (starred.length && rest.length) {
+    body = `<div class="section"><div class="section-h">${ICON.star}Starred</div>${group(starred)}</div>
+      <div class="section"><div class="section-h">${CATS_OF_FILTER()}</div>${group(rest)}</div>`;
+  } else {
+    body = `<div class="section">${group(list)}</div>`;
+  }
+  const subtitle = `${plural(places.length, 'place')} across ${plural(trips.length, 'trip')}`;
+  return `${navbar('Places', { right: addButton })}<h1 class="largetitle" data-anchor>Places</h1>
+    <div class="subtitle"><span>${esc(subtitle)}</span></div>${homeSwitch()}${places.length ? chips + controls : ''}${body}${selBar()}`;
+}
+const CATS_OF_FILTER = () => (S.home.cat === 'all' ? 'More places' : esc(GROUPS.find((g) => g.id === S.home.cat).label));
+
+/** Floating bar while selecting places. */
+function selBar() {
+  if (!S.sel.on) return '';
+  const n = S.sel.picked.size;
+  return `<div class="selbar" role="region" aria-label="Selected places"><span class="selcount">${n ? `${plural(n, 'place')} selected` : 'Tap places to select them'}</span>
+    <button class="btn small" data-act="selectadd" ${n ? '' : 'disabled'}>${ICON.calendarPlus}Add to itinerary</button></div>`;
+}
+
 const VIEWS = {
   async trips() {
     const trips = await cachedTrips();
+    if (S.home.tab === 'places') return placesHome(trips);
     const inflightJobs = S.jobs.filter((j) => ACTIVE.has(j.status));
     const body = !trips.length && !inflightJobs.length
       ? emptyState('accent', 'plane', 'No trips yet',
@@ -890,7 +1040,7 @@ const VIEWS = {
     const active = activeTrip(trips);
     if (active && !S.trip[active.trip.id]) loadTrip(active.trip.id).then(() => render({ quiet: true })).catch(() => {});
     return {
-      html: `${navbar('Trips', { right: addButton })}<h1 class="largetitle" data-anchor>Trips</h1>${active ? todayCard(active) : ''}
+      html: `${navbar('Trips', { right: addButton })}<h1 class="largetitle" data-anchor>Trips</h1>${homeSwitch()}${active ? todayCard(active) : ''}
         ${tasteInvite()}${homeEdits(trips.length)}${body}`,
       // Warm the cache so opening a trip is instant.
       after: () => setTimeout(() => trips.slice(0, 8).forEach((t) => { if (!S.trip[t.id]) loadTrip(t.id).catch(() => {}); }), 400),
@@ -1010,14 +1160,14 @@ const VIEWS = {
         <input class="datefield" type="time" id="time-input" data-act="settime" data-id="${p.id}" value="${esc(p.start_time || '')}">
         ${p.start_time ? `<button class="linkbtn" data-act="cleartime" data-id="${p.id}" aria-label="Clear exact time">Clear</button>` : ''}</div>` : '';
 
-    const star = `<button class="gbtn star${p.must_do ? ' on' : ''}" data-act="star" data-id="${p.id}" aria-pressed="${p.must_do}" aria-label="Must-do">${p.must_do ? ICON.star : ICON.starO}</button>`;
+    const star = `<button class="gbtn star${p.must_do ? ' on' : ''}" data-act="star" data-id="${p.id}" aria-pressed="${p.must_do}" aria-label="${p.must_do ? 'Remove the star' : 'Star this place'}">${p.must_do ? ICON.star : ICON.starO}</button>`;
     const html = `${navbar(p.name, { back: `#/trip/${trip.id}`, backLabel: trip.name, right: star })}
       ${hero}
       <div class="ph" style="${cvar(p.category)}">
         <span class="cat">${catTile(p.category, 'sm')}${CATS[p.category]}</span>
         <h1 data-anchor>${esc(p.name)}${isNew(p)}</h1>
         <span class="loc">${esc([p.neighborhood, p.city].filter(Boolean).join(' · '))}</span>
-        ${p.must_do ? `<span class="mustline">${ICON.star}Must-do: the planner always fits it in</span>` : ''}
+        ${p.must_do ? `<span class="mustline">${ICON.star}Starred: first in your lists, and the planner always fits it in</span>` : ''}
         ${p.mention_count >= 2 ? `<span class="hotline">${ICON.flame}Recommended in ${p.mention_count} of your saved reels</span>` : ''}
         ${st ? `<span class="status hours-${st.state}">${esc(st.label)}</span>` : ''}
         ${p.resolved_name ? `<span class="s">On maps as ${esc(p.resolved_name)}</span>` : ''}
@@ -1296,7 +1446,9 @@ function gettingThere(p) {
 
 function placesList(trip) {
   if (!trip.places.length) return emptyState('gray', 'pinslash', 'No places', 'Places you save from reels appear here.');
-  return CAT_ORDER.filter((c) => trip.places.some((p) => p.category === c)).map((c) => {
+  const bar = `<div class="planbar"><span class="planned-by">${S.sel.on ? 'Tick places, then add them to a day' : 'Star the places you love'}</span>
+    <button class="linkbtn" data-act="selecttoggle">${S.sel.on ? 'Done' : 'Select'}</button></div>`;
+  return bar + CAT_ORDER.filter((c) => trip.places.some((p) => p.category === c)).map((c) => {
     const list = trip.places.filter((p) => p.category === c).sort(byPriority);
     return `<div class="section"><h2 class="section-title">${catTile(c)}${CATS[c]}<span class="count">${list.length}</span></h2>
       <div class="group thumbs">${list.map(placeRow).join('')}</div></div>`;
@@ -1304,23 +1456,26 @@ function placesList(trip) {
     + (trip.reels.length ? `<div class="section"><h2 class="section-title">Saved from</h2><div class="group tiles">${trip.reels.map((r) => `
       ${safeUrl(r.url) ? `<a class="row" href="${esc(r.url)}" target="_blank" rel="noopener">` : '<div class="row">'}${platformTile(platformOf(r.platform || r.url))}
       <span class="main"><span class="t" style="font-size:16px">${esc(r.title)}</span>
-      <span class="s">${esc([platformName(r.platform), r.creator ? `@${r.creator}` : '', plural(r.place_count, 'place')].filter(Boolean).join(' · '))}</span></span>${safeUrl(r.url) ? `${ICON.chev}</a>` : '</div>'}`).join('')}</div></div>` : '');
+      <span class="s">${esc([platformName(r.platform), r.creator ? `@${r.creator}` : '', plural(r.place_count, 'place')].filter(Boolean).join(' · '))}</span></span>${safeUrl(r.url) ? `${ICON.chev}</a>` : '</div>'}`).join('')}</div></div>` : '')
+    + selBar();
 }
 
 function itinerary(trip) {
   if (!trip.day_count) {
     return emptyState('indigo', 'calendar', 'No itinerary yet',
-      `Turn your ${plural(trip.places.length, 'saved place')} into a day-by-day plan grouped by neighborhood and time of day.`,
-      `<button class="btn" data-act="plan" data-id="${trip.id}" ${trip.places.length ? '' : 'disabled'}>${ICON.sparkle}Plan my trip</button>`);
+      `Build it yourself from your ${plural(trip.places.length, 'saved place')}, or let Claude group them by neighborhood and time of day. You can ask Claude to tidy your own plan later.`,
+      `<button class="btn" data-act="buildown" data-id="${trip.id}" ${trip.places.length ? '' : 'disabled'}>${ICON.calendarPlus}Build it myself</button>
+       <button class="btn tint" data-act="plan" data-id="${trip.id}" ${trip.places.length ? '' : 'disabled'}>${ICON.sparkle}Plan with Claude</button>`);
   }
   const by = trip.planned_by === 'claude'
     ? `<span class="planned-by">${ICON.sparkle}Planned with Claude</span>`
-    : trip.planned_by === 'offline' ? '<span class="planned-by">Quick plan grouped by location</span>' : '<span></span>';
+    : trip.planned_by === 'offline' ? '<span class="planned-by">Quick plan grouped by location</span>' : '<span class="planned-by">Your itinerary</span>';
   const active = activeTrip([trip]);
   let html = `${active ? `<a class="todaylink" href="#/today/${trip.id}">${ICON.sun}<span>Day ${active.day} is today. Open the day view</span>${ICON.chev}</a>` : ''}
     <div class="planbar">${by}
-    <span><button class="linkbtn" data-act="plan" data-id="${trip.id}">Re-plan</button>
-    <button class="linkbtn" data-act="editday" style="margin-left:10px">${S.editDay ? 'Done' : 'Edit'}</button></span></div>
+    <span class="planlinks"><button class="linkbtn" data-act="tidy" data-id="${trip.id}">Tidy with AI</button>
+    <button class="linkbtn" data-act="plan" data-id="${trip.id}">Re-plan</button>
+    <button class="linkbtn" data-act="editday">${S.editDay ? 'Done' : 'Edit'}</button></span></div>
     ${S.editDay ? '<div class="section"><div class="section-f" style="padding-top:0">Drag the handles to reorder stops or move them between days.</div></div>' : ''}`;
   if (trip.plan_notes) html += `<div class="section"><div class="group"><div class="notecard">${esc(trip.plan_notes)}</div></div></div>`;
   const mode = currentMode();
@@ -1335,7 +1490,7 @@ function itinerary(trip) {
     const dayIdx = dayIndexFor(trip, d);
     const locatedList = list.filter(located);
     html += `<div class="section"><div class="dayhead"><div>${date ? `<div class="date">${date}</div>` : ''}<div class="d">Day ${d}</div>
-      <div class="dt">${esc(trip.day_titles[d - 1] || `Day ${d}`)}</div></div><span class="daytravel" data-day="${d}"></span></div>
+      ${trip.day_titles[d - 1] && trip.day_titles[d - 1] !== `Day ${d}` ? `<div class="dt">${esc(trip.day_titles[d - 1])}</div>` : ''}</div><span class="daytravel" data-day="${d}"></span></div>
       <div class="group${S.editDay ? ' droplist' : ''}" data-day="${d}">${list.map((p, i) => {
         const conflict = slotConflict(p.opening_hours, dayIdx, p.time_of_day, p.start_time);
         const todays = dayIdx != null ? dayHours(p.opening_hours, dayIdx) : null;
@@ -1351,7 +1506,10 @@ function itinerary(trip) {
         const legRow = located(p) && next && !S.editDay
           ? `<div class="leg" data-day="${d}" data-from="${p.id}" data-to="${next.id}"><span class="spinner" style="width:14px;height:14px"></span></div>` : '';
         return (S.editDay ? dragRow(p, inner) : `<a class="row" href="#/place/${p.id}">${inner}${ICON.chev}</a>`) + legRow;
-      }).join('') || `<div class="row dropempty"><span class="s">${S.editDay ? 'Drop a place here' : 'Nothing planned. Move places here from their page.'}</span></div>`}</div></div>`;
+      }).join('') || `<div class="row dropempty"><span class="s">${S.editDay ? 'Drop a place here' : 'Nothing planned yet.'}</span></div>`}${S.editDay ? '' : `<button class="row addrow" data-act="daypick" data-day="${d}" data-id="${trip.id}"><span class="addic">${ICON.plus}</span><span class="t link">Add places</span></button>`}</div></div>`;
+  }
+  if (!S.editDay && trip.day_count < 21) {
+    html += `<div class="section"><button class="btn tint wide" data-act="daypick" data-day="0" data-id="${trip.id}">${ICON.plus}Add a day</button></div>`;
   }
   html += '<div class="section" id="travel-note" hidden><div class="section-f">Travel times are estimates from distance. Real routes and transit times need a Google key with the Routes API (see the README).</div></div>';
   if (!trip.start_date && trip.places.some((p) => p.opening_hours && p.opening_hours.weekly)) {
@@ -1617,6 +1775,87 @@ function planSheet(trip) {
         closeSheet();
         toast(res.planned_by === 'claude' ? `Planned ${plural(res.day_count, 'day')} with Claude` : 'Made a quick plan by location (Claude unavailable)');
         go(`#/trip/${trip.id}/itinerary`);
+      } catch (e) {
+        S.sheet.busy = false; renderOverlay();
+        toast(e.message, true);
+      }
+    },
+  });
+}
+
+/** Brings a trip's places into the caches after the itinerary changed on the server. */
+function syncTrip(res) {
+  S.trip[res.id] = res;
+  if (S.places) {
+    const fresh = new Map(res.places.map((p) => [p.id, p]));
+    S.places = S.places.map((p) => fresh.get(p.id) || p);
+  }
+  fetchedAt.trips = 0;
+}
+
+async function addToDay(tripId, ids, day) {
+  const res = await api(`/v1/trips/${tripId}/add-to-day`, { method: 'POST', body: { place_ids: ids, day } });
+  syncTrip(res);
+  toast(`Added ${plural(ids.length, 'place')} to Day ${day || res.day_count}`);
+  resetSel();
+  render();
+}
+
+/** After ticking places in a list: which day do they go on? */
+async function addSelectedSheet() {
+  const ids = [...S.sel.picked];
+  const tripId = selTripId();
+  if (!ids.length || !tripId) return;
+  const trip = await cachedTrip(tripId);
+  const title = (d) => (trip.day_titles[d - 1] && trip.day_titles[d - 1] !== `Day ${d}` ? ` · ${trip.day_titles[d - 1]}` : '');
+  const actions = Array.from({ length: trip.day_count }, (_, i) => i + 1).map((d) => ({
+    label: `Day ${d}${title(d)} (${plural(stops(trip, d).length, 'stop')})`,
+    run: () => addToDay(trip.id, ids, d),
+  }));
+  if (trip.day_count < 21) actions.push({ label: trip.day_count ? `New day (Day ${trip.day_count + 1})` : 'Day 1', run: () => addToDay(trip.id, ids, null) });
+  openSheet({ type: 'actions', title: `Add ${plural(ids.length, 'place')} to…`, actions });
+}
+
+/** From the itinerary: tick places to put on a day (day 0 = a new day at the end). */
+function pickPlacesSheet(trip, day) {
+  const target = day || trip.day_count + 1;
+  const st = { picked: new Set() };
+  const candidates = trip.places.filter((p) => p.day_number !== target)
+    .sort((a, b) => (a.day_number != null) - (b.day_number != null) || (Number(b.must_do) - Number(a.must_do)) || byPriority(a, b)
+      || a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+  openSheet({
+    type: 'form', title: day ? `Add to Day ${day}` : `New day ${target}`, confirm: 'Add', st,
+    body: () => (candidates.length
+      ? `<div class="section"><div class="group thumbs">${candidates.map((p) => `
+        <button class="row prow sel" data-act="sheetpick" data-id="${p.id}" aria-pressed="false"><span class="check" aria-hidden="true"></span>${thumb(p, 44)}
+          <span class="main"><span class="t">${esc(p.name)}${starMark(p)}</span>
+          <span class="s">${esc([CATS[p.category], p.neighborhood].filter(Boolean).join(' · '))}${dayChip(p)}</span></span></button>`).join('')}</div>
+        <div class="section-f">Places already on another day move to this one.</div></div>`
+      : '<div class="section"><div class="section-f">Every saved place is already on this day.</div></div>'),
+    async ok() {
+      closeSheet();
+      if (st.picked.size) await addToDay(trip.id, [...st.picked], day || null);
+    },
+  });
+}
+
+const TIDY_IDEAS = ['Group stops by neighborhood', 'Make it more relaxed', 'Put meals at mealtimes', 'Start later in the morning'];
+function tidySheet(trip) {
+  const st = { text: '' };
+  openSheet({
+    type: 'form', title: 'Tidy with AI', confirm: 'Tidy', st,
+    body: () => `<div class="section"><div class="section-h">What should change? (optional)</div><div class="group"><div class="row">
+        <input class="field" id="tidy-text" data-act="tidytext" placeholder="e.g. make day 2 more relaxed" value="${esc(st.text)}" aria-label="What should change"></div></div>
+      <div class="fchips wrap">${TIDY_IDEAS.map((t) => `<button class="fchip" data-act="tidysuggest" data-text="${esc(t)}">${esc(t)}</button>`).join('')}</div>
+      <div class="section-f">Keeps each place on the day you chose, orders the stops to cut down on travel and suggests times. It can take up to a minute.</div></div>`,
+    async ok() {
+      S.sheet.busy = true; renderOverlay();
+      try {
+        const res = await api(`/v1/trips/${trip.id}/tidy`, { method: 'POST', body: { instruction: st.text.trim() || null } });
+        syncTrip(res);
+        closeSheet();
+        toast(res.planned_by === 'claude' ? 'Tidied with Claude' : 'Ordered by location and time (Claude unavailable)');
+        render();
       } catch (e) {
         S.sheet.busy = false; renderOverlay();
         toast(e.message, true);
@@ -1916,11 +2155,11 @@ async function onAction(act, el) {
         { label: 'Add a place', run: () => addSheet({ tripId: t.id }) },
         { label: 'Save for offline', run: () => saveOffline(t.id) },
         { label: 'Rename', run: () => renameSheet(t) },
-        { label: 'Update hours & photos', run: async () => {
-          toast('Looking up hours and photos…');
+        { label: 'Update hours, photos & ratings', run: async () => {
+          toast('Looking up hours, photos and ratings…');
           S.trip[t.id] = await api(`/v1/trips/${t.id}/refresh-details`, { method: 'POST' });
           fetchedAt.trips = 0;
-          toast('Hours and photos updated');
+          toast('Hours, photos and ratings updated');
           render();
         } },
       ];
@@ -1994,11 +2233,57 @@ async function onAction(act, el) {
       return;
     }
     case 'star': {
-      const place = allPlaces().find((x) => x.id === el.dataset.id);
+      const place = findAnyPlace(el.dataset.id);
+      if (!place) return;
       await patchPlace(el.dataset.id, { must_do: !place.must_do });
-      toast(place.must_do ? 'Removed from must-dos' : 'Marked as a must-do');
+      toast(place.must_do ? 'Star removed' : 'Starred. It stays at the top of your lists');
       return;
     }
+    case 'hometab': S.home.tab = el.dataset.tab; resetSel(); saveHome(); render(); return;
+    case 'homecat': S.home.cat = el.dataset.cat; saveHome(); render(); return;
+    case 'homestarred': S.home.starred = !S.home.starred; render(); return;
+    case 'homeclear': S.home.cat = 'all'; S.home.starred = false; S.home.trip = 'all'; saveHome(); render(); return;
+    case 'hometrip': {
+      const mark = (on) => (on ? '✓ ' : '');
+      openSheet({ type: 'actions', title: 'Show places from', actions: [
+        { label: `${mark(S.home.trip === 'all')}All trips`, run: () => { S.home.trip = 'all'; render(); } },
+        ...(S.trips || []).map((t) => ({ label: `${mark(S.home.trip === t.id)}${t.name}`, run: () => { S.home.trip = t.id; render(); } })),
+      ] });
+      return;
+    }
+    case 'homesort':
+      openSheet({ type: 'actions', title: 'Sort by', actions: Object.entries(SORTS).map(([key, { label }]) => ({
+        label: `${S.home.sort === key ? '✓ ' : ''}${label}`,
+        run: async () => {
+          if (key === 'closest') { toast('Finding your location…'); await getPosition(); }
+          S.home.sort = key; saveHome(); render();
+        },
+      })) });
+      return;
+    case 'selecttoggle': S.sel = { on: !S.sel.on, picked: new Set() }; render(); return;
+    case 'pick': {
+      const p = findAnyPlace(el.dataset.id);
+      if (!p) return;
+      if (S.sel.picked.has(p.id)) S.sel.picked.delete(p.id);
+      else if (selTripId() && p.trip_id !== selTripId()) { toast('Pick places from one trip at a time', true); return; }
+      else S.sel.picked.add(p.id);
+      render();
+      return;
+    }
+    case 'selectadd': await addSelectedSheet(); return;
+    case 'buildown': resetSel(); S.sel.on = true; S.sel.keep = true; go(`#/trip/${el.dataset.id}`); toast('Tick the places for your first day'); return;
+    case 'daypick': pickPlacesSheet(S.trip[el.dataset.id], Number(el.dataset.day)); return;
+    case 'sheetpick': {
+      const { st } = S.sheet;
+      const on = !st.picked.has(el.dataset.id);
+      if (on) st.picked.add(el.dataset.id); else st.picked.delete(el.dataset.id);
+      el.classList.toggle('picked', on);
+      el.setAttribute('aria-pressed', String(on));
+      el.querySelector('.check').innerHTML = on ? ICON.done : '';
+      return;
+    }
+    case 'tidy': tidySheet(S.trip[el.dataset.id]); return;
+    case 'tidysuggest': S.sheet.st.text = el.dataset.text; renderOverlay(); return;
     case 'settime': await patchPlace(el.dataset.id, el.value ? { start_time: el.value } : { clear_start_time: true }); return;
     case 'cleartime': await patchPlace(el.dataset.id, { clear_start_time: true }); return;
     case 'done': {
@@ -2191,6 +2476,7 @@ document.addEventListener('input', (ev) => {
   if (el.dataset && ['notes', 'prefs'].includes(el.dataset.act)) onAction(el.dataset.act, el);
   if (el.dataset && el.dataset.act === 'addinput') addInputChanged(el.value);
   if (el.dataset && el.dataset.act === 'tastenotes' && S.taste) S.taste.p.notes = el.value;
+  if (el.dataset && el.dataset.act === 'tidytext' && S.sheet && S.sheet.st) S.sheet.st.text = el.value;
   if (el.id === 'chat-input') { el.style.height = 'auto'; el.style.height = `${Math.min(el.scrollHeight, 140)}px`; }
 });
 

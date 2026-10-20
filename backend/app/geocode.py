@@ -32,6 +32,8 @@ class GeoMatch:
     maps_url: Optional[str] = None
     hours: Optional[OpeningHours] = None
     photos: list[dict] = field(default_factory=list)  # {"source", "ref", "attribution"}
+    rating: Optional[float] = None  # Google's rating out of 5
+    rating_count: Optional[int] = None
     # Filled in by search()/details(), used when adding a place by hand.
     place_id: Optional[str] = None  # "google:<id>" or "osm:N123"
     category: Optional[str] = None
@@ -113,11 +115,11 @@ class GooglePlacesGeocoder:
     URL = "https://places.googleapis.com/v1/places:searchText"
     # Opening hours put this request in Google's "Enterprise" Text Search tier (smaller free allowance).
     FIELDS = ("places.displayName,places.formattedAddress,places.location,places.googleMapsUri,"
-              "places.regularOpeningHours,places.photos")
+              "places.regularOpeningHours,places.photos,places.rating,places.userRatingCount")
     # Search results only need enough to pick one; details() then fetches the rest for the chosen place.
     SEARCH_FIELDS = "places.id,places.displayName,places.formattedAddress,places.location,places.types"
     DETAIL_FIELDS = ("id,displayName,formattedAddress,location,googleMapsUri,regularOpeningHours,photos,types,"
-                     "addressComponents")
+                     "addressComponents,rating,userRatingCount")
 
     def __init__(self, api_key: str, client: Optional[httpx.AsyncClient] = None):
         self.api_key = api_key
@@ -149,6 +151,7 @@ class GooglePlacesGeocoder:
             address=p.get("formattedAddress"),
             maps_url=p.get("googleMapsUri"),
             hours=from_google(p.get("regularOpeningHours")),
+            rating=p.get("rating"), rating_count=p.get("userRatingCount"),
             photos=[
                 {"source": "google", "ref": photo["name"],
                  "attribution": ", ".join(a.get("displayName", "") for a in photo.get("authorAttributions", [])) or None}
@@ -204,6 +207,7 @@ class GooglePlacesGeocoder:
             name=(p.get("displayName") or {}).get("text") or "",
             latitude=loc["latitude"], longitude=loc["longitude"], address=p.get("formattedAddress"),
             maps_url=p.get("googleMapsUri"), hours=from_google(p.get("regularOpeningHours")),
+            rating=p.get("rating"), rating_count=p.get("userRatingCount"),
             photos=[
                 {"source": "google", "ref": photo["name"],
                  "attribution": ", ".join(a.get("displayName", "") for a in photo.get("authorAttributions", [])) or None}

@@ -49,7 +49,7 @@ function placeRow(p, trip, num, dayIdx) {
   const hours = dayIdx != null ? dayHours(p.opening_hours, dayIdx) : (openStatus(p.opening_hours) || {}).label;
   return `<details class="srow">
     <summary class="row">${num ? `<span class="stopnum" style="--pc: var(--c-${p.category})">${num}</span>` : ''}${thumb(p)}
-      <span class="main"><span class="t">${esc(p.name)}${p.must_do ? ` <span class="star-inline" aria-label="Must-do">${ICON.star}</span>` : ''}</span>
+      <span class="main"><span class="t">${esc(p.name)}${p.must_do ? ` <span class="star-inline" aria-label="Starred">${ICON.star}</span>` : ''}</span>
       <span class="s">${esc([when, CATS[p.category], p.neighborhood].filter(Boolean).join(' · '))}</span></span>${ICON.chev}</summary>
     <div class="sdetail">
       ${p.summary ? `<p>${esc(p.summary)}</p>` : ''}

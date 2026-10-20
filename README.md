@@ -93,10 +93,11 @@ On Android, install the app from Chrome's menu (**Install app**). TripIt then ap
 - **Notifications:** turn on **Settings → Import notifications** to hear when a shared reel's places are saved ("3 new places saved to New York") or when it couldn't be read. On iPhone this works once TripIt is on your Home Screen (iOS 16.4 or later).
 - **Add without a reel:** the **+** button takes a TikTok/Instagram/YouTube link, a **Google Maps or Apple Maps link**, or a place name to search for. **Choose screenshots** reads screenshots of a post, map or article and finds the places in them.
 - **Trips:** places are grouped into one trip per city. Reels about the same city add to the same trip, and duplicates are merged. A place several reels recommend shows a **🔥 3 reels** badge and is listed first.
-- **Must-dos:** tap the star on a place to make it a must-do. Must-dos are listed first, and the planner always fits them in.
+- **Places home:** the home screen has a **Trips | Places** switch. **Places** lists every saved place across your trips. Filter by **Starred**, **Food**, **Coffee**, **Drinks**, **Hotels**, **Shopping**, **Sights** and **Activities**, narrow to one trip, and sort by **Most popular** (reels that mention it, then Google's rating), **A to Z**, **Closest to me** (asks for your location; the distance is computed on your phone), **Highest rated** or **Recently saved**. Your choices are remembered.
+- **Stars:** tap the star on any place to rank it. Starred places are listed first in every list, whatever the sort, and the planner always fits them in. (This replaces the earlier "must-do" flag.)
 - **Places:** places are listed by category with what to order and tips from the reel. A place that couldn't be found on the map has an orange dot; open it and tap **Find** to search again.
-- **Itinerary:** **Plan my trip** asks Claude to group places by neighborhood and time of day. If Claude can't be reached, an offline planner groups nearby places instead. Tap **Edit** and drag the handles to reorder stops or move them between days (arrow keys work too). Set an **Exact time** on a place for reservations; the itinerary and calendar use it.
-- **Photos:** each place gets pictures. Claude picks the frames or slides of the reel that show the place, Google adds its place photos when you have a server key, and landmarks get a Wikimedia Commons photo. Thumbnails appear in the place list and itinerary; a place's page opens with a swipeable photo strip next to its map, and tapping a photo opens it full screen. Places saved before this feature get Google and Wikimedia photos via **••• → Update hours & photos**; reel frames are only kept for reels shared from now on.
+- **Itinerary:** **Plan my trip** asks Claude to group places by neighborhood and time of day. If Claude can't be reached, an offline planner groups nearby places instead. Tap **Edit** and drag the handles to reorder stops or move them between days (arrow keys work too). **Build it yourself:** tap **Select** in the Places list (on the home screen or inside a trip), tick places, then **Add to itinerary** and choose a day or a new one; or use **Add places** under any day. No chat needed. **Tidy with AI** then keeps your days as they are, orders each day to cut down on travel, suggests times and follows an optional instruction like "make day 2 more relaxed"; without Claude it orders by time of day and distance. Set an **Exact time** on a place for reservations; the itinerary and calendar use it.
+- **Photos:** each place gets pictures. Claude picks the frames or slides of the reel that show the place, Google adds its place photos when you have a server key, and landmarks get a Wikimedia Commons photo. Thumbnails appear in the place list and itinerary; a place's page opens with a swipeable photo strip next to its map, and tapping a photo opens it full screen. Places saved before this feature get Google and Wikimedia photos via **••• → Update hours, photos & ratings**; reel frames are only kept for reels shared from now on.
 - **Travel times:** in the itinerary, pick **Walk**, **Transit**, **Drive** or **Bike** to see how long each hop takes, with a day total and a **Directions** link for each leg. Tap **From me** to add travel times from where you are; it asks for location permission the first time. A place's page also shows every mode from your location.
 - **Opening hours:** each place shows whether it's open now and its weekly hours. With a start date, the itinerary shows that day's hours and warns when a stop is closed or not open at its planned time (e.g. "Closed on Mondays"). Claude also takes hours into account when planning. Use **••• → Update opening hours** to look them up for places saved earlier.
 - **Map:** pins are colored by category. Filter by day to see that day's route in order.
@@ -147,14 +148,14 @@ Without a key, the app's maps use free OpenStreetMap tiles. To use Google Maps i
 
 If Google rejects the key, the app falls back to OpenStreetMap and shows a message. **Settings → Maps in the app** shows which one is active.
 
-For better map search on restaurants and shops too, enable **Places API (New)** and put a *second* key (no website restriction, API-restricted to Places API (New)) in `GOOGLE_MAPS_API_KEY`. That one stays on the server.
+For better map search on restaurants and shops too, enable **Places API (New)** and put a *second* key (no website restriction, API-restricted to **Places API (New)** and **Routes API**) in `GOOGLE_MAPS_API_KEY`. That one stays on the server.
 
 ### Real travel times and better opening hours (optional)
 
 Without Google, travel times are estimates from distance (marked "≈"), there are no transit times for short hops, and opening hours come from OpenStreetMap where it has them. For real routes, transit and fuller hours, use a server-side Google key in `GOOGLE_MAPS_API_KEY` with these APIs enabled in Google Cloud:
 
 - **Routes API**: walking, transit, driving and cycling times. Results are cached for days to keep requests low.
-- **Places API (New)**: map search, opening hours and place photos. Photos are fetched through your server each time they're viewed (Google doesn't allow storing them), and each fetch counts as a Place Photo request. Asking for hours puts searches in Google's "Enterprise" tier, which has a smaller free monthly allowance.
+- **Places API (New)**: map search, opening hours, ratings and place photos. Photos are fetched through your server each time they're viewed (Google doesn't allow storing them), and each fetch counts as a Place Photo request. Asking for hours puts searches in Google's "Enterprise" tier, which has a smaller free monthly allowance.
 
 Restrict this key by API (Routes API and Places API (New)), not by website, because it's used from the server. If Google refuses the key, TripIt falls back to estimates automatically. **Settings → Travel times** shows which one is active.
 
@@ -175,6 +176,8 @@ All `/v1` routes need the `X-API-Key` header when `APP_API_KEY` is set.
 | `GET /v1/trips`, `GET/PATCH/DELETE /v1/trips/{id}` | Trips with their places and source reels |
 | `POST /v1/trips/{id}/plan` `{days, start_date?, preferences?}` | Build the itinerary (Claude, with offline fallback) |
 | `DELETE /v1/trips/{id}/plan`, `POST /v1/trips/{id}/days/{n}/order` | Clear the itinerary or reorder a day |
+| `POST /v1/trips/{id}/add-to-day` `{place_ids, day?}` | Put places at the end of a day (a new day when `day` is omitted) |
+| `POST /v1/trips/{id}/tidy` `{instruction?}` | Claude (or an offline fallback) orders and times the days you built |
 | `GET /v1/places`, `PATCH/DELETE /v1/places/{id}`, `POST /v1/places/{id}/locate` | Edit places, move them between days, re-run the map search |
 | `POST /v1/trips/{id}/move` `{place_id, day, index}` | Drag and drop: put a place at a position in a day (`day` 0 = not scheduled) |
 | `POST /v1/places/search` `{query, trip_id?}`, `POST /v1/places` `{candidate_id \| name, trip_id?, city?}` | Add a place without a reel |

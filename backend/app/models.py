@@ -126,6 +126,8 @@ class PlanPlace(BaseModel):
     opening_hours: Optional[str] = None
     must_do: bool = False
     mentions: int = 1  # how many saved reels recommend it
+    start_time: Optional[str] = None  # a fixed time, e.g. a reservation ("HH:MM")
+    current_day: Optional[int] = None  # the day the person already put it on, if any
 
 
 class PlanRequest(BaseModel):
@@ -196,8 +198,11 @@ class Place(BaseModel):
     hours_checked_at: Optional[datetime] = None
     photos: list[PlacePhoto] = []
     photos_checked_at: Optional[datetime] = None
-    must_do: bool = False
+    must_do: bool = False  # shown as a star: starred places rank first everywhere
     start_time: Optional[str] = None  # "HH:MM" local time, e.g. a reservation
+    rating: Optional[float] = None  # Google's rating out of 5, when the place was found there
+    rating_count: Optional[int] = None
+    rating_checked_at: Optional[datetime] = None
     # Every saved reel that recommends this place (reel_id is the first one).
     reel_ids: list[str] = []
     mention_count: int = 0
@@ -274,6 +279,15 @@ class MoveRequest(BaseModel):
     place_id: str
     day: int = Field(ge=0, le=21)  # 0 = not scheduled
     index: int = Field(default=0, ge=0)
+
+
+class AddToDayRequest(BaseModel):
+    place_ids: list[str] = Field(min_length=1, max_length=100)
+    day: Optional[int] = Field(default=None, ge=1, le=21)  # None = a new day at the end
+
+
+class TidyRequest(BaseModel):
+    instruction: Optional[str] = Field(default=None, max_length=500)  # e.g. "make day 2 more relaxed"
 
 
 class SearchPlacesRequest(BaseModel):

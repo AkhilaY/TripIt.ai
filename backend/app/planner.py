@@ -43,12 +43,13 @@ def _kmeans(places: list[Place], k: int) -> list[list[Place]]:
     return [g for g in groups if g]
 
 
-def _order_day(group: list[Place]) -> list[Place]:
+def _order_day(group: list[Place], slot_of=None) -> list[Place]:
     """Time of day first; within each slot, walk to the nearest next place to avoid zigzagging."""
+    slot_of = slot_of or (lambda p: preferred_time(p.category))
     ordered: list[Place] = []
     last = None
     for slot in TIME_ORDER:
-        remaining = [p for p in group if preferred_time(p.category) == slot]
+        remaining = [p for p in group if slot_of(p) == slot]
         while remaining:
             located = [p for p in remaining if p.latitude is not None]
             if last is not None and located:
@@ -83,3 +84,32 @@ def offline_plan(places: list[Place], days: int, city: str) -> PlanResult:
             stops=[PlannedStop(place_id=p.id, time_of_day=preferred_time(p.category), note=None) for p in group],
         ))
     return PlanResult(days=result_days, unscheduled_place_ids=[], notes=None)
+
+
+def slot_for_time(start_time: str) -> TimeOfDay:
+    """The part of the day an exact "HH:MM" time falls in."""
+    minutes = int(start_time[:2]) * 60 + int(start_time[3:5])
+    for limit, slot in ((11 * 60 + 30, TimeOfDay.morning), (14 * 60 + 30, TimeOfDay.lunch),
+                        (17 * 60 + 30, TimeOfDay.afternoon), (20 * 60 + 30, TimeOfDay.dinner)):
+        if minutes < limit:
+            return slot
+    return TimeOfDay.evening
+
+
+def offline_tidy(places: list[Place], day_count: int) -> PlanResult:
+    """Keeps each place on the day it's on; orders stops by time of day and proximity."""
+    def slot_of(p: Place) -> TimeOfDay:
+        return slot_for_time(p.start_time) if p.start_time else p.time_of_day or preferred_time(p.category)
+
+    days = []
+    for number in range(1, day_count + 1):
+        group = [p for p in places if p.day_number == number]
+        if not group:
+            continue
+        hoods = Counter(p.neighborhood for p in group if p.neighborhood)
+        days.append(PlannedDay(
+            day_number=len(days) + 1,
+            title=" & ".join(h for h, _ in hoods.most_common(2)) or f"Day {number}",
+            stops=[PlannedStop(place_id=p.id, time_of_day=slot_of(p), note=p.day_note) for p in _order_day(group, slot_of)],
+        ))
+    return PlanResult(days=days, unscheduled_place_ids=[p.id for p in places if not p.day_number], notes=None)

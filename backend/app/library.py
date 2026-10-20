@@ -2,6 +2,7 @@
 
 import logging
 import math
+import re
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Callable, Optional
@@ -24,7 +25,7 @@ from .models import (
     Trip,
     TripDetail,
 )
-from .planner import offline_plan
+from .planner import offline_plan, offline_tidy
 
 log = logging.getLogger(__name__)
 
@@ -101,6 +102,7 @@ class Library:
             hours_checked_at=datetime.now(timezone.utc),
             photos=merge_photos(self.db.photo_refs(place.id), match.photos, replace_sources=("google", "wikimedia")),
             photos_checked_at=datetime.now(timezone.utc),
+            rating=match.rating, rating_count=match.rating_count, rating_checked_at=datetime.now(timezone.utc),
         )
         return True
 
@@ -165,6 +167,7 @@ class Library:
             latitude=match.latitude, longitude=match.longitude, maps_url=match.maps_url,
             opening_hours=match.hours, hours_checked_at=checked if match.hours or match.place_id else None,
             photos=merge_photos([], match.photos), photos_checked_at=checked if match.photos else None,
+            rating=match.rating, rating_count=match.rating_count, rating_checked_at=checked if match.place_id else None,
         )
         return place, True
 
@@ -211,12 +214,13 @@ class Library:
         for place in self.db.list_places(trip_id):
             if updated >= limit:
                 break
-            if place.hours_checked_at is not None and place.photos_checked_at is not None and place.latitude is not None:
+            if (place.hours_checked_at is not None and place.photos_checked_at is not None
+                    and place.rating_checked_at is not None and place.latitude is not None):
                 continue  # already looked up; "Find" on the place page re-runs it on demand
             match = await self.geocoder.locate(place.name, place.neighborhood, place.city, place.country)
             if not match:
                 now = datetime.now(timezone.utc)
-                self.db.update_place(place.id, hours_checked_at=now, photos_checked_at=now)
+                self.db.update_place(place.id, hours_checked_at=now, photos_checked_at=now, rating_checked_at=now)
                 continue
             if place.latitude is None:
                 await self.locate(place)
@@ -226,7 +230,10 @@ class Library:
                     maps_url=place.maps_url or match.maps_url,
                     photos=merge_photos(self.db.photo_refs(place.id), match.photos, replace_sources=("google", "wikimedia")),
                     photos_checked_at=datetime.now(timezone.utc),
+                    rating=match.rating, rating_count=match.rating_count, rating_checked_at=datetime.now(timezone.utc),
                 )
+            else:  # the lookup found somewhere else; keep the pin, and don't look again
+                self.db.update_place(place.id, rating_checked_at=datetime.now(timezone.utc))
             updated += 1
         return updated
 
@@ -277,6 +284,54 @@ class Library:
 
         self.apply_plan(trip_id, result, start_date, planned_by)
         return self.db.get_trip_detail(trip_id)
+
+    async def tidy_trip(self, trip_id: str, instruction: Optional[str], claude: Optional[ClaudeService]) -> TripDetail:
+        """Orders the stops on the days the person built, suggests times and tips, and (when asked) applies
+        their instruction. Places they haven't put on a day stay unscheduled unless the instruction says otherwise."""
+        trip = self.db.get_trip(trip_id)
+        places = self.db.list_places(trip_id)
+        scheduled = [p for p in places if p.day_number]
+        if not scheduled:
+            raise ValueError("Add some places to a day first")
+        day_count = max(trip.day_count, max(p.day_number for p in scheduled))
+        result: Optional[PlanResult] = None
+        planned_by = "offline"
+        if claude is not None:
+            request = PlanRequest(
+                city=trip.city, days=day_count, start_date=trip.start_date, preferences=None,
+                places=[
+                    PlanPlace(id=p.id, name=p.name, category=p.category, latitude=p.latitude, longitude=p.longitude,
+                              neighborhood=p.neighborhood, notes=p.summary[:300] or None,
+                              opening_hours=hours_summary(p.opening_hours), must_do=p.must_do,
+                              mentions=max(1, p.mention_count), start_time=p.start_time, current_day=p.day_number)
+                    for p in places
+                ],
+            )
+            try:
+                result = await claude.tidy_itinerary(request, instruction)
+                planned_by = "claude"
+            except ClaudeError as e:
+                log.warning("Claude tidy failed, using offline ordering: %s", e)
+        if result is None:
+            result = offline_tidy(places, day_count)
+        titles = {i: t for i, t in enumerate(trip.day_titles, start=1) if t and not re.fullmatch(r"Day \d+", t)}
+        for i, day in enumerate(result.days, start=1):
+            if i in titles and day.day_number == i:
+                day.title = titles[i]
+        self.apply_plan(trip_id, result, trip.start_date, planned_by)
+        return self.db.get_trip_detail(trip_id)
+
+    def add_to_day(self, trip_id: str, place_ids: list[str], day: Optional[int]) -> None:
+        """Puts places at the end of a day (a new last day when day is None). Places already on that day stay put."""
+        trip = self.db.get_trip(trip_id)
+        target = day if day is not None else trip.day_count + 1
+        if target > 21:
+            raise ValueError("Trips can have at most 21 days")
+        for place_id in dict.fromkeys(place_ids):
+            place = self.db.get_place(place_id)
+            if place is None or place.trip_id != trip_id or place.day_number == target:
+                continue
+            self.move_to(place, target, None)
 
     def apply_plan(self, trip_id: str, result: PlanResult, start_date: Optional[date], planned_by: str) -> None:
         self.clear_plan(trip_id)

@@ -42,6 +42,17 @@ PLAN_SYSTEM = """You are a travel planner. Arrange the given saved places into a
 - Day titles should name the area or theme."""
 
 
+TIDY_SYSTEM = """You tidy an itinerary a person built by hand from their own saved places. Each place has current_day when they put it on a day; places without it are saved but not scheduled.
+
+- Keep every place on the day it is on (current_day). Only move a place to another day, or schedule one that has no current_day, when the person's instruction asks for it.
+- Within each day, order the stops so the walking or driving between them is short, and give each stop a time_of_day that fits it (cafes in the morning, meals at lunch or dinner, bars in the evening).
+- A place with start_time has a fixed time (a reservation): order the day so those are in time order and match its time_of_day to it.
+- Respect opening_hours when given (local times, Mon–Sun). If a start_date is given, day 1 falls on that date's weekday.
+- Add a short, useful tip to a stop's note only when you have one; otherwise null. Don't repeat the place's own notes.
+- Use each place at most once, and only place_ids from the input. Anything not scheduled goes in unscheduled_place_ids.
+- Keep day titles short (the area or theme). When the person's instruction is a request such as "make day 2 more relaxed", follow it as far as the places allow."""
+
+
 class ClaudeError(RuntimeError):
     pass
 
@@ -97,6 +108,20 @@ class ClaudeService:
             }
         ]
         result = await self._parse(PLAN_SYSTEM, content, PlanResult)
+        return _sanitize_plan(result, request)
+
+    async def tidy_itinerary(self, request: PlanRequest, instruction: Optional[str]) -> PlanResult:
+        payload = {
+            "city": request.city,
+            "days": request.days,
+            "start_date": request.start_date.isoformat() if request.start_date else None,
+            "start_weekday": request.start_date.strftime("%A") if request.start_date else None,
+            "places": [p.model_dump(mode="json", exclude_none=True) for p in request.places],
+        }
+        text = "Tidy this itinerary:\n\n" + json.dumps(payload, indent=2)
+        if instruction and instruction.strip():
+            text += f"\n\nThe person's instruction: {instruction.strip()}"
+        result = await self._parse(TIDY_SYSTEM, [{"type": "text", "text": text}], PlanResult)
         return _sanitize_plan(result, request)
 
     async def _parse(self, system: str, content: list[dict], output_type: type[T], effort: Optional[str] = None,

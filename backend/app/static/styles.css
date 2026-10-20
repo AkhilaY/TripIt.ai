@@ -759,3 +759,17 @@ button.row.sel { cursor: pointer; }
 .addic svg { width: 14px; height: 14px; }
 .planbar { flex-wrap: wrap; }
 .planlinks { display: inline-flex; flex-wrap: wrap; gap: 0 12px; }
+
+/* ---------- Menu tab ---------- */
+.ptabs { margin-top: 8px; }
+.menuhead { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 20px 14px; }
+.menuhead .s { overflow-wrap: anywhere; }
+.menuhead a { color: var(--link); text-decoration: none; font-weight: 600; }
+.menulinks { display: flex; gap: 16px; justify-content: center; }
+.menuwait .spinner.big { width: 34px; height: 34px; border-width: 3px; margin-bottom: 8px; }
+.menuitem { align-items: flex-start; }
+.menuitem .t { font-weight: 500; letter-spacing: -0.01em; }
+.price { flex-shrink: 0; font-size: 16px; font-weight: 600; color: var(--label); font-variant-numeric: tabular-nums; padding-top: 1px; text-align: right; max-width: 36%; overflow-wrap: anywhere; }
+.mtag { display: inline-block; margin-left: 8px; padding: 2px 8px; border-radius: 999px; font-size: 10px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase;
+  color: var(--link); background: var(--gold-soft); vertical-align: 1px; white-space: nowrap; }
+.menusub { padding: 0 4px 10px; margin-top: -6px; }

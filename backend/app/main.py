@@ -48,6 +48,8 @@ from .models import (
     Job,
     JobStatus,
     LocateRequest,
+    MenuRequest,
+    PlaceMenu,
     MoveRequest,
     Place,
     PlaceUpdate,
@@ -68,6 +70,7 @@ from .models import (
     TripEdits,
     TripUpdate,
 )
+from .menus import MENU_CATEGORIES, MenuService, SafeFetcher
 from .photos import PhotoStore
 from .pipeline import Pipeline
 from .push import Push
@@ -92,6 +95,7 @@ def build_services(app: FastAPI, settings: Settings) -> None:
     app.state.router = Router(db, settings)
     app.state.push = Push(db, Path(settings.database_path).parent / "vapid_private.pem", settings.push_contact)
     app.state.curator = Curator(db, app.state.claude)
+    app.state.menus = MenuService(db, app.state.claude, SafeFetcher(), app.state.library.geocoder, settings)
     app.state.pipeline.on_finished = lambda job: notify_import(app, job)
 
 
@@ -694,6 +698,25 @@ async def locate_place(place_id: str, body: LocateRequest, request: Request) -> 
     if not await _library(request).locate(place, query=body.query):
         raise HTTPException(status_code=422, detail="Couldn't find that on the map. Try adding the street or neighborhood.")
     return _db(request).get_place(place_id)
+
+
+@app.get("/v1/places/{place_id}/menu", response_model=PlaceMenu, dependencies=[Auth])
+async def get_menu(place_id: str, request: Request) -> PlaceMenu:
+    """The menu saved for a place (status "unknown" when nobody has looked for one yet)."""
+    _place_or_404(request, place_id)
+    return request.app.state.menus.stored(place_id)
+
+
+@app.post("/v1/places/{place_id}/menu", response_model=PlaceMenu, dependencies=[Auth])
+async def find_menu(place_id: str, request: Request, body: Optional[MenuRequest] = None) -> PlaceMenu:
+    """Looks for the menu on the place's website (then, if allowed, in its Google photos) and saves it."""
+    place = _place_or_404(request, place_id)
+    if place.category.value not in MENU_CATEGORIES:
+        raise HTTPException(status_code=422, detail="Menus are for restaurants, cafés, bars and sweet shops")
+    try:
+        return await request.app.state.menus.find(place, refresh=bool(body and body.refresh))
+    except ClaudeError as e:
+        raise HTTPException(status_code=502, detail=str(e))
 
 
 @app.get("/v1/places/{place_id}/photos/{index}", include_in_schema=False)

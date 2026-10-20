@@ -166,6 +166,43 @@ class PlanResult(BaseModel):
     notes: Optional[str] = None
 
 
+# ---------- Menus ----------
+
+MenuTag = Literal["vegetarian", "vegan", "gluten_free", "spicy"]
+
+
+class MenuItem(BaseModel):
+    name: str
+    description: Optional[str] = Field(description="Ingredients or a short description as printed, or null.")
+    price: Optional[str] = Field(description="The price exactly as printed, e.g. '$14' or '9 / 12', or null.")
+    tags: list[MenuTag] = Field(description="Only dietary or spice marks the menu itself shows (e.g. a V or a chili symbol).")
+
+
+class MenuSection(BaseModel):
+    title: str = Field(description="Section heading as printed, e.g. 'Starters' or 'Cocktails'.")
+    note: Optional[str] = Field(description="A line printed under the heading, e.g. 'Served with fries', or null.")
+    items: list[MenuItem]
+
+
+class MenuResult(BaseModel):
+    found: bool = Field(description="False when the material has no menu of food or drinks.")
+    sections: list[MenuSection]
+    notes: Optional[str] = Field(description="Anything that applies to the whole menu, e.g. 'Dinner menu, Tue-Sun 5-10pm'.")
+
+
+class PlaceMenu(BaseModel):
+    status: Literal["unknown", "found", "none"] = "unknown"  # unknown = never looked for
+    sections: list[MenuSection] = []
+    notes: Optional[str] = None
+    source_kind: Optional[Literal["website", "photos"]] = None
+    source_url: Optional[str] = None  # the page or file the menu was read from
+    fetched_at: Optional[datetime] = None
+
+
+class MenuRequest(BaseModel):
+    refresh: bool = False
+
+
 # ---------- Library (what the web app shows) ----------
 
 

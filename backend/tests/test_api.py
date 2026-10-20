@@ -11,12 +11,16 @@ from app.db import Database, normalize
 from app.geocode import GeoMatch, GooglePlacesGeocoder, NominatimGeocoder
 from app.jobs import JobStore
 from app.library import Library
+from app.menus import MenuService, SafeFetcher
 from app.llm import ClaudeService, _sanitize_plan
 from app.concierge import Curator
 from app.main import app, notify_import
 from app.media import DownloadedReel, UnsupportedURLError, find_url, platform_for
 from app.models import (
     ExtractionResult,
+    MenuItem,
+    MenuResult,
+    MenuSection,
     PlanResult,
     PlannedDay,
     PlannedStop,
@@ -59,6 +63,8 @@ class FakeMessages:
     async def parse(self, **kwargs):
         self.calls.append(kwargs)
         parsed = self.outputs.get(kwargs["output_format"])
+        if isinstance(parsed, list):  # one result per call, in order
+            parsed = parsed.pop(0)
         if isinstance(parsed, Exception):
             raise parsed
         return SimpleNamespace(parsed_output=parsed, stop_reason=self.stop_reason)
@@ -148,7 +154,24 @@ def client(monkeypatch, tmp_path):
     app.state.push = Push(db, tmp_path / "vapid.pem", client=httpx.AsyncClient(transport=httpx.MockTransport(push_handler)))
     app.state.curator = Curator(db, claude)
 
+    web, web_log = {}, []  # url -> (status, content type, body, headers) served to the menu finder
+
+    def web_handler(request):
+        web_log.append(str(request.url))
+        hit = web.get(str(request.url))
+        if hit is None:
+            return httpx.Response(404)
+        status, ctype, body, headers = hit
+        return httpx.Response(status, content=body, headers={"content-type": ctype, **headers})
+
+    async def resolver(host):
+        return {"internal.test": ["10.0.0.5"], "meta.test": ["169.254.169.254"], "v6.test": ["::ffff:127.0.0.1"]}.get(host, ["93.184.216.34"])
+
+    app.state.menus = MenuService(db, claude, SafeFetcher(client=httpx.AsyncClient(transport=httpx.MockTransport(web_handler)), resolver=resolver),
+                                  geocoder, settings)
+
     with TestClient(app) as c:
+        c.web, c.web_log = web, web_log
         c.messages = messages
         c.geocoder = geocoder
         c.push_log = push_log
@@ -156,7 +179,7 @@ def client(monkeypatch, tmp_path):
         c.uploads = tmp_path / "uploads"
         yield c
     app.dependency_overrides.clear()
-    for attr in ("db", "store", "claude", "library", "pipeline", "router", "photos", "push", "curator"):
+    for attr in ("db", "store", "claude", "library", "pipeline", "router", "photos", "push", "curator", "menus"):
         delattr(app.state, attr)
 
 
@@ -408,7 +431,7 @@ def test_output_schemas_are_accepted_by_sdk():
 
     from app.models import BriefingText, ConciergeReply, EditsResult
 
-    for model in (ExtractionResult, PlanResult, EditsResult, ConciergeReply, BriefingText):
+    for model in (ExtractionResult, PlanResult, EditsResult, ConciergeReply, BriefingText, MenuResult):
         schema = transform_schema(TypeAdapter(model).json_schema())
         assert schema["additionalProperties"] is False
 
@@ -1249,6 +1272,182 @@ def test_website_and_phone_saved_and_backfilled(client):
     refreshed = client.post(f"/v1/trips/{job['trip_id']}/refresh-details", headers=H).json()
     again = next(p for p in refreshed["places"] if p["id"] == joes["id"])
     assert again["website"] == "https://www.joespizzanyc.com/" and again["contact_checked_at"] is not None
+
+
+# ---------- Menus ----------
+
+MENU_HTML = b"""<html><head><title>Joe's</title><script>var junk = 'IGNORE ME';</script></head><body>
+<nav><a href="/menu">Our Menu</a> <a href="/gift-cards">Gift cards</a> <a href="mailto:hi@joes.test">Email</a>
+<a href="http://internal.test/menu">Internal menu</a></nav><h1>Joe's Pizza</h1><p>Open daily.</p></body></html>"""
+MENU_PAGE = ("<html><body><h1>Menu</h1><h2>Slices</h2><p>Plain slice $4.00</p><p>Pepperoni slice $4.50</p><p>Sicilian $5.00</p>"
+             "<p>Garlic knots $3.00</p><p>Cheese pie $22.00</p><p>Pepperoni pie $25.00</p></body></html>").encode()
+MENU_RESULT = MenuResult(found=True, notes="Prices before tax", sections=[
+    MenuSection(title="Slices", note=None, items=[
+        MenuItem(name="Plain slice", description=None, price="$4.00", tags=["vegetarian"]),
+        MenuItem(name="Pepperoni slice", description="Classic", price="$4.50", tags=[])])])
+
+
+def menu_place(client, website="https://joes.test/"):
+    job = import_reel(client)
+    joes = next(p for p in client.get(f"/v1/trips/{job['trip_id']}", headers=H).json()["places"] if p["name"] == "Joe's Pizza")
+    app.state.db.update_place(joes["id"], website=website)
+    return joes["id"]
+
+
+def serve(client, url, body, ctype="text/html", status=200, **headers):
+    client.web[url] = (status, ctype, body, headers)
+
+
+def test_menu_read_from_the_website(client):
+    pid = menu_place(client)
+    assert client.get(f"/v1/places/{pid}/menu", headers=H).json()["status"] == "unknown"
+    serve(client, "https://joes.test/", MENU_HTML)
+    serve(client, "https://joes.test/menu", MENU_PAGE)
+    serve(client, "https://joes.test/gift-cards", b"<html><body>Buy a gift card for a friend, in any amount you like, delivered by email.</body></html>")
+    client.messages.outputs[MenuResult] = MENU_RESULT
+
+    menu = client.post(f"/v1/places/{pid}/menu", json={}, headers=H).json()
+    assert menu["status"] == "found" and menu["source_kind"] == "website" and menu["source_url"] == "https://joes.test/menu"
+    assert menu["sections"][0]["title"] == "Slices" and menu["sections"][0]["items"][0]["price"] == "$4.00"
+    assert menu["sections"][0]["items"][0]["tags"] == ["vegetarian"] and menu["notes"] == "Prices before tax"
+    sent = client.messages.calls[-1]
+    text = " ".join(b["text"] for b in sent["messages"][0]["content"] if b["type"] == "text")
+    assert "Plain slice $4.00" in text and "IGNORE ME" not in text and "gift card" not in text
+    assert "untrusted" in sent["system"] and sent["output_config"]["effort"] == "low"
+    assert not any("gift-cards" in u or "internal.test" in u for u in client.web_log)  # not a menu page; not public
+
+    calls = len(client.messages.calls)
+    assert client.post(f"/v1/places/{pid}/menu", json={}, headers=H).json()["status"] == "found"
+    assert client.get(f"/v1/places/{pid}/menu", headers=H).json()["sections"][0]["title"] == "Slices"
+    assert len(client.messages.calls) == calls  # saved menus aren't read again
+    client.post(f"/v1/places/{pid}/menu", json={"refresh": True}, headers=H)
+    assert len(client.messages.calls) == calls + 1
+
+    client.delete(f"/v1/places/{pid}", headers=H)
+    assert app.state.db.get_menu(pid) is None  # goes with the place
+
+
+def test_menu_pdf_and_menu_images(client):
+    pid = menu_place(client)
+    serve(client, "https://joes.test/", b'<html><body><a href="/files/dinner-menu.pdf">Dinner menu</a>'
+          b'<img src="/img/lunch-menu.jpg" alt="Lunch menu"><img src="/img/team.jpg" alt="Our team"></body></html>')
+    serve(client, "https://joes.test/files/dinner-menu.pdf", b"%PDF-1.4 fake", "application/pdf")
+    serve(client, "https://joes.test/img/lunch-menu.jpg", b"\xff\xd8\xff fake", "image/jpeg")
+    serve(client, "https://joes.test/img/team.jpg", b"\xff\xd8\xff fake", "image/jpeg")
+    client.messages.outputs[MenuResult] = MENU_RESULT
+    assert client.post(f"/v1/places/{pid}/menu", json={}, headers=H).json()["status"] == "found"
+    blocks = client.messages.calls[-1]["messages"][0]["content"]
+    assert [b["type"] for b in blocks].count("document") == 1 and [b["type"] for b in blocks].count("image") == 1
+    assert not any("team.jpg" in u for u in client.web_log)
+
+
+def test_menu_fetching_stays_on_the_public_web(client):
+    import asyncio
+
+    pid = menu_place(client, website="http://internal.test/")
+    serve(client, "http://internal.test/", MENU_PAGE)
+    assert client.post(f"/v1/places/{pid}/menu", json={}, headers=H).json()["status"] == "none"
+    assert client.web_log == []  # never even connected
+
+    fetcher = app.state.menus.fetcher
+    run = asyncio.new_event_loop().run_until_complete
+    for url in ("http://meta.test/latest", "http://v6.test/", "https://joes.test:8443/", "https://user:pw@joes.test/", "ftp://joes.test/", "file:///etc/passwd", "https:///x"):
+        assert run(fetcher.allowed(url)) is False, url
+    assert run(fetcher.allowed("https://joes.test/menu")) is True
+
+    # A public page that redirects to a private address is refused at the redirect.
+    serve(client, "https://joes.test/go", b"", status=302, location="http://internal.test/secret")
+    serve(client, "http://internal.test/secret", b"secret")
+    assert run(fetcher.get("https://joes.test/go", 1000)) is None
+    assert "http://internal.test/secret" not in client.web_log
+
+    # Big files are cut off at the size limit.
+    serve(client, "https://joes.test/big", b"x" * 5000, "text/html")
+    got = run(fetcher.get("https://joes.test/big", 1000))
+    assert len(got.body) == 1000 and got.truncated
+
+
+def test_menu_not_found_and_claude_failures(client):
+    pid = menu_place(client)
+    serve(client, "https://joes.test/", b"<html><body>Joe's Pizza has been on Carmine Street since 1975 and loves visitors, so come hungry.</body></html>")
+    client.messages.outputs[MenuResult] = MenuResult(found=False, sections=[], notes=None)
+    assert client.post(f"/v1/places/{pid}/menu", json={}, headers=H).json()["status"] == "none"
+    assert client.get(f"/v1/places/{pid}/menu", headers=H).json()["status"] == "none"
+
+    # When Claude can't be reached nothing is saved, so it can be tried again.
+    client.messages.stop_reason = "refusal"
+    r = client.post(f"/v1/places/{pid}/menu", json={"refresh": True}, headers=H)
+    assert r.status_code == 502
+    assert client.get(f"/v1/places/{pid}/menu", headers=H).json()["status"] == "none"  # the earlier answer stays
+
+    client.messages.stop_reason = "end_turn"
+    client.patch(f"/v1/places/{pid}", json={"category": "stay"}, headers=H)
+    assert client.post(f"/v1/places/{pid}/menu", json={}, headers=H).status_code == 422
+    assert client.post("/v1/places/nope/menu", json={}, headers=H).status_code == 404
+    assert client.get("/v1/places/nope/menu", headers=H).status_code == 404
+
+
+def test_menu_falls_back_to_google_photos(client):
+    pid = menu_place(client, website=None)
+    log = []
+
+    def google(request):
+        log.append(request.url.path)
+        if request.url.path.endswith(":searchText"):
+            assert request.headers["x-goog-fieldmask"] == "places.photos"
+            return httpx.Response(200, json={"places": [{"photos": [{"name": f"places/x/photos/{i}"} for i in range(10)]}]})
+        assert request.url.params["maxWidthPx"] == "1400"
+        return httpx.Response(200, content=b"\xff\xd8\xff", headers={"content-type": "image/jpeg"})
+
+    menus = app.state.menus
+    menus.geocoder = GooglePlacesGeocoder("k", client=httpx.AsyncClient(transport=httpx.MockTransport(google)))
+    client.messages.outputs[MenuResult] = MENU_RESULT
+    menu = client.post(f"/v1/places/{pid}/menu", json={}, headers=H).json()
+    assert menu["status"] == "found" and menu["source_kind"] == "photos" and menu["source_url"] is None
+    sent = client.messages.calls[-1]
+    assert [b["type"] for b in sent["messages"][0]["content"]].count("image") == 8  # at most 8 photos
+    assert "NOT menus" in sent["system"]
+
+    # Website first: when it has the menu, Google isn't asked at all.
+    app.state.db.update_place(pid, website="https://joes.test/")
+    serve(client, "https://joes.test/", MENU_PAGE)
+    log.clear()
+    client.messages.outputs[MenuResult] = [MENU_RESULT]
+    assert client.post(f"/v1/places/{pid}/menu", json={"refresh": True}, headers=H).json()["source_kind"] == "website"
+    assert log == []
+
+    # The website had nothing, so the photos are tried; and the setting can switch that off.
+    client.messages.outputs[MenuResult] = [MenuResult(found=False, sections=[], notes=None), MENU_RESULT]
+    assert client.post(f"/v1/places/{pid}/menu", json={"refresh": True}, headers=H).json()["source_kind"] == "photos"
+    menus.settings = menus.settings.model_copy(update={"menu_google_photos": False})
+    log.clear()
+    client.messages.outputs[MenuResult] = [MenuResult(found=False, sections=[], notes=None)]
+    assert client.post(f"/v1/places/{pid}/menu", json={"refresh": True}, headers=H).json()["status"] == "none"
+    assert log == []
+
+
+def test_menu_page_reading_helpers():
+    from app.menus import candidate_links, clean_menu, is_public_address, parse_page, score_link
+
+    page = parse_page("https://a.test/", b"""<html><head><title>x</title><style>.a{}</style></head><body><script>bad()</script>
+        <a href="/menus/dinner">Dinner Menu</a><a href="/about">About us</a><a href="/menu.pdf">Menu (PDF)</a><a href="#top">Top</a>
+        <a href="tel:123">Call</a><a href="javascript:x()">x</a><img src="data:image/png;base64,AAA"><img src="/m.png" alt="menu"><p>Hello</p>
+        <script type="application/ld+json">{"hasMenu": "yes"}</script></body></html>""")
+    assert page.text == "Dinner Menu About us Menu (PDF) Top Call\nHello" or "Hello" in page.text and "bad()" not in page.text
+    assert [u for u, _ in page.links] == ["https://a.test/menus/dinner", "https://a.test/about", "https://a.test/menu.pdf"]
+    assert page.images == [("https://a.test/m.png", "menu")] and page.jsonld == ['{"hasMenu": "yes"}']
+    assert candidate_links(page) == ["https://a.test/menus/dinner", "https://a.test/menu.pdf"]
+    assert score_link("https://a.test/gift-cards", "Gift card menu") < score_link("https://a.test/menu", "Menu")
+    assert is_public_address("93.184.216.34") and not any(map(is_public_address, ("10.0.0.1", "127.0.0.1", "169.254.169.254", "::1", "::ffff:10.0.0.1", "nope")))
+
+    messy = MenuResult(found=True, notes="  Dinner \n only ", sections=[
+        MenuSection(title="  ", note=None, items=[MenuItem(name=" Soup \n of the day ", description="", price=" $9 ", tags=["vegan", "vegan"])]),
+        MenuSection(title="Empty", note=None, items=[MenuItem(name="   ", description=None, price=None, tags=[])])])
+    clean = clean_menu(messy)
+    assert len(clean.sections) == 1 and clean.sections[0].title == "Menu"
+    item = clean.sections[0].items[0]
+    assert item.name == "Soup of the day" and item.description is None and item.price == "$9" and item.tags == ["vegan"]
+    assert clean.notes == "Dinner only" and clean_menu(MenuResult(found=True, sections=[], notes=None)).found is False
 
 
 # ---------- Taste profile, edits, concierge, briefings ----------

@@ -13,6 +13,9 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     claude_model: str = "claude-opus-5-5"
     claude_effort: str = "medium"
+    # Menus: when a place's website has none, read menu photos listed for it on Google Maps. Google's terms
+    # may not allow extracting text from its photos, so check them and turn this off if in doubt.
+    menu_google_photos: bool = True
 
     # Transcription (faster-whisper). "base" is a good CPU default; "small" is more accurate.
     whisper_model: str = "base"

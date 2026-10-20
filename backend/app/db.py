@@ -115,6 +115,15 @@ CREATE TABLE IF NOT EXISTS trip_edits (
     created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS menus (
+    place_id TEXT PRIMARY KEY REFERENCES places(id) ON DELETE CASCADE,
+    status TEXT NOT NULL,
+    data TEXT,
+    source_kind TEXT,
+    source_url TEXT,
+    fetched_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS briefings (
     trip_id TEXT NOT NULL REFERENCES trips(id) ON DELETE CASCADE,
     day INTEGER NOT NULL,
@@ -421,6 +430,16 @@ class Database:
 
     def set_setting(self, key: str, value: Any) -> None:
         self._exec("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (key, json.dumps(value, default=str)))
+
+    def get_menu(self, place_id: str) -> Optional[sqlite3.Row]:
+        rows = self._rows("SELECT * FROM menus WHERE place_id = ?", (place_id,))
+        return rows[0] if rows else None
+
+    def save_menu(self, place_id: str, status: str, data: Optional[dict], source_kind: Optional[str], source_url: Optional[str]) -> None:
+        self._exec(
+            "INSERT OR REPLACE INTO menus (place_id, status, data, source_kind, source_url, fetched_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (place_id, status, json.dumps(data) if data is not None else None, source_kind, source_url, now().isoformat()),
+        )
 
     def get_edits(self, trip_id: str) -> Optional[sqlite3.Row]:
         rows = self._rows("SELECT * FROM trip_edits WHERE trip_id = ?", (trip_id,))

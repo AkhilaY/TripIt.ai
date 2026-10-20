@@ -15,6 +15,7 @@ const CATS = {
 const CAT_ORDER = Object.keys(CATS);
 const TODS = ['morning', 'lunch', 'afternoon', 'dinner', 'evening'];
 const ACTIVE = new Set(['queued', 'downloading', 'transcribing', 'analyzing']);
+const MENU_CATS = new Set(['food', 'cafe', 'dessert', 'drinks', 'nightlife']); // places that get a Menu tab
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const cap = (s) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : '');
@@ -103,6 +104,9 @@ const S = {
   home: null,           // home filters: {tab, cat, sort, trip, starred}
   sel: { on: false, picked: new Set() }, // multi-select for building an itinerary
   pos: null,            // {at, latitude, longitude} for "closest to me"
+  menu: {},             // placeId -> saved menu
+  menuBusy: {},         // placeId -> true while a menu is being looked up
+  menuDiet: {},         // placeId -> dietary filter on the menu
 };
 
 const view = $('#view');
@@ -176,7 +180,7 @@ function route() {
   const params = new URLSearchParams(query);
   if (!parts.length) return { name: 'trips', params };
   if (parts[0] === 'trip' && parts[1]) return { name: 'trip', id: parts[1], mode: parts[2] || 'places', params };
-  if (parts[0] === 'place' && parts[1]) return { name: 'place', id: parts[1], params };
+  if (parts[0] === 'place' && parts[1]) return { name: 'place', id: parts[1], mode: parts[2] === 'menu' ? 'menu' : 'overview', params };
   if (parts[0] === 'today' && parts[1]) return { name: 'today', id: parts[1], params };
   if (parts[0] === 'edit' && parts[1] && parts[2]) return { name: 'edit', id: parts[1], editId: parts[2], params };
   if (['map', 'imports', 'settings', 'setup', 'add', 'concierge', 'taste'].includes(parts[0])) return { name: parts[0], params };
@@ -1161,8 +1165,14 @@ const VIEWS = {
         ${p.start_time ? `<button class="linkbtn" data-act="cleartime" data-id="${p.id}" aria-label="Clear exact time">Clear</button>` : ''}</div>` : '';
 
     const star = `<button class="gbtn star${p.must_do ? ' on' : ''}" data-act="star" data-id="${p.id}" aria-pressed="${p.must_do}" aria-label="${p.must_do ? 'Remove the star' : 'Star this place'}">${p.must_do ? ICON.star : ICON.starO}</button>`;
-    const html = `${navbar(p.name, { back: `#/trip/${trip.id}`, backLabel: trip.name, right: star })}
-      ${hero}
+    const hasMenu = MENU_CATS.has(p.category);
+    const mode = hasMenu && r.mode === 'menu' ? 'menu' : 'overview';
+    const tabs = hasMenu ? segControl(`pseg:${p.id}`, [['overview', 'Overview'], ['menu', 'Menu']].map(([m, label]) => ({
+      on: m === mode,
+      html: `<a href="#/place/${p.id}${m === 'menu' ? '/menu' : ''}" class="${m === mode ? 'on' : ''}" ${m === mode ? 'aria-current="page"' : ''}>${label}</a>`,
+    }))) : '';
+    const head = `${navbar(p.name, { back: `#/trip/${trip.id}`, backLabel: trip.name, right: star })}
+      ${mode === 'menu' ? '' : hero}
       <div class="ph" style="${cvar(p.category)}">
         <span class="cat">${catTile(p.category, 'sm')}${CATS[p.category]}</span>
         <h1 data-anchor>${esc(p.name)}${isNew(p)}</h1>
@@ -1173,6 +1183,10 @@ const VIEWS = {
         ${p.resolved_name ? `<span class="s">On maps as ${esc(p.resolved_name)}</span>` : ''}
         ${p.confidence === 'low' ? '<span class="flag">The name was hard to make out in the reel; double-check it.</span>' : ''}
       </div>
+      ${tabs ? `<div class="ptabs">${tabs}</div>` : ''}`;
+    const after = () => { if (isLocated) renderMap($('#mini-map'), [p], { interactive: false, zoom: 15 }); };
+    if (mode === 'menu') return { html: head + await menuSection(p) };
+    const html = `${head}
       ${p.summary ? `<p class="para">${esc(p.summary)}</p>` : ''}
 
       <div class="quick">
@@ -1221,10 +1235,7 @@ const VIEWS = {
         ${safeUrl(reel.url) ? `${ICON.chev}</a>` : '</div>'}`).join('')}</div></div>` : ''}
 
       <div class="section"><div class="group"><button class="row destructive" data-act="askdeleteplace" data-id="${p.id}" data-trip="${trip.id}">Delete place</button></div></div>`;
-    return {
-      html,
-      after: () => { if (isLocated) renderMap($('#mini-map'), [p], { interactive: false, zoom: 15 }); },
-    };
+    return { html, after };
   },
 
   async edit(r) {
@@ -1410,6 +1421,52 @@ function photoCaption(ph) {
   if (ph.source === 'reel') return ph.attribution || 'From the reel';
   if (ph.source === 'google') return ph.attribution ? `Google · ${ph.attribution}` : 'Google';
   return ph.attribution || 'Wikimedia Commons';
+}
+
+const DIETS = { vegetarian: 'Vegetarian', vegan: 'Vegan', gluten_free: 'Gluten-free', spicy: 'Spicy' };
+
+/** The Menu tab of a place page. */
+async function menuSection(p) {
+  let m = S.menu[p.id];
+  if (!m) {
+    try { m = S.menu[p.id] = await api(`/v1/places/${p.id}/menu`); } catch (e) { return `<div class="error" role="alert">${esc(e.message)}</div>`; }
+  }
+  const site = safeUrl(p.website);
+  const links = `<div class="menulinks">${site ? `<a class="linkbtn" href="${esc(site)}" target="_blank" rel="noopener">Website</a>` : ''}
+    ${safeUrl(p.maps_url) ? `<a class="linkbtn" href="${esc(p.maps_url)}" target="_blank" rel="noopener">Google Maps</a>` : ''}</div>`;
+  if (S.menuBusy[p.id]) {
+    return `<div class="empty menuwait"><span class="spinner big"></span><h3>Looking for the menu</h3>
+      <p>Checking ${site ? 'the website' : 'what’s online'} and reading it for you. This can take up to a minute.</p></div>`;
+  }
+  if (m.status === 'unknown') {
+    return emptyState('accent', 'book', 'See the menu',
+      `We’ll look for it ${site ? 'on the website' : 'online'} and lay it out neatly here.`,
+      `<button class="btn" data-act="findmenu" data-id="${p.id}">${ICON.search}Find the menu</button>`);
+  }
+  if (m.status === 'none') {
+    return emptyState('gray', 'book', 'No menu found',
+      'We couldn’t find a menu we could read. Some places only post theirs on Instagram or a delivery app.',
+      `<button class="btn tint" data-act="findmenu" data-id="${p.id}" data-refresh="1">Try again</button>${links}`);
+  }
+  const host = (() => { try { return new URL(m.source_url).hostname.replace(/^www\./, ''); } catch { return ''; } })();
+  const source = m.source_kind === 'photos'
+    ? 'Read from photos on Google Maps'
+    : `From ${host && safeUrl(m.source_url) ? `<a href="${esc(m.source_url)}" target="_blank" rel="noopener">${esc(host)}</a>` : 'the website'}`;
+  const present = Object.keys(DIETS).filter((tag) => m.sections.some((s) => s.items.some((i) => i.tags.includes(tag))));
+  const diet = present.includes(S.menuDiet[p.id]) ? S.menuDiet[p.id] : null;
+  const keep = (i) => !diet || i.tags.includes(diet) || (diet === 'vegetarian' && i.tags.includes('vegan'));
+  const sections = m.sections.map((s) => ({ ...s, items: s.items.filter(keep) })).filter((s) => s.items.length);
+  const chips = present.length ? `<div class="fchips" role="group" aria-label="Dietary filter">${present.map((tag) =>
+    `<button class="fchip${diet === tag ? ' on' : ''}" data-act="menudiet" data-id="${p.id}" data-tag="${tag}" aria-pressed="${diet === tag}">${DIETS[tag]}</button>`).join('')}</div>` : '';
+  return `<div class="menuhead"><span class="s">${source} · ${timeAgo(m.fetched_at)}</span>
+      <button class="linkbtn" data-act="findmenu" data-id="${p.id}" data-refresh="1">Refresh</button></div>
+    ${m.notes ? `<div class="section"><div class="group"><div class="notecard">${esc(m.notes)}</div></div></div>` : ''}${chips}
+    ${sections.map((s) => `<div class="section"><h2 class="section-title">${esc(s.title)}<span class="count">${s.items.length}</span></h2>
+      ${s.note ? `<div class="section-f menusub">${esc(s.note)}</div>` : ''}
+      <div class="group menu">${s.items.map((i) => `<div class="row menuitem"><span class="main"><span class="t">${esc(i.name)}${i.tags.map((tag) => `<span class="mtag" title="${DIETS[tag]}">${esc(DIETS[tag])}</span>`).join('')}</span>
+        ${i.description ? `<span class="s">${esc(i.description)}</span>` : ''}</span>${i.price ? `<span class="price">${esc(i.price)}</span>` : ''}</div>`).join('')}</div></div>`).join('')
+      || '<div class="section"><div class="section-f">Nothing on the menu matches that filter.</div></div>'}
+    <div class="section"><div class="section-f">Menus change. Check with the restaurant for today’s dishes and prices.${m.source_kind === 'photos' ? ' Read from photos, so some items may be missing or misread.' : ''}</div></div>`;
 }
 
 /** Rating, website and phone rows for a place's Details (only the ones we have). */
@@ -2309,6 +2366,22 @@ async function onAction(act, el) {
       return;
     }
     case 'tidy': tidySheet(S.trip[el.dataset.id]); return;
+    case 'findmenu': {
+      const id = el.dataset.id;
+      S.menuBusy[id] = true;
+      render();
+      try {
+        S.menu[id] = await api(`/v1/places/${id}/menu`, { method: 'POST', body: { refresh: el.dataset.refresh === '1' } });
+        if (S.menu[id].status === 'none') toast('No menu found');
+      } catch (e) {
+        toast(e.message, true);
+      } finally {
+        delete S.menuBusy[id];
+        render();
+      }
+      return;
+    }
+    case 'menudiet': S.menuDiet[el.dataset.id] = S.menuDiet[el.dataset.id] === el.dataset.tag ? null : el.dataset.tag; render(); return;
     case 'tidysuggest': S.sheet.st.text = el.dataset.text; renderOverlay(); return;
     case 'settime': await patchPlace(el.dataset.id, el.value ? { start_time: el.value } : { clear_start_time: true }); return;
     case 'cleartime': await patchPlace(el.dataset.id, { clear_start_time: true }); return;

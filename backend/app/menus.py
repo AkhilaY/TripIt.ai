@@ -1,0 +1,406 @@
+"""Finding a place's menu and turning it into neat sections.
+
+1. The place's website: the home page, then the pages, PDFs and images it links to that look like a menu.
+2. When the website has none (or there is no website) and it's allowed: photos listed for the place on
+   Google Maps, which may include a photographed menu card.
+
+Claude reads whatever was found (page text, PDFs, images) and returns structured sections. Everything
+fetched from the web is untrusted: it is only ever shown as escaped text, and Claude is told to ignore
+instructions inside it. Fetching is restricted to public http(s) addresses so a link on a page can't make
+the server call into its own network.
+"""
+
+import asyncio
+import contextlib
+import ipaddress
+import json
+import logging
+import re
+import socket
+from dataclasses import dataclass, field
+from html.parser import HTMLParser
+from typing import Awaitable, Callable, Optional
+from urllib.parse import unquote, urldefrag, urljoin, urlsplit
+
+import httpx
+
+from .config import Settings
+from .db import Database
+from .geocode import Geocoder, GooglePlacesGeocoder
+from .llm import ClaudeError, ClaudeService
+from .models import MenuResult, Place, PlaceMenu
+
+log = logging.getLogger(__name__)
+
+# Places that get a Menu tab.
+MENU_CATEGORIES = {"food", "cafe", "dessert", "drinks", "nightlife"}
+
+USER_AGENT = "Mozilla/5.0 (compatible; TripIt/1.0; +https://github.com/akhilay/tripit.ai)"
+MAX_REDIRECTS = 4
+HTML_BYTES = 2_000_000
+PDF_BYTES = 5_000_000
+IMAGE_BYTES = 3_500_000
+MAX_CANDIDATES = 3
+MAX_PDFS = 2
+MAX_IMAGES = 6
+MAX_TEXT_CHARS = 40_000
+PAGE_TEXT_CHARS = 14_000
+IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
+
+STRONG = re.compile(r"menu|menú|carte|speisekarte", re.I)
+WEAK = re.compile(r"\b(food|drinks?|dinner|lunch|brunch|breakfast|cocktails?|wine|dessert|beverages?|eat)\b", re.I)
+NOISE = re.compile(r"gift|career|jobs?|privacy|terms|cookie|catering|events?|private|reserv|contact|about|press|login|cart|shop|allerg", re.I)
+PRICE = re.compile(r"(?:[$€£¥]\s?\d|\d\s?[$€£¥]|\b\d{1,3}[.,]\d{2}\b)")
+
+
+@dataclass
+class Fetched:
+    url: str
+    content_type: str
+    body: bytes
+    truncated: bool = False
+
+
+@dataclass
+class Material:
+    """One piece of evidence for Claude to read."""
+    kind: str  # "text" | "image" | "pdf"
+    label: str
+    url: str
+    text: Optional[str] = None
+    data: Optional[bytes] = None
+    media_type: Optional[str] = None
+
+
+async def _resolve(host: str) -> list[str]:
+    infos = await asyncio.get_running_loop().getaddrinfo(host, None, type=socket.SOCK_STREAM)
+    return [info[4][0] for info in infos]
+
+
+def is_public_address(address: str) -> bool:
+    try:
+        ip = ipaddress.ip_address(address.split("%")[0])
+    except ValueError:
+        return False
+    if ip.version == 6 and ip.ipv4_mapped:
+        ip = ip.ipv4_mapped
+    return ip.is_global and not ip.is_multicast
+
+
+class SafeFetcher:
+    """GET for public web pages only: http(s) on the usual ports, public IPs, a few redirects, size limits."""
+
+    def __init__(self, client: Optional[httpx.AsyncClient] = None,
+                 resolver: Callable[[str], Awaitable[list[str]]] = _resolve):
+        self.client = client or httpx.AsyncClient(
+            timeout=httpx.Timeout(12.0, connect=5.0), headers={"User-Agent": USER_AGENT, "Accept-Language": "en"})
+        self._resolve = resolver
+
+    async def allowed(self, url: str) -> bool:
+        try:
+            parts = urlsplit(url)
+            host = parts.hostname
+            port = parts.port
+        except ValueError:
+            return False
+        if parts.scheme not in ("http", "https") or not host or parts.username or parts.password:
+            return False
+        if port not in (None, 80, 443):
+            return False
+        try:
+            addresses = await self._resolve(host)
+        except OSError:
+            return False
+        return bool(addresses) and all(is_public_address(a) for a in addresses)
+
+    async def get(self, url: str, max_bytes: int) -> Optional[Fetched]:
+        for _ in range(MAX_REDIRECTS + 1):
+            if not await self.allowed(url):
+                return None
+            try:
+                async with self.client.stream("GET", url, follow_redirects=False) as response:
+                    if response.is_redirect:
+                        url = urljoin(url, response.headers.get("location", ""))
+                        continue
+                    if response.status_code != 200:
+                        return None
+                    kind = response.headers.get("content-type", "").split(";")[0].strip().lower()
+                    body = bytearray()
+                    truncated = False
+                    async with contextlib.aclosing(response.aiter_bytes()) as chunks:
+                        async for chunk in chunks:
+                            body += chunk
+                            if len(body) > max_bytes:
+                                del body[max_bytes:]
+                                truncated = True
+                                break
+                    return Fetched(url=url, content_type=kind, body=bytes(body), truncated=truncated)
+            except (httpx.HTTPError, ValueError):
+                return None
+        return None
+
+
+# ---------- Reading a web page ----------
+
+
+@dataclass
+class Page:
+    url: str
+    text: str = ""
+    links: list[tuple[str, str]] = field(default_factory=list)  # (absolute url, link text)
+    images: list[tuple[str, str]] = field(default_factory=list)  # (absolute url, alt text)
+    jsonld: list[str] = field(default_factory=list)
+
+
+class _PageParser(HTMLParser):
+    SKIP = {"script", "style", "noscript", "svg", "template", "head", "iframe"}
+    BLOCKS = {"p", "div", "li", "br", "tr", "section", "article", "h1", "h2", "h3", "h4", "h5", "h6", "ul", "ol", "table", "dt", "dd"}
+
+    def __init__(self, base: str):
+        super().__init__(convert_charrefs=True)
+        self.base = base
+        self.page = Page(url=base)
+        self._chunks: list[str] = []
+        self._skip = 0
+        self._ld = False
+        self._ld_buf: list[str] = []
+        self._link: Optional[list] = None
+
+    def handle_starttag(self, tag, attrs):
+        a = dict(attrs)
+        if tag == "script" and (a.get("type") or "").lower() == "application/ld+json":
+            self._ld, self._ld_buf = True, []
+            return
+        if tag in self.SKIP:
+            self._skip += 1
+            return
+        if tag in self.BLOCKS:
+            self._chunks.append("\n")
+        if tag == "a" and a.get("href"):
+            href = a["href"].strip()
+            if href and not href.lower().startswith(("mailto:", "tel:", "javascript:", "#")):
+                self._link = [urldefrag(urljoin(self.base, href))[0], []]
+        elif tag == "img":
+            src = a.get("src") or a.get("data-src") or a.get("data-lazy-src")
+            if src and not src.startswith("data:"):
+                self.page.images.append((urljoin(self.base, src.strip()), (a.get("alt") or "").strip()))
+
+    def handle_endtag(self, tag):
+        if tag == "script" and self._ld:
+            self._ld = False
+            blob = "".join(self._ld_buf).strip()
+            if blob:
+                self.page.jsonld.append(blob)
+            return
+        if tag in self.SKIP:
+            self._skip = max(0, self._skip - 1)
+            return
+        if tag in self.BLOCKS:
+            self._chunks.append("\n")
+        if tag == "a" and self._link:
+            self.page.links.append((self._link[0], " ".join("".join(self._link[1]).split())))
+            self._link = None
+
+    def handle_data(self, data):
+        if self._ld:
+            self._ld_buf.append(data)
+        elif not self._skip:
+            self._chunks.append(data)
+            if self._link:
+                self._link[1].append(data)
+
+    def result(self) -> Page:
+        text = "".join(self._chunks)
+        lines = (" ".join(line.split()) for line in text.splitlines())
+        self.page.text = "\n".join(line for line in lines if line)
+        return self.page
+
+
+def parse_page(url: str, body: bytes) -> Page:
+    parser = _PageParser(url)
+    try:
+        parser.feed(body.decode("utf-8", errors="replace"))
+        parser.close()
+    except Exception:  # malformed markup shouldn't sink the lookup; use what was read
+        log.debug("Odd HTML at %s", url, exc_info=True)
+    return parser.result()
+
+
+def score_link(url: str, text: str) -> int:
+    path = unquote(urlsplit(url).path)
+    score = 0
+    if STRONG.search(text):
+        score += 6
+    if STRONG.search(path):
+        score += 5
+    if WEAK.search(text):
+        score += 2
+    if WEAK.search(path):
+        score += 1
+    if score and path.lower().endswith(".pdf"):
+        score += 2
+    if NOISE.search(text) or NOISE.search(path):
+        score -= 3
+    return score
+
+
+def candidate_links(page: Page, limit: int = MAX_CANDIDATES) -> list[str]:
+    best: dict[str, int] = {}
+    for url, text in page.links:
+        if url == page.url or not url.lower().startswith(("http://", "https://")):
+            continue
+        score = score_link(url, text)
+        if score > 0 and score > best.get(url, 0):
+            best[url] = score
+    return [u for u, _ in sorted(best.items(), key=lambda kv: -kv[1])[:limit]]
+
+
+def looks_like_menu(text: str) -> bool:
+    return len(PRICE.findall(text)) >= 5
+
+
+# ---------- Finding the menu ----------
+
+
+class MenuService:
+    def __init__(self, db: Database, claude: Optional[ClaudeService], fetcher: SafeFetcher,
+                 geocoder: Optional[Geocoder], settings: Settings):
+        self.db = db
+        self.claude = claude
+        self.fetcher = fetcher
+        self.geocoder = geocoder
+        self.settings = settings
+        self._running: dict[str, asyncio.Task] = {}
+
+    def stored(self, place_id: str) -> PlaceMenu:
+        row = self.db.get_menu(place_id)
+        if row is None:
+            return PlaceMenu()
+        data = json.loads(row["data"]) if row["data"] else {}
+        return PlaceMenu(
+            status=row["status"], sections=data.get("sections", []), notes=data.get("notes"),
+            source_kind=row["source_kind"], source_url=row["source_url"], fetched_at=row["fetched_at"],
+        )
+
+    async def find(self, place: Place, refresh: bool = False) -> PlaceMenu:
+        """Returns the saved menu, or looks for one. A second request for the same place waits for the first."""
+        if not refresh and self.db.get_menu(place.id) is not None:
+            return self.stored(place.id)
+        task = self._running.get(place.id)
+        if task is None:
+            task = asyncio.ensure_future(self._look(place))
+            self._running[place.id] = task
+            task.add_done_callback(lambda _t, pid=place.id: self._running.pop(pid, None))
+        return await asyncio.shield(task)
+
+    async def _look(self, place: Place) -> PlaceMenu:
+        if self.claude is None:
+            raise ClaudeError("Claude isn't configured on the server")
+        result: Optional[MenuResult] = None
+        kind: Optional[str] = None
+        source: Optional[str] = None
+
+        if place.website:
+            materials = await self.gather_website(place.website)
+            if materials:
+                result = clean_menu(await self.claude.extract_menu(place, materials, from_photos=False))
+                if result.found:
+                    kind = "website"
+                    source = self._best_source(materials, place.website)
+        if (result is None or not result.found) and self.settings.menu_google_photos \
+                and isinstance(self.geocoder, GooglePlacesGeocoder):
+            photos = await self.geocoder.menu_photos(place.name, place.neighborhood, place.city, place.country)
+            if photos:
+                materials = [Material("image", f"Photo {i}", "", data=data, media_type=media_type)
+                             for i, (media_type, data) in enumerate(photos, start=1)]
+                result = clean_menu(await self.claude.extract_menu(place, materials, from_photos=True))
+                if result.found:
+                    kind, source = "photos", None
+
+        if result is not None and result.found:
+            self.db.save_menu(place.id, "found", {"sections": [s.model_dump() for s in result.sections], "notes": result.notes},
+                              kind, source)
+        else:
+            self.db.save_menu(place.id, "none", None, None, None)
+        return self.stored(place.id)
+
+    @staticmethod
+    def _best_source(materials: list[Material], fallback: str) -> str:
+        for m in materials:
+            if m.url:
+                return m.url
+        return fallback
+
+    async def gather_website(self, website: str) -> list[Material]:
+        home = await self.fetcher.get(website, HTML_BYTES)
+        if home is None:
+            return []
+        if home.content_type == "application/pdf" and not home.truncated:
+            return [Material("pdf", "Menu PDF", home.url, data=home.body, media_type="application/pdf")]
+        if home.content_type in IMAGE_TYPES and len(home.body) <= IMAGE_BYTES and not home.truncated:
+            return [Material("image", "Menu image", home.url, data=home.body, media_type=home.content_type)]
+        if "html" not in home.content_type:
+            return []
+
+        pages = [parse_page(home.url, home.body)]
+        materials: list[Material] = []
+        pdfs = images = 0
+        candidates = candidate_links(pages[0])
+        fetched = await asyncio.gather(*(self.fetcher.get(url, PDF_BYTES) for url in candidates))
+        for got in fetched:
+            if got is None or got.truncated and "html" not in got.content_type:
+                continue
+            if got.content_type == "application/pdf" and pdfs < MAX_PDFS:
+                pdfs += 1
+                materials.append(Material("pdf", f"Menu PDF {pdfs}", got.url, data=got.body, media_type="application/pdf"))
+            elif got.content_type in IMAGE_TYPES and images < MAX_IMAGES and len(got.body) <= IMAGE_BYTES:
+                images += 1
+                materials.append(Material("image", f"Menu image {images}", got.url, data=got.body, media_type=got.content_type))
+            elif "html" in got.content_type:
+                pages.append(parse_page(got.url, got.body))
+
+        # The home page counts when it has no menu page to point to, or is itself full of prices.
+        use = pages if len(pages) == 1 or looks_like_menu(pages[0].text) else pages[1:]
+        used = 0
+        for page in use:
+            text = page.text[:PAGE_TEXT_CHARS]
+            if len(text) >= 60 and used + len(text) <= MAX_TEXT_CHARS:
+                materials.append(Material("text", f"Web page {len(materials) + 1}", page.url, text=text))
+                used += len(text)
+            for blob in page.jsonld:
+                if re.search(r'"(hasMenu|Menu|MenuItem|MenuSection)"', blob) and used + len(blob) <= MAX_TEXT_CHARS:
+                    materials.append(Material("text", "Structured menu data", page.url, text=blob[:PAGE_TEXT_CHARS]))
+                    used += min(len(blob), PAGE_TEXT_CHARS)
+        # Menus are often pictures: take the menu-looking images from those pages.
+        wanted = [(u, alt) for page in use for u, alt in page.images if STRONG.search(alt) or STRONG.search(unquote(urlsplit(u).path))]
+        for url, _alt in list(dict.fromkeys(wanted))[:MAX_IMAGES - images]:
+            got = await self.fetcher.get(url, IMAGE_BYTES)
+            if got and got.content_type in IMAGE_TYPES and not got.truncated:
+                images += 1
+                materials.append(Material("image", f"Menu image {images}", got.url, data=got.body, media_type=got.content_type))
+        return materials
+
+
+def clean_menu(result: MenuResult) -> MenuResult:
+    """Trims what Claude returned into sizes the app is happy to store and show."""
+    sections = []
+    for section in result.sections[:40]:
+        items = []
+        for item in section.items[:150]:
+            name = " ".join(item.name.split())[:150]
+            if not name:
+                continue
+            item.name = name
+            item.description = " ".join((item.description or "").split())[:500] or None
+            item.price = " ".join((item.price or "").split())[:40] or None
+            item.tags = list(dict.fromkeys(item.tags))
+            items.append(item)
+        if items:
+            section.title = " ".join(section.title.split())[:120] or "Menu"
+            section.note = " ".join((section.note or "").split())[:300] or None
+            section.items = items
+            sections.append(section)
+    result.sections = sections
+    result.notes = " ".join((result.notes or "").split())[:400] or None
+    result.found = bool(sections)
+    return result

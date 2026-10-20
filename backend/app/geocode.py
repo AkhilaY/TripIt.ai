@@ -192,6 +192,33 @@ class GooglePlacesGeocoder:
             ],
         )
 
+    async def menu_photos(self, name, neighborhood, city, country, limit: int = 8) -> list[tuple[str, bytes]]:
+        """(media type, bytes) of the photos Google lists for a place, to look for a photographed menu."""
+        text = ", ".join(p for p in (name, neighborhood, city, country) if p)
+        try:
+            response = await self.client.post(
+                self.URL, headers={"X-Goog-Api-Key": self.api_key, "X-Goog-FieldMask": "places.photos"},
+                json={"textQuery": text, "pageSize": 1},
+            )
+            response.raise_for_status()
+            places = response.json().get("places") or []
+        except (httpx.HTTPError, ValueError) as e:
+            log.warning("Google photo lookup failed for %r: %s", text, e)
+            return []
+        refs = [ph["name"] for ph in ((places[0].get("photos") if places else None) or [])[:limit] if ph.get("name")]
+
+        async def fetch(ref: str) -> Optional[tuple[str, bytes]]:
+            try:
+                r = await self.client.get(f"https://places.googleapis.com/v1/{ref}/media",
+                                          params={"maxWidthPx": 1400, "key": self.api_key}, follow_redirects=True)
+            except httpx.HTTPError:
+                return None
+            kind = r.headers.get("content-type", "").split(";")[0].strip().lower()
+            return (kind, r.content) if r.status_code == 200 and kind.startswith("image/") and len(r.content) <= 3_500_000 else None
+
+        got = await asyncio.gather(*(fetch(ref) for ref in refs))
+        return [g for g in got if g]
+
     async def search(self, query, near=None, limit=5) -> list[GeoMatch]:
         body: dict = {"textQuery": query, "pageSize": limit}
         if near:

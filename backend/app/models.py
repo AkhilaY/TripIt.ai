@@ -166,6 +166,69 @@ class PlanResult(BaseModel):
     notes: Optional[str] = None
 
 
+# ---------- Bookings ----------
+
+BookingKind = Literal["flight", "hotel", "reservation", "car", "other"]
+# Local wall-clock time as printed on the booking, with no time zone: a flight leaves and lands in different ones.
+BOOKING_TIME = r"^\d{4}-\d{2}-\d{2}(T([01]\d|2[0-3]):[0-5]\d)?$"
+
+
+class Booking(BaseModel):
+    id: str
+    trip_id: str
+    kind: BookingKind
+    title: str  # flight number, hotel, restaurant or rental company
+    start_at: Optional[str] = None  # "YYYY-MM-DD" or "YYYY-MM-DDTHH:MM": departure, check-in, table time, pick-up
+    end_at: Optional[str] = None  # arrival, check-out, drop-off
+    origin: Optional[str] = None
+    destination: Optional[str] = None
+    address: Optional[str] = None
+    confirmation: Optional[str] = None
+    party_size: Optional[int] = None
+    notes: Optional[str] = None
+    place_id: Optional[str] = None  # the saved place a table reservation is for
+    source: Literal["manual", "screenshot", "text", "reserve"] = "manual"
+    created_at: datetime
+
+
+class BookingInput(BaseModel):
+    kind: Optional[BookingKind] = None
+    title: Optional[str] = Field(default=None, min_length=1, max_length=160)
+    start_at: Optional[str] = Field(default=None, pattern=BOOKING_TIME)
+    end_at: Optional[str] = Field(default=None, pattern=BOOKING_TIME)
+    origin: Optional[str] = Field(default=None, max_length=80)
+    destination: Optional[str] = Field(default=None, max_length=80)
+    address: Optional[str] = Field(default=None, max_length=300)
+    confirmation: Optional[str] = Field(default=None, max_length=60)
+    party_size: Optional[int] = Field(default=None, ge=1, le=100)
+    notes: Optional[str] = Field(default=None, max_length=2000)
+    place_id: Optional[str] = Field(default=None, max_length=40)
+    source: Optional[Literal["manual", "screenshot", "text", "reserve"]] = None
+
+
+class BookingDraft(BaseModel):
+    """What Claude read from a confirmation; the person checks it before it is saved."""
+    kind: BookingKind
+    title: str = Field(description="Flight number like 'BA 178', the hotel's or restaurant's name, or the rental company.")
+    start_at: Optional[str] = Field(description="Departure, check-in, table time or pick-up as 'YYYY-MM-DDTHH:MM' (local time, 24 hour), or 'YYYY-MM-DD' when there is no time. Null if not shown.")
+    end_at: Optional[str] = Field(description="Arrival, check-out or drop-off in the same format, or null.")
+    origin: Optional[str] = Field(description="Departure airport (IATA code if shown) or pick-up location, or null.")
+    destination: Optional[str] = Field(description="Arrival airport or drop-off location, or null.")
+    address: Optional[str] = Field(description="Street address of the hotel, restaurant or rental office, or null.")
+    confirmation: Optional[str] = Field(description="Confirmation or booking reference exactly as printed, or null.")
+    party_size: Optional[int] = Field(description="Guests for a restaurant table, or null.")
+    notes: Optional[str] = Field(description="Terminal, seat, room type, check-in instructions or similar, briefly, or null.")
+
+
+class BookingsResult(BaseModel):
+    bookings: list[BookingDraft]
+
+
+class ReadBookingsRequest(BaseModel):
+    text: Optional[str] = Field(default=None, max_length=20000)
+    images: list[str] = Field(default=[], max_length=6, description="Base64 JPEG images (data: URLs are fine).")
+
+
 # ---------- Menus ----------
 
 MenuTag = Literal["vegetarian", "vegan", "gluten_free", "spicy"]
@@ -240,6 +303,9 @@ class Place(BaseModel):
     rating: Optional[float] = None  # Google's rating out of 5, when the place was found there
     rating_count: Optional[int] = None
     rating_checked_at: Optional[datetime] = None
+    reserve_url: Optional[str] = None  # the restaurant's own page on Resy, OpenTable, Tock or SevenRooms
+    reserve_provider: Optional[str] = None
+    reserve_checked_at: Optional[datetime] = None
     website: Optional[str] = None
     phone: Optional[str] = None
     contact_checked_at: Optional[datetime] = None
@@ -284,6 +350,7 @@ class Trip(BaseModel):
 class TripDetail(Trip):
     places: list[Place] = []
     reels: list[Reel] = []
+    bookings: list[Booking] = []
 
 
 class TripUpdate(BaseModel):

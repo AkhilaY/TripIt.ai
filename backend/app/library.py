@@ -3,6 +3,7 @@
 import logging
 import math
 import re
+import re as _re
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Callable, Optional
@@ -15,6 +16,9 @@ from .photos import PhotoStore
 from .photos import merge as merge_photos
 from .llm import ClaudeError, ClaudeService
 from .models import (
+    Booking,
+    BookingDraft,
+    BOOKING_TIME,
     ExtractedPlace,
     ExtractionResult,
     Place,
@@ -25,7 +29,7 @@ from .models import (
     Trip,
     TripDetail,
 )
-from .planner import offline_plan, offline_tidy
+from .planner import offline_plan, offline_tidy, slot_for_time
 
 log = logging.getLogger(__name__)
 
@@ -291,6 +295,63 @@ class Library:
         self.apply_plan(trip_id, result, start_date, planned_by)
         return self.db.get_trip_detail(trip_id)
 
+    # ---------- Bookings ----------
+
+    def clean_drafts(self, drafts: list[BookingDraft]) -> list[BookingDraft]:
+        """Keeps what Claude read in shapes the app accepts; anything malformed becomes "not shown"."""
+        def text(value, limit):
+            return " ".join((value or "").split())[:limit] or None
+
+        out = []
+        for d in drafts[:20]:
+            title = text(d.title, 160)
+            if not title:
+                continue
+            valid = lambda v: v if v and _re.match(BOOKING_TIME, v) and _valid_date(v) else None
+            out.append(BookingDraft(
+                kind=d.kind, title=title, start_at=valid(d.start_at), end_at=valid(d.end_at),
+                origin=text(d.origin, 80), destination=text(d.destination, 80), address=text(d.address, 300),
+                confirmation=text(d.confirmation, 60), party_size=d.party_size if d.party_size and 1 <= d.party_size <= 100 else None,
+                notes=text(d.notes, 2000),
+            ))
+        return out
+
+    def add_booking(self, trip_id: str, fields: dict) -> Booking:
+        booking = self.db.add_booking(trip_id, **fields)
+        self._apply_reservation(booking)
+        return booking
+
+    def update_booking(self, booking: Booking, changes: dict) -> Booking:
+        self.db.update_booking(booking.id, **changes)
+        booking = self.db.get_booking(booking.id)
+        self._apply_reservation(booking)
+        return booking
+
+    def delete_booking(self, booking: Booking) -> None:
+        place = self.db.get_place(booking.place_id) if booking.place_id and booking.kind == "reservation" else None
+        if place is not None and booking.start_at and place.start_time == booking.start_at[11:16]:
+            self.db.update_place(place.id, start_time=None)  # the reservation was what set it
+        self.db.delete_booking(booking.id)
+
+    def _apply_reservation(self, booking: Booking) -> None:
+        """A table booked for a saved place sets its exact time and, when the trip has dates, puts it on that day."""
+        if booking.kind != "reservation" or not booking.place_id or not booking.start_at:
+            return
+        place = self.db.get_place(booking.place_id)
+        if place is None or place.trip_id != booking.trip_id:
+            return
+        day_part, _, time_part = booking.start_at.partition("T")
+        if time_part:
+            self.db.update_place(place.id, start_time=time_part, time_of_day=slot_for_time(time_part))
+        trip = self.db.get_trip(booking.trip_id)
+        if trip.start_date:
+            try:
+                day = (date.fromisoformat(day_part) - trip.start_date).days + 1
+            except ValueError:
+                return
+            if 1 <= day <= 21 and place.day_number != day:
+                self.move_to(self.db.get_place(place.id), day, None)
+
     async def tidy_trip(self, trip_id: str, instruction: Optional[str], claude: Optional[ClaudeService]) -> TripDetail:
         """Orders the stops on the days the person built, suggests times and tips, and (when asked) applies
         their instruction. Places they haven't put on a day stay unscheduled unless the instruction says otherwise."""
@@ -389,6 +450,14 @@ class Library:
         on_day = {p.id for p in self.db.list_places(trip_id) if p.day_number == day}
         for order, place_id in enumerate(pid for pid in place_ids if pid in on_day):
             self.db.update_place(place_id, day_order=order)
+
+
+def _valid_date(value: str) -> bool:
+    try:
+        date.fromisoformat(value[:10])
+        return True
+    except ValueError:
+        return False
 
 
 def _meters(lat1: float, lon1: float, lat2: float, lon2: float) -> float:

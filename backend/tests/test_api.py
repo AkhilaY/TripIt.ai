@@ -17,6 +17,8 @@ from app.concierge import Curator
 from app.main import app, notify_import
 from app.media import DownloadedReel, UnsupportedURLError, find_url, platform_for
 from app.models import (
+    BookingDraft,
+    BookingsResult,
     ExtractionResult,
     MenuItem,
     MenuResult,
@@ -431,7 +433,7 @@ def test_output_schemas_are_accepted_by_sdk():
 
     from app.models import BriefingText, ConciergeReply, EditsResult
 
-    for model in (ExtractionResult, PlanResult, EditsResult, ConciergeReply, BriefingText, MenuResult):
+    for model in (ExtractionResult, PlanResult, EditsResult, ConciergeReply, BriefingText, MenuResult, BookingsResult):
         schema = transform_schema(TypeAdapter(model).json_schema())
         assert schema["additionalProperties"] is False
 
@@ -1448,6 +1450,171 @@ def test_menu_page_reading_helpers():
     item = clean.sections[0].items[0]
     assert item.name == "Soup of the day" and item.description is None and item.price == "$9" and item.tags == ["vegan"]
     assert clean.notes == "Dinner only" and clean_menu(MenuResult(found=True, sections=[], notes=None)).found is False
+
+
+# ---------- Bookings and reservation links ----------
+
+
+def booking_trip(client, start_date=None):
+    job = import_reel(client)
+    trip_id = job["trip_id"]
+    if start_date:
+        client.patch(f"/v1/trips/{trip_id}", json={"start_date": start_date}, headers=H)
+    places = client.get(f"/v1/trips/{trip_id}", headers=H).json()["places"]
+    return trip_id, {p["name"]: p["id"] for p in places}
+
+
+def test_bookings_crud_in_trip_detail(client):
+    trip_id, ids = booking_trip(client)
+    assert client.get(f"/v1/trips/{trip_id}", headers=H).json()["bookings"] == []
+
+    flight = {"kind": "flight", "title": "BA 178", "start_at": "2026-11-07T19:25", "end_at": "2026-11-08T07:30",
+              "origin": "JFK", "destination": "LHR", "confirmation": "ABC123", "source": "screenshot"}
+    r = client.post(f"/v1/trips/{trip_id}/bookings", json=flight, headers=H)
+    assert r.status_code == 201
+    client.post(f"/v1/trips/{trip_id}/bookings", json={"kind": "hotel", "title": "The Hoxton", "start_at": "2026-11-08T15:00",
+                                                       "end_at": "2026-11-12", "address": "199 High Holborn"}, headers=H)
+    client.post(f"/v1/trips/{trip_id}/bookings", json={"kind": "car", "title": "Hertz"}, headers=H)  # no date: sorts last
+    bookings = client.get(f"/v1/trips/{trip_id}", headers=H).json()["bookings"]
+    assert [b["title"] for b in bookings] == ["BA 178", "The Hoxton", "Hertz"]
+    assert bookings[0]["origin"] == "JFK" and bookings[0]["source"] == "screenshot" and bookings[1]["source"] == "manual"
+
+    fixed = client.patch(f"/v1/trips/{trip_id}/bookings/{bookings[0]['id']}",
+                         json={"start_at": "2026-11-07T20:10", "notes": "Terminal 7"}, headers=H).json()["bookings"][0]
+    assert fixed["start_at"] == "2026-11-07T20:10" and fixed["notes"] == "Terminal 7" and fixed["confirmation"] == "ABC123"
+    cleared = client.patch(f"/v1/trips/{trip_id}/bookings/{bookings[0]['id']}", json={"notes": None}, headers=H).json()["bookings"][0]
+    assert cleared["notes"] is None  # an explicit null clears a field
+
+    assert client.delete(f"/v1/trips/{trip_id}/bookings/{bookings[2]['id']}", headers=H).json()["bookings"].__len__() == 2
+
+    bad = [{"kind": "flight"}, {"title": "x"}, {"kind": "boat", "title": "x"}, {"kind": "flight", "title": "x", "start_at": "tomorrow"},
+           {"kind": "flight", "title": "x", "start_at": "2026-11-07T25:00"}, {"kind": "flight", "title": "x", "party_size": 0}]
+    for body in bad:
+        assert client.post(f"/v1/trips/{trip_id}/bookings", json=body, headers=H).status_code == 422, body
+    assert client.patch(f"/v1/trips/{trip_id}/bookings/{bookings[0]['id']}", json={"title": None}, headers=H).status_code == 422
+
+    other = client.post("/v1/places", json={"name": "Elsewhere", "city": "Paris"}, headers=H).json()["place"]
+    assert client.post(f"/v1/trips/{trip_id}/bookings", json={"kind": "reservation", "title": "x", "place_id": other["id"]}, headers=H).status_code == 422
+    other_trip = client.get("/v1/trips", headers=H).json()
+    paris = next(t for t in other_trip if t["id"] != trip_id)["id"]
+    assert client.patch(f"/v1/trips/{paris}/bookings/{bookings[0]['id']}", json={"notes": "x"}, headers=H).status_code == 404
+    assert client.delete(f"/v1/trips/{paris}/bookings/{bookings[0]['id']}", headers=H).status_code == 404
+    assert client.post("/v1/trips/nope/bookings", json=flight, headers=H).status_code == 404
+
+    assert client.delete(f"/v1/trips/{trip_id}", headers=H).status_code == 204
+    assert app.state.db._rows("SELECT * FROM bookings") == []  # they go with the trip
+
+
+def test_reservation_booking_sets_time_and_day(client):
+    trip_id, ids = booking_trip(client, start_date="2026-11-07")
+    joes = ids["Joe's Pizza"]
+    body = {"kind": "reservation", "title": "Joe's Pizza", "start_at": "2026-11-09T19:30", "party_size": 2, "place_id": joes}
+    trip = client.post(f"/v1/trips/{trip_id}/bookings", json=body, headers=H).json()
+    place = next(p for p in trip["places"] if p["id"] == joes)
+    assert place["start_time"] == "19:30" and place["time_of_day"] == "dinner"
+    assert place["day_number"] == 3 and trip["day_count"] == 3  # Nov 9 is the third day of a trip starting Nov 7
+
+    booking = trip["bookings"][0]
+    trip = client.patch(f"/v1/trips/{trip_id}/bookings/{booking['id']}", json={"start_at": "2026-11-08T12:15"}, headers=H).json()
+    place = next(p for p in trip["places"] if p["id"] == joes)
+    assert place["start_time"] == "12:15" and place["day_number"] == 2 and place["time_of_day"] == "lunch"
+
+    trip = client.delete(f"/v1/trips/{trip_id}/bookings/{booking['id']}", headers=H).json()
+    place = next(p for p in trip["places"] if p["id"] == joes)
+    assert place["start_time"] is None and place["day_number"] == 2  # the time goes; it stays where it was planned
+
+    # Outside the trip's dates, or no dates at all: only the exact time is set.
+    far = {"kind": "reservation", "title": "Lucali", "start_at": "2027-03-01T20:00", "place_id": ids["Lucali"]}
+    place = next(p for p in client.post(f"/v1/trips/{trip_id}/bookings", json=far, headers=H).json()["places"] if p["id"] == ids["Lucali"])
+    assert place["start_time"] == "20:00" and place["day_number"] is None
+    # A hotel with a place_id doesn't touch the place; a reservation with a date only leaves its time alone.
+    client.post(f"/v1/trips/{trip_id}/bookings", json={"kind": "hotel", "title": "H", "start_at": "2026-11-08T15:00", "place_id": ids["Prince Street Pizza"]}, headers=H)
+    prince = next(p for p in client.get(f"/v1/trips/{trip_id}", headers=H).json()["places"] if p["id"] == ids["Prince Street Pizza"])
+    assert prince["start_time"] is None
+
+
+def test_read_bookings_from_text_and_screenshots(client):
+    import base64
+
+    trip_id, _ = booking_trip(client)
+    client.messages.outputs[BookingsResult] = BookingsResult(bookings=[
+        BookingDraft(kind="flight", title=" BA  178 ", start_at="2026-11-07T19:25", end_at="2026-02-31", origin="JFK", destination="LHR",
+                     address=None, confirmation="ABC123", party_size=None, notes="Terminal 7"),
+        BookingDraft(kind="hotel", title="The Hoxton", start_at="Nov 8", end_at="2026-11-12", origin=None, destination=None,
+                     address="199 High Holborn", confirmation=None, party_size=500, notes=None),
+        BookingDraft(kind="other", title="   ", start_at=None, end_at=None, origin=None, destination=None, address=None,
+                     confirmation=None, party_size=None, notes=None)])
+    jpeg = "data:image/jpeg;base64," + base64.b64encode(b"\xff\xd8\xff fake").decode()
+    r = client.post(f"/v1/trips/{trip_id}/bookings/read", json={"text": "Your booking is confirmed", "images": [jpeg]}, headers=H)
+    assert r.status_code == 200
+    drafts = r.json()
+    assert [d["title"] for d in drafts] == ["BA 178", "The Hoxton"]  # the blank one is dropped; spaces are tidied
+    assert drafts[0]["end_at"] is None and drafts[1]["start_at"] is None and drafts[1]["party_size"] is None  # impossible values
+    assert drafts[0]["start_at"] == "2026-11-07T19:25" and drafts[0]["confirmation"] == "ABC123"
+    sent = client.messages.calls[-1]
+    blocks = sent["messages"][0]["content"]
+    assert [b["type"] for b in blocks].count("image") == 1
+    assert "Today is" in blocks[-1]["text"] and "Your booking is confirmed" in blocks[-1]["text"]
+    assert "untrusted" in sent["system"] and sent["output_config"]["effort"] == "low"
+    assert client.get(f"/v1/trips/{trip_id}", headers=H).json()["bookings"] == []  # reading doesn't save anything
+
+    assert client.post(f"/v1/trips/{trip_id}/bookings/read", json={}, headers=H).status_code == 422
+    assert client.post(f"/v1/trips/{trip_id}/bookings/read", json={"images": ["!!!"]}, headers=H).status_code == 422
+    assert client.post(f"/v1/trips/{trip_id}/bookings/read", json={"images": [base64.b64encode(b"GIF89a").decode()]}, headers=H).status_code == 422
+    assert client.post("/v1/trips/nope/bookings/read", json={"text": "x"}, headers=H).status_code == 404
+    client.messages.stop_reason = "refusal"
+    assert client.post(f"/v1/trips/{trip_id}/bookings/read", json={"text": "x"}, headers=H).status_code == 502
+
+
+def test_shared_trip_never_includes_bookings(client):
+    trip_id, _ = booking_trip(client)
+    client.post(f"/v1/trips/{trip_id}/bookings", json={"kind": "flight", "title": "BA 178", "confirmation": "SECRET1"}, headers=H)
+    token = client.post(f"/v1/trips/{trip_id}/share", headers=H).json()["token"]
+    shared = client.get(f"/v1/shared/{token}")
+    assert shared.status_code == 200 and "SECRET1" not in shared.text and "bookings" not in shared.json()
+
+
+def test_reserve_link_found_on_the_restaurant_website(client):
+    from app.reserve import provider_for
+
+    trip_id, ids = booking_trip(client)
+    pid = ids["Joe's Pizza"]
+    app.state.db.update_place(pid, website="https://joes.test/")
+    serve(client, "https://joes.test/", b'<html><body><a href="/gift">Gift cards</a><a href="https://resy.com/gift-cards">Gifts</a>'
+          b'<a href="https://www.opentable.com/r/joes-pizza-new-york">Reserve on OpenTable</a>'
+          b'<a href="https://resy.com/cities/ny/joes-pizza">Resy</a></body></html>')
+    place = client.post(f"/v1/places/{pid}/reserve-link", headers=H).json()
+    assert place["reserve_provider"] == "OpenTable" and place["reserve_url"] == "https://www.opentable.com/r/joes-pizza-new-york"
+    assert place["reserve_checked_at"] is not None
+    calls = len(client.web_log)
+    assert client.post(f"/v1/places/{pid}/reserve-link", headers=H).json()["reserve_url"] == place["reserve_url"]
+    assert len(client.web_log) == calls  # looked at once
+
+    # One click away: the home page links to a Reservations page that has the booking link.
+    lucali = ids["Lucali"]
+    app.state.db.update_place(lucali, website="https://lucali.test/")
+    serve(client, "https://lucali.test/", b'<html><body><a href="/reservations">Reservations</a><a href="/about">About</a></body></html>')
+    serve(client, "https://lucali.test/reservations", b'<html><body><a href="https://resy.com/cities/ny/lucali?date=2026-11-08">Book</a></body></html>')
+    found = client.post(f"/v1/places/{lucali}/reserve-link", headers=H).json()
+    assert found["reserve_provider"] == "Resy" and found["reserve_url"].startswith("https://resy.com/cities/ny/lucali")
+
+    # Nothing found: remembered, so the page isn't fetched again.
+    prince = ids["Prince Street Pizza"]
+    app.state.db.update_place(prince, website="https://prince.test/")
+    serve(client, "https://prince.test/", b'<html><body><a href="javascript:x()">Book</a><a href="https://evil.test/resy.com/cities/ny/x">Resy</a></body></html>')
+    none = client.post(f"/v1/places/{prince}/reserve-link", headers=H).json()
+    assert none["reserve_url"] is None and none["reserve_checked_at"] is not None
+
+    # Not for hotels, or places without a website.
+    client.patch(f"/v1/places/{pid}", json={"category": "stay"}, headers=H)
+    app.state.db.update_place(pid, reserve_checked_at=None)
+    assert client.post(f"/v1/places/{pid}/reserve-link", headers=H).json()["reserve_checked_at"] is None
+    assert client.post("/v1/places/nope/reserve-link", headers=H).status_code == 404
+
+    assert provider_for("https://resy.com/cities/ny/lucali") == "Resy" and provider_for("https://resy.com/") is None
+    assert provider_for("https://www.opentable.co.uk/r/the-ivy") == "OpenTable" and provider_for("https://opentable.com/about") is None
+    assert provider_for("https://www.exploretock.com/alinea") == "Tock" and provider_for("https://resy.com/cities/ny/x y") is None
+    assert provider_for("https://resy.com.evil.test/cities/ny/x") is None and provider_for("http://resy.com/cities/ny/" + "a" * 600) is None
 
 
 # ---------- Taste profile, edits, concierge, briefings ----------

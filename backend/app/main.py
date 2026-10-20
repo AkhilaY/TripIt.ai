@@ -10,6 +10,7 @@ import re
 import secrets
 import time
 from contextlib import asynccontextmanager
+from datetime import date, datetime, timezone
 from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Optional
@@ -35,6 +36,9 @@ from .media import UnsupportedURLError, find_url, platform_for
 from .models import (
     AddFromLinkRequest,
     AddToDayRequest,
+    Booking,
+    BookingDraft,
+    BookingInput,
     AddPlaceRequest,
     AddPlaceResult,
     BriefingRequest,
@@ -59,6 +63,7 @@ from .models import (
     PlanTripRequest,
     PushSubscriptionRequest,
     Reel,
+    ReadBookingsRequest,
     ReorderRequest,
     ScreenshotJobRequest,
     SearchPlacesRequest,
@@ -72,6 +77,7 @@ from .models import (
 )
 from .menus import MENU_CATEGORIES, MenuService, SafeFetcher
 from .photos import PhotoStore
+from .reserve import find_reserve_link
 from .pipeline import Pipeline
 from .push import Push
 from .routing import Router
@@ -211,11 +217,9 @@ async def create_job(body: CreateJobRequest, request: Request) -> Job:
     return job
 
 
-@app.post("/v1/jobs/screenshots", response_model=Job, status_code=202, dependencies=[Auth])
-async def create_screenshot_job(body: ScreenshotJobRequest, request: Request) -> Job:
-    """Finds places in screenshots (of a post, map or article) instead of a reel link."""
+def _decode_images(items: list[str]) -> list[bytes]:
     images = []
-    for item in body.images:
+    for item in items:
         data = item.split(",", 1)[1] if item.startswith("data:") else item
         try:
             raw = base64.b64decode(data, validate=True)
@@ -226,6 +230,13 @@ async def create_screenshot_job(body: ScreenshotJobRequest, request: Request) ->
         if not raw.startswith(b"\xff\xd8\xff"):
             raise HTTPException(status_code=422, detail="Images must be JPEGs")
         images.append(raw)
+    return images
+
+
+@app.post("/v1/jobs/screenshots", response_model=Job, status_code=202, dependencies=[Auth])
+async def create_screenshot_job(body: ScreenshotJobRequest, request: Request) -> Job:
+    """Finds places in screenshots (of a post, map or article) instead of a reel link."""
+    images = _decode_images(body.images)
     url = request.app.state.pipeline.save_upload(images)
     note = (body.note or "").strip() or None
     job, _ = await request.app.state.store.create(url, note)
@@ -352,6 +363,70 @@ async def tidy_trip(trip_id: str, body: TidyRequest, request: Request) -> TripDe
     return _trip_or_404(request, trip_id)
 
 
+# ---------- Bookings ----------
+
+
+def _booking_or_404(request: Request, trip_id: str, booking_id: str) -> Booking:
+    booking = _db(request).get_booking(booking_id)
+    if booking is None or booking.trip_id != trip_id:
+        raise HTTPException(status_code=404, detail="Booking not found")
+    return booking
+
+
+def _check_booking_place(request: Request, trip_id: str, place_id: Optional[str]) -> None:
+    if place_id:
+        place = _db(request).get_place(place_id)
+        if place is None or place.trip_id != trip_id:
+            raise HTTPException(status_code=422, detail="That place isn't in this trip")
+
+
+@app.post("/v1/trips/{trip_id}/bookings/read", response_model=list[BookingDraft], dependencies=[Auth])
+async def read_bookings(trip_id: str, body: ReadBookingsRequest, request: Request) -> list[BookingDraft]:
+    """Reads flights, stays and reservations from pasted text or screenshots. Nothing is saved: the app shows
+    the result for the person to check, then saves each booking with POST /v1/trips/{id}/bookings."""
+    trip = _trip_or_404(request, trip_id)
+    text = (body.text or "").strip() or None
+    if not text and not body.images:
+        raise HTTPException(status_code=422, detail="Paste the confirmation or add a screenshot")
+    images = _decode_images(body.images)
+    try:
+        result = await request.app.state.claude.extract_bookings(
+            text, images, date.today().isoformat(), trip.name, trip.start_date.isoformat() if trip.start_date else None)
+    except ClaudeError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    return _library(request).clean_drafts(result.bookings)
+
+
+@app.post("/v1/trips/{trip_id}/bookings", response_model=TripDetail, status_code=201, dependencies=[Auth])
+async def add_booking(trip_id: str, body: BookingInput, request: Request) -> TripDetail:
+    _trip_or_404(request, trip_id)
+    if not body.kind or not body.title:
+        raise HTTPException(status_code=422, detail="A booking needs a type and a name")
+    _check_booking_place(request, trip_id, body.place_id)
+    fields = {k: getattr(body, k) for k in body.model_fields_set if k != "place_id" or body.kind == "reservation"}
+    _library(request).add_booking(trip_id, fields)
+    return _trip_or_404(request, trip_id)
+
+
+@app.patch("/v1/trips/{trip_id}/bookings/{booking_id}", response_model=TripDetail, dependencies=[Auth])
+async def update_booking(trip_id: str, booking_id: str, body: BookingInput, request: Request) -> TripDetail:
+    booking = _booking_or_404(request, trip_id, booking_id)
+    changes = {k: getattr(body, k) for k in body.model_fields_set}
+    if "kind" in changes and changes["kind"] is None or "title" in changes and changes["title"] is None:
+        raise HTTPException(status_code=422, detail="A booking needs a type and a name")
+    if changes.get("place_id"):
+        _check_booking_place(request, trip_id, changes["place_id"])
+    _library(request).update_booking(booking, changes)
+    return _trip_or_404(request, trip_id)
+
+
+@app.delete("/v1/trips/{trip_id}/bookings/{booking_id}", response_model=TripDetail, dependencies=[Auth])
+async def delete_booking(trip_id: str, booking_id: str, request: Request) -> TripDetail:
+    booking = _booking_or_404(request, trip_id, booking_id)
+    _library(request).delete_booking(booking)
+    return _trip_or_404(request, trip_id)
+
+
 @app.post("/v1/trips/{trip_id}/refresh-details", response_model=TripDetail, dependencies=[Auth])
 async def refresh_details(trip_id: str, request: Request) -> TripDetail:
     """Looks up opening hours (and missing pins) for places that haven't been checked yet."""
@@ -414,9 +489,9 @@ def _shared_or_404(request: Request, token: str) -> TripDetail:
 
 def _public_trip(trip: TripDetail, settings: Settings) -> dict:
     """What a shared link shows: everything but your own notes."""
-    data = trip.model_dump(mode="json", exclude={"share_token"})
+    data = trip.model_dump(mode="json", exclude={"share_token", "bookings"})
     for p in data["places"]:
-        for key in ("user_notes", "hours_checked_at", "photos_checked_at", "rating_checked_at", "contact_checked_at"):
+        for key in ("user_notes", "hours_checked_at", "photos_checked_at", "rating_checked_at", "contact_checked_at", "reserve_checked_at"):
             p.pop(key, None)
     data["reels"] = [
         {k: r[k] for k in ("id", "url", "platform", "title", "creator")}
@@ -697,6 +772,20 @@ async def locate_place(place_id: str, body: LocateRequest, request: Request) -> 
     place = _place_or_404(request, place_id)
     if not await _library(request).locate(place, query=body.query):
         raise HTTPException(status_code=422, detail="Couldn't find that on the map. Try adding the street or neighborhood.")
+    return _db(request).get_place(place_id)
+
+
+@app.post("/v1/places/{place_id}/reserve-link", response_model=Place, dependencies=[Auth])
+async def find_reservation_link(place_id: str, request: Request) -> Place:
+    """Looks on the restaurant's website for its Resy, OpenTable, Tock or SevenRooms page. Checked once."""
+    place = _place_or_404(request, place_id)
+    if place.category.value not in MENU_CATEGORIES or not place.website or place.reserve_checked_at is not None:
+        return place
+    found = await find_reserve_link(request.app.state.menus.fetcher, place.website)
+    _db(request).update_place(
+        place_id, reserve_provider=found[0] if found else None, reserve_url=found[1] if found else None,
+        reserve_checked_at=datetime.now(timezone.utc),
+    )
     return _db(request).get_place(place_id)
 
 

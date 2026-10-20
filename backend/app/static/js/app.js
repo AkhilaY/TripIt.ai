@@ -107,6 +107,8 @@ const S = {
   menu: {},             // placeId -> saved menu
   menuBusy: {},         // placeId -> true while a menu is being looked up
   menuDiet: {},         // placeId -> dietary filter on the menu
+  bkflow: null,         // confirmations read by Claude, being checked one by one
+  reserveTried: {},     // placeId -> already looked for a booking link this visit
 };
 
 const view = $('#view');
@@ -1053,12 +1055,12 @@ const VIEWS = {
 
   async trip(r) {
     const trip = await cachedTrip(r.id);
-    const mode = ['places', 'itinerary', 'map'].includes(r.mode) ? r.mode : 'places';
-    const right = `<span class="gcluster"><button class="gbtn" data-act="sharetrip" data-id="${trip.id}" aria-label="Share trip">${ICON.share}</button>
+    const mode = ['places', 'itinerary', 'bookings', 'map'].includes(r.mode) ? r.mode : 'places';
+    const right = `<span class="gcluster">${r.mode === 'bookings' ? `<button class="gbtn" data-act="addbooking" data-id="${trip.id}" aria-label="Add a booking">${ICON.plus}</button>` : ''}<button class="gbtn" data-act="sharetrip" data-id="${trip.id}" aria-label="Share trip">${ICON.share}</button>
       <button class="gbtn" data-act="tripmenu" data-id="${trip.id}" aria-label="More">${ICON.more}</button></span>`;
-    const seg = segControl(`seg:${trip.id}`, ['places', 'itinerary', 'map'].map((m) => ({
+    const seg = segControl(`seg:${trip.id}`, ['places', 'itinerary', 'bookings', 'map'].map((m) => ({
       on: m === mode,
-      html: `<a href="#/trip/${trip.id}${m === 'places' ? '' : `/${m}`}" class="${m === mode ? 'on' : ''}" ${m === mode ? 'aria-current="page"' : ''}>${cap(m)}</a>`,
+      html: `<a href="#/trip/${trip.id}${m === 'places' ? '' : `/${m}`}" class="${m === mode ? 'on' : ''}" ${m === mode ? 'aria-current="page"' : ''}>${{ itinerary: 'Plan' }[m] || cap(m)}</a>`,
     })));
     const meta = [trip.country, plural(trip.places.length, 'place'), trip.day_count ? `${trip.day_count}-day plan` : ''].filter(Boolean).join(' · ');
     const cats = [...new Set(trip.places.map((p) => p.category))].sort((a, b) => CAT_ORDER.indexOf(a) - CAT_ORDER.indexOf(b));
@@ -1069,6 +1071,7 @@ const VIEWS = {
 
     if (mode === 'places') return head + editsSection(trip) + placesList(trip);
     if (mode === 'itinerary') return { html: head + itinerary(trip), after: () => loadLegs(trip) };
+    if (mode === 'bookings') return head + bookingsView(trip);
 
     const day = S.mapDay[trip.id] || 0;
     const shown = day ? stops(trip, day) : trip.places;
@@ -1118,6 +1121,7 @@ const VIEWS = {
     const html = `${head(title)}<h1 class="largetitle" data-anchor>${title}</h1>
       <div class="subtitle"><span>${esc([dayDate(trip.start_date, day), trip.name, trip.day_titles[day - 1]].filter(Boolean).join(' · '))}</span></div>
       ${pills}
+      ${dayBookings(trip, day).length ? `<div class="section"><div class="section-h">Booked today</div>${bookingRows(dayBookings(trip, day))}</div>` : ''}
       <div class="section"><div class="progress big" aria-label="${done.length} of ${list.length} stops done"><i style="width:${list.length ? Math.round((done.length / list.length) * 100) : 0}%"></i></div>
         <div class="section-f">${done.length} of ${plural(list.length, 'stop')} done</div></div>
       ${list.length ? `<div class="section"><div class="briefing" id="briefing">${S.briefing[briefKey] ? briefingHtml(S.briefing[briefKey]) : '<div class="brief-skel"></div>'}</div></div>` : ''}
@@ -1166,6 +1170,15 @@ const VIEWS = {
 
     const star = `<button class="gbtn star${p.must_do ? ' on' : ''}" data-act="star" data-id="${p.id}" aria-pressed="${p.must_do}" aria-label="${p.must_do ? 'Remove the star' : 'Star this place'}">${p.must_do ? ICON.star : ICON.starO}</button>`;
     const hasMenu = MENU_CATS.has(p.category);
+    const canReserve = !!safeUrl(p.reserve_url) && !(trip.bookings || []).some((b) => b.place_id === p.id && b.kind === 'reservation');
+    if (hasMenu && p.website && !p.reserve_checked_at && !S.reserveTried[p.id]) {
+      S.reserveTried[p.id] = true; // look for the restaurant's Resy or OpenTable page once, in the background
+      api(`/v1/places/${p.id}/reserve-link`, { method: 'POST' }).then((fresh) => {
+        trip.places = trip.places.map((x) => (x.id === fresh.id ? fresh : x));
+        if (S.places) S.places = S.places.map((x) => (x.id === fresh.id ? fresh : x));
+        render({ quiet: true });
+      }).catch(() => {});
+    }
     const mode = hasMenu && r.mode === 'menu' ? 'menu' : 'overview';
     const tabs = hasMenu ? segControl(`pseg:${p.id}`, [['overview', 'Overview'], ['menu', 'Menu']].map(([m, label]) => ({
       on: m === mode,
@@ -1189,11 +1202,14 @@ const VIEWS = {
     const html = `${head}
       ${p.summary ? `<p class="para">${esc(p.summary)}</p>` : ''}
 
-      <div class="quick">
+      <div class="quick"${canReserve ? ' style="grid-template-columns:repeat(4,1fr)"' : ''}>
+        ${canReserve ? `<a class="qbtn qreserve" href="${esc(p.reserve_url)}" target="_blank" rel="noopener" data-reserve="${p.id}" data-act="link">${tile('gold', 'calendarPlus')}Reserve</a>` : ''}
         <a class="qbtn" href="${esc(links.apple)}" target="_blank" rel="noopener">${tile('green', 'map')}Apple Maps</a>
         <a class="qbtn" href="${esc(links.google)}" target="_blank" rel="noopener">${tile('blue', 'globe')}Google Maps</a>
         <button class="qbtn" data-act="directions" data-id="${p.id}">${tile('orange', 'route')}Directions</button>
       </div>
+
+      ${reservationSection(p, trip)}
 
       ${isLocated ? '' : `<div class="section"><div class="section-h">Not on the map yet</div><div class="group">
         <form class="row" data-form="locate" data-id="${p.id}"><span class="inline-form">
@@ -1574,6 +1590,7 @@ function itinerary(trip) {
     const locatedList = list.filter(located);
     html += `<div class="section"><div class="dayhead"><div>${date ? `<div class="date">${date}</div>` : ''}<div class="d">Day ${d}</div>
       ${trip.day_titles[d - 1] && trip.day_titles[d - 1] !== `Day ${d}` ? `<div class="dt">${esc(trip.day_titles[d - 1])}</div>` : ''}</div><span class="daytravel" data-day="${d}"></span></div>
+      ${!S.editDay && dayBookings(trip, d).length ? bookingRows(dayBookings(trip, d)) : ''}
       <div class="group${S.editDay ? ' droplist' : ''}" data-day="${d}">${list.map((p, i) => {
         const conflict = slotConflict(p.opening_hours, dayIdx, p.time_of_day, p.start_time);
         const todays = dayIdx != null ? dayHours(p.opening_hours, dayIdx) : null;
@@ -1864,6 +1881,264 @@ function planSheet(trip) {
       }
     },
   });
+}
+
+// ---------- Bookings: flights, stays, tables and cars ----------
+
+const BOOKING_KINDS = {
+  flight: ['Flight', 'blue', 'plane'], hotel: ['Hotel', 'indigo', 'stay'], reservation: ['Table', 'gold', 'food'],
+  car: ['Car', 'green', 'drive'], other: ['Booking', 'gray', 'tag'],
+};
+const BOOKING_FIELDS = ['kind', 'title', 'start_at', 'end_at', 'origin', 'destination', 'address', 'confirmation', 'party_size', 'notes'];
+
+/** "2026-11-07T19:25" → {date, time, day}; local wall-clock times, shown as printed on the booking. */
+function parseWhen(value) {
+  if (!value) return null;
+  const [date, time = null] = value.split('T');
+  const [y, m, d] = date.split('-').map(Number);
+  return { date, time, day: new Date(y, m - 1, d) };
+}
+const fmtDay = (day) => day.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+const mapsSearch = (query) => `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
+
+function bookingDetails(b) {
+  const s = parseWhen(b.start_at);
+  const e = parseWhen(b.end_at);
+  const at = (w, prefix) => (w && w.time ? `${prefix} ${fmtClock(w.time)}` : '');
+  let sub = '';
+  let meta = '';
+  if (b.kind === 'flight') {
+    sub = [at(s, 'Departs'), b.notes].filter(Boolean).join(' · ');
+    meta = e ? `Lands ${s && e.date !== s.date ? `${fmtDay(e.day)}${e.time ? ', ' : ''}` : ''}${e.time ? fmtClock(e.time) : ''}`.trim() : '';
+  } else if (b.kind === 'hotel') {
+    const nights = s && e ? Math.round((e.day - s.day) / 86400000) : 0;
+    sub = [s && s.time ? `Check-in from ${fmtClock(s.time)}` : 'Check-in', nights > 0 ? plural(nights, 'night') : ''].filter(Boolean).join(' · ');
+    meta = b.address || '';
+  } else if (b.kind === 'reservation') {
+    sub = [b.party_size ? `Table for ${b.party_size}` : 'Reservation', s && s.time ? fmtClock(s.time) : ''].filter(Boolean).join(' · ');
+    meta = b.address || '';
+  } else if (b.kind === 'car') {
+    sub = [at(s, 'Pick-up'), e ? `Drop-off ${fmtDay(e.day)}` : ''].filter(Boolean).join(' · ');
+    meta = [b.origin, b.destination].filter(Boolean).join(' → ');
+  } else {
+    sub = [s && s.time ? fmtClock(s.time) : '', b.notes].filter(Boolean).join(' · ');
+    meta = b.address || '';
+  }
+  return { sub, meta };
+}
+
+function bookingCard(b) {
+  const [label, color, icon] = BOOKING_KINDS[b.kind] || BOOKING_KINDS.other;
+  const { sub, meta } = bookingDetails(b);
+  const route = b.kind === 'flight' && b.origin && b.destination
+    ? `<div class="route"><span>${esc(b.origin)}</span><span class="line">${ICON.plane}</span><span>${esc(b.destination)}</span></div>` : '';
+  const place = b.place_id ? `<a class="linkbtn pl" href="#/place/${b.place_id}" data-act="link">Open place</a>` : '';
+  const directions = b.kind === 'hotel' && b.address
+    ? `<a class="linkbtn pl" href="${esc(mapsSearch(`${b.title} ${b.address}`))}" target="_blank" rel="noopener" data-act="link">Directions</a>` : '';
+  return `<div class="bcard" data-act="bookingmenu" data-id="${b.id}" role="button" tabindex="0" aria-label="${esc(label)}: ${esc(b.title)}. Tap for options">
+    <div class="top">${tile(color, icon)}<span class="main"><span class="t">${esc(b.title)}</span><span class="s">${esc(sub)}</span></span><span class="pill2">${esc(label)}</span></div>
+    ${route}
+    ${meta || b.confirmation ? `<div class="meta"><span>${esc(meta)}</span>${b.confirmation ? `<span class="conf">${esc(b.confirmation)}</span>` : ''}</div>` : ''}
+    ${place || directions ? `<div class="bactions">${directions}${place}</div>` : ''}</div>`;
+}
+
+function bookingsView(trip) {
+  const list = trip.bookings || [];
+  if (!list.length) {
+    return emptyState('blue', 'plane', 'No bookings yet',
+      'Keep your flights, hotel and table reservations here, next to your places. Add one from a screenshot or the confirmation email text, or enter it yourself.',
+      `<button class="btn" data-act="addbooking" data-id="${trip.id}">${ICON.plus}Add a booking</button>`);
+  }
+  const groups = [];
+  list.forEach((b) => {
+    const key = b.start_at ? b.start_at.slice(0, 10) : '';
+    const last = groups[groups.length - 1];
+    if (last && last.key === key) last.items.push(b); else groups.push({ key, items: [b] });
+  });
+  return `${groups.map((g) => `<div class="datehead">${g.key ? esc(fmtDay(parseWhen(g.key).day)) : 'No date'}</div>${g.items.map(bookingCard).join('')}`).join('')}
+    <div class="section"><button class="btn tint wide" data-act="addbooking" data-id="${trip.id}">${ICON.plus}Add a booking</button>
+    <div class="section-f">Keep confirmation numbers handy for the airport or front desk. Bookings stay private: shared trip links never include them.</div></div>`;
+}
+
+/** Bookings for a day of the itinerary (needs the trip's start date). A table booked for a saved place shows as that stop instead. */
+function dayBookings(trip, day) {
+  if (!trip.start_date || !trip.bookings) return [];
+  const [y, m, d] = trip.start_date.split('-').map(Number);
+  const iso = isoDate(new Date(y, m - 1, d + day - 1));
+  return trip.bookings.filter((b) => b.start_at && b.start_at.slice(0, 10) === iso && !(b.kind === 'reservation' && b.place_id));
+}
+function bookingRows(list) {
+  return `<div class="group tiles bookstrip">${list.map((b) => {
+    const [label, color, icon] = BOOKING_KINDS[b.kind] || BOOKING_KINDS.other;
+    const s = parseWhen(b.start_at);
+    const route = b.kind === 'flight' && b.origin && b.destination ? ` ${b.origin} → ${b.destination}` : '';
+    return `<div class="row">${tile(color, icon)}<span class="main"><span class="t">${esc(b.title)}${esc(route)}</span>
+      <span class="s">${esc([label, s && s.time ? fmtClock(s.time) : '', b.confirmation ? `Ref ${b.confirmation}` : ''].filter(Boolean).join(' · '))}</span></span></div>`;
+  }).join('')}</div>`;
+}
+
+function addBookingSheet(trip) {
+  S.bkflow = null;
+  const opt = (act, color, icon, title, sub) => `<button class="row" data-act="${act}" data-id="${trip.id}">${tile(color, icon)}<span class="main"><span class="t">${title}</span><span class="s">${sub}</span></span>${ICON.chev}</button>`;
+  openSheet({
+    type: 'form', title: 'Add a booking', st: {},
+    body: () => `<div class="section"><div class="group tiles">
+      ${opt('bkshot', 'green', 'photo', 'Screenshot or photo', 'Of a confirmation, e-ticket or itinerary')}
+      ${opt('bktext', 'orange', 'note', 'Paste the email text', 'Claude reads flight, hotel and reservation details')}
+      ${opt('bkmanual', 'gray', 'plus', 'Enter it yourself', 'Flight, stay, car or table')}
+      </div><div class="section-f">Claude shows what it read so you can check it before saving. A confirmation number alone can’t be looked up, so TripIt reads the confirmation itself.</div></div>`,
+  });
+}
+
+function pickBookingShots(trip) {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'image/*';
+  input.multiple = true;
+  input.onchange = async () => {
+    const files = [...input.files].slice(0, 6);
+    if (!files.length) return;
+    try {
+      const images = [];
+      for (const f of files) images.push(await toJpegDataUrl(f));
+      await readBookings(trip, { images });
+    } catch (e) { toast(e.message, true); }
+  };
+  input.click();
+}
+
+function pasteBookingSheet(trip) {
+  const st = { text: '' };
+  openSheet({
+    type: 'form', title: 'Paste a confirmation', confirm: 'Read', st,
+    body: () => `<div class="section"><div class="group"><div class="row"><textarea class="notes" data-act="bkfield" data-f="text" rows="8"
+      placeholder="Paste the confirmation email or itinerary here" aria-label="Confirmation text">${esc(st.text)}</textarea></div></div>
+      <div class="section-f">You can paste more than one booking at once. Names and card details aren’t needed; leave them out if you like.</div></div>`,
+    async ok() {
+      if (!st.text.trim()) { toast('Paste the confirmation first', true); return; }
+      await readBookings(trip, { text: st.text.trim() });
+    },
+  });
+}
+
+async function readBookings(trip, { text = null, images = [] }) {
+  openSheet({ type: 'form', title: 'Reading your confirmation', busy: true, st: {},
+    body: () => '<div class="section"><div class="section-f">Claude is reading it. This takes a few seconds.</div></div>' });
+  try {
+    const drafts = await api(`/v1/trips/${trip.id}/bookings/read`, { method: 'POST', body: { text, images } });
+    closeSheet();
+    if (!drafts.length) { toast('No bookings found there. You can enter it yourself.', true); return; }
+    S.bkflow = { tripId: trip.id, drafts, i: 0, source: images.length ? 'screenshot' : 'text' };
+    nextDraft();
+  } catch (e) {
+    closeSheet();
+    toast(e.message, true);
+  }
+}
+
+function nextDraft() {
+  const f = S.bkflow;
+  if (!f || f.i >= f.drafts.length) { S.bkflow = null; return; }
+  bookingForm(S.trip[f.tripId], { ...f.drafts[f.i], source: f.source }, { step: f.drafts.length > 1 ? `${f.i + 1} of ${f.drafts.length}` : null, flow: true });
+}
+
+const KIND_LABELS = { flight: 'Flight', hotel: 'Hotel', reservation: 'Table reservation', car: 'Car rental', other: 'Other' };
+const FORM_FIELDS = {
+  flight: { title: ['Flight number', 'BA 178'], origin: ['From', 'JFK'], destination: ['To', 'LHR'], start_at: ['Departs', 'datetime-local'], end_at: ['Arrives', 'datetime-local'] },
+  hotel: { title: ['Hotel', 'The Hoxton'], address: ['Address', ''], start_at: ['Check-in', 'datetime-local'], end_at: ['Check-out', 'date'] },
+  reservation: { title: ['Restaurant or venue', ''], start_at: ['Date and time', 'datetime-local'], party_size: ['Guests', 'number'], address: ['Address', ''] },
+  car: { title: ['Rental company', 'Hertz'], origin: ['Pick-up location', ''], destination: ['Drop-off location', ''], start_at: ['Pick-up', 'datetime-local'], end_at: ['Drop-off', 'datetime-local'] },
+  other: { title: ['What is it?', 'Train, tour, event…'], start_at: ['When', 'datetime-local'], end_at: ['Until', 'datetime-local'], address: ['Where', ''] },
+};
+
+/** Add or edit one booking. `initial` can be a draft Claude read, or a saved booking when `id` is given. */
+function bookingForm(trip, initial = {}, { id = null, title = null, step = null, flow = false } = {}) {
+  const st = { ...Object.fromEntries(BOOKING_FIELDS.map((f) => [f, null])), kind: 'flight', source: 'manual', place_id: null, ...initial };
+  openSheet({
+    type: 'form', title: title || (id ? 'Edit booking' : step ? `Check booking (${step})` : 'Add a booking'), confirm: 'Save', st,
+    body: () => {
+      const spec = FORM_FIELDS[st.kind] || FORM_FIELDS.other;
+      const input = (f, [label, hint]) => {
+        const isDate = ['date', 'datetime-local', 'number'].includes(hint);
+        const type = hint === 'datetime-local' && st[f] && !st[f].includes('T') ? 'date' : hint;
+        const value = type === 'date' && st[f] ? st[f].slice(0, 10) : (st[f] ?? '');
+        return `<div class="row"><label class="main"><span class="s">${label}</span>
+          <input class="field" type="${isDate ? type : 'text'}" data-act="bkfield" data-f="${f}" value="${esc(value)}" ${isDate ? (type === 'number' ? 'min="1" max="100" inputmode="numeric"' : '') : `placeholder="${esc(hint)}"`} autocomplete="off"></label></div>`;
+      };
+      return `<div class="section"><div class="group">
+        <div class="row"><label class="main"><span class="s">Type</span><select class="select wideselect" data-act="bkfield" data-f="kind">
+          ${Object.entries(KIND_LABELS).map(([k, l]) => `<option value="${k}" ${st.kind === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label></div>
+        ${Object.entries(spec).map(([f, def]) => input(f, def)).join('')}
+        ${input('confirmation', ['Confirmation number', ''])}${input('notes', ['Notes', 'Terminal, seat, room type…'])}</div>
+        ${flow ? `<div class="section-f">Check what was read against your confirmation. Anything it couldn’t find is left blank.</div>
+          <div class="section"><button class="btn tint wide" data-act="bkskip">Skip this one</button></div>` : ''}</div>`;
+    },
+    async ok() {
+      const name = (st.title || '').trim();
+      if (!name) { toast('Add a name for this booking', true); return; }
+      S.sheet.busy = true; renderOverlay();
+      try {
+        const body = Object.fromEntries(BOOKING_FIELDS.map((f) => [f, typeof st[f] === 'string' ? (st[f].trim() || null) : (st[f] ?? null)]));
+        let res;
+        if (id) {
+          res = await api(`/v1/trips/${trip.id}/bookings/${id}`, { method: 'PATCH', body });
+        } else {
+          const create = { source: st.source };
+          Object.entries(body).forEach(([k, v]) => { if (v !== null) create[k] = v; });
+          if (st.kind === 'reservation' && st.place_id) create.place_id = st.place_id;
+          res = await api(`/v1/trips/${trip.id}/bookings`, { method: 'POST', body: create });
+        }
+        syncTrip(res);
+        closeSheet();
+        toast(id ? 'Booking updated' : 'Booking saved');
+        render();
+        if (flow && S.bkflow) { S.bkflow.i += 1; nextDraft(); }
+      } catch (e) {
+        S.sheet.busy = false; renderOverlay();
+        toast(e.message, true);
+      }
+    },
+  });
+}
+
+/** Bookings for a table at a place show on its page: the booking itself, or a Reserve link. */
+function reservationSection(p, trip) {
+  const booking = (trip.bookings || []).find((b) => b.place_id === p.id && b.kind === 'reservation');
+  const link = safeUrl(p.reserve_url);
+  const provider = esc(p.reserve_provider || 'the restaurant');
+  if (booking) {
+    const s = parseWhen(booking.start_at);
+    return `<div class="section"><div class="section-h">Reservation</div><div class="group tiles">
+      <button class="row" data-act="bookingmenu" data-id="${booking.id}">${tile('green', 'done')}<span class="main"><span class="t">${esc([s ? fmtDay(s.day) : '', s && s.time ? fmtClock(s.time) : ''].filter(Boolean).join(' · ') || 'Booked')}</span>
+        <span class="s">${esc([booking.party_size ? `Table for ${booking.party_size}` : '', booking.confirmation ? `Confirmation ${booking.confirmation}` : ''].filter(Boolean).join(' · '))}</span></span>${ICON.chev}</button>
+      ${link ? `<a class="row" href="${esc(link)}" target="_blank" rel="noopener" data-act="link">${tile('gray', 'link')}<span class="main"><span class="t link">Change or cancel on ${provider}</span></span>${ICON.chev}</a>` : ''}</div></div>`;
+  }
+  if (!link) return '';
+  return `<div class="section"><div class="section-h">Reservation</div><div class="group tiles">
+    <a class="row" href="${esc(link)}" target="_blank" rel="noopener" data-reserve="${p.id}" data-act="link">${tile('gold', 'calendarPlus')}<span class="main"><span class="t">Reserve a table</span>
+      <span class="s">Opens ${provider} in your browser</span></span><span class="brandchip">${provider}</span>${ICON.chev}</a>
+    <button class="row" data-act="bookedplace" data-id="${p.id}">${tile('green', 'done')}<span class="main"><span class="t">I already booked</span><span class="s">Add the time and confirmation</span></span>${ICON.chev}</button></div>
+    <div class="section-f">TripIt can’t see availability. It takes you to the restaurant’s own booking page, then asks whether you booked so it can save the time.</div></div>`;
+}
+
+const RESERVE_KEY = 'tripit.reserve';
+function noteReserveClick(placeId) {
+  try { localStorage.setItem(RESERVE_KEY, JSON.stringify({ placeId, at: Date.now() })); } catch { /* private mode */ }
+}
+/** Back from a booking page: ask whether it was booked, so the time can be saved. */
+function checkReservePending() {
+  let pending = null;
+  try { pending = JSON.parse(localStorage.getItem(RESERVE_KEY) || 'null'); } catch { /* ignore */ }
+  if (!pending || S.sheet) return;
+  const age = Date.now() - pending.at;
+  if (age < 4000) return; // still leaving the app
+  try { localStorage.removeItem(RESERVE_KEY); } catch { /* ignore */ }
+  if (age > 6 * 3600 * 1000) return;
+  const p = findAnyPlace(pending.placeId);
+  const trip = p && S.trip[p.trip_id];
+  if (!p || !trip || (trip.bookings || []).some((b) => b.place_id === p.id && b.kind === 'reservation')) return;
+  bookingForm(trip, { kind: 'reservation', title: p.name, place_id: p.id, source: 'reserve', address: p.address || null },
+    { title: `Did you book ${p.name}?` });
 }
 
 /** Brings a trip's places into the caches after the itinerary changed on the server. */
@@ -2366,6 +2641,39 @@ async function onAction(act, el) {
       return;
     }
     case 'tidy': tidySheet(S.trip[el.dataset.id]); return;
+    case 'link': return;
+    case 'addbooking': addBookingSheet(S.trip[el.dataset.id]); return;
+    case 'bkmanual': bookingForm(S.trip[el.dataset.id], {}, {}); return;
+    case 'bktext': pasteBookingSheet(S.trip[el.dataset.id]); return;
+    case 'bkshot': { const trip = S.trip[el.dataset.id]; closeSheet(); pickBookingShots(trip); return; }
+    case 'bkfield': {
+      const { st } = S.sheet;
+      const f = el.dataset.f;
+      st[f] = f === 'party_size' ? (el.value ? Number(el.value) : null) : el.value;
+      if (f === 'kind') renderOverlay();
+      return;
+    }
+    case 'bkskip': if (S.bkflow) { S.bkflow.i += 1; closeSheet(); nextDraft(); } return;
+    case 'bookedplace': {
+      const p = findAnyPlace(el.dataset.id);
+      bookingForm(S.trip[p.trip_id], { kind: 'reservation', title: p.name, place_id: p.id, source: 'manual', address: p.address || null }, { title: `Booked at ${p.name}` });
+      return;
+    }
+    case 'bookingmenu': {
+      const trip = Object.values(S.trip).find((t) => (t.bookings || []).some((b) => b.id === el.dataset.id));
+      const b = trip && trip.bookings.find((x) => x.id === el.dataset.id);
+      if (!b) return;
+      const actions = [{ label: 'Edit', run: () => bookingForm(trip, b, { id: b.id }) }];
+      if (b.place_id) actions.push({ label: 'Open place', run: () => go(`#/place/${b.place_id}`) });
+      if (b.confirmation) actions.push({ label: 'Copy confirmation number', run: async () => { try { await navigator.clipboard.writeText(b.confirmation); toast('Copied'); } catch { toast(b.confirmation); } } });
+      actions.push({ label: 'Delete booking', destructive: true, run: async () => {
+        syncTrip(await api(`/v1/trips/${trip.id}/bookings/${b.id}`, { method: 'DELETE' }));
+        toast('Booking deleted');
+        render();
+      } });
+      openSheet({ type: 'actions', title: b.title, actions });
+      return;
+    }
     case 'findmenu': {
       const id = el.dataset.id;
       S.menuBusy[id] = true;
@@ -2555,6 +2863,8 @@ document.addEventListener('click', (ev) => {
     if (location.hash !== href) location.replace(href);
     return;
   }
+  const reserve = ev.target.closest('a[data-reserve]');
+  if (reserve) noteReserveClick(reserve.dataset.reserve);
   const el = ev.target.closest('[data-act]');
   if (!el) return;
   if (['INPUT', 'SELECT', 'TEXTAREA'].includes(el.tagName)) return;
@@ -2573,6 +2883,7 @@ document.addEventListener('change', (ev) => {
 document.addEventListener('input', (ev) => {
   const el = ev.target;
   if (el.dataset && ['notes', 'prefs'].includes(el.dataset.act)) onAction(el.dataset.act, el);
+  if (el.dataset && el.dataset.act === 'bkfield' && el.dataset.f !== 'kind' && S.sheet && S.sheet.st) onAction('bkfield', el);
   if (el.dataset && el.dataset.act === 'addinput') addInputChanged(el.value);
   if (el.dataset && el.dataset.act === 'tastenotes' && S.taste) S.taste.p.notes = el.value;
   if (el.dataset && el.dataset.act === 'tidytext' && S.sheet && S.sheet.st) S.sheet.st.text = el.value;
@@ -2608,6 +2919,11 @@ document.addEventListener('submit', async (ev) => {
 });
 
 document.addEventListener('keydown', (ev) => {
+  if ((ev.key === 'Enter' || ev.key === ' ') && ev.target.classList && ev.target.classList.contains('bcard')) {
+    ev.preventDefault();
+    onAction('bookingmenu', ev.target).catch((e) => toast(e.message, true));
+    return;
+  }
   if (ev.key === 'Enter' && !ev.shiftKey && !ev.isComposing && ev.target.id === 'chat-input') {
     ev.preventDefault();
     ev.target.form.requestSubmit();
@@ -2638,7 +2954,7 @@ document.addEventListener('touchend', (ev) => {
 }, { passive: true });
 
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible' && route().name !== 'setup') { schedulePoll(true); }
+  if (document.visibilityState === 'visible' && route().name !== 'setup') { schedulePoll(true); setTimeout(checkReservePending, 800); }
 });
 
 // ---------- Boot ----------

@@ -773,3 +773,24 @@ button.row.sel { cursor: pointer; }
 .mtag { display: inline-block; margin-left: 8px; padding: 2px 8px; border-radius: 999px; font-size: 10px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase;
   color: var(--link); background: var(--gold-soft); vertical-align: 1px; white-space: nowrap; }
 .menusub { padding: 0 4px 10px; margin-top: -6px; }
+
+/* ---------- Bookings and reservations ---------- */
+.datehead { font-size: 12px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; color: var(--secondary); padding: 18px 20px 8px; }
+.bcard { margin: 0 16px 10px; background: var(--cell); border-radius: 20px; padding: 16px; display: grid; gap: 10px; cursor: pointer; transition: transform 0.25s var(--spring), background 0.2s; }
+.bcard:active { transform: scale(0.985); }
+.bcard:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+.bcard .top { display: flex; align-items: center; gap: 12px; }
+.bcard .route { display: flex; align-items: center; justify-content: space-between; font-family: var(--serif); font-size: 34px; line-height: 1; }
+.bcard .route .line { flex: 1; height: 1px; background: var(--sep); margin: 0 14px; position: relative; }
+.bcard .route .line svg { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 18px; height: 18px; background: var(--cell); color: var(--gold); padding: 0 4px; box-sizing: content-box; }
+.bcard .meta { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; font-size: 14px; color: var(--secondary); }
+.bcard .meta span:first-child { min-width: 0; overflow-wrap: anywhere; }
+.bcard .conf { font: 600 13px ui-monospace, Menlo, monospace; letter-spacing: 0.12em; color: var(--label); flex-shrink: 0; }
+.bactions { display: flex; gap: 16px; }
+.linkbtn.pl { padding: 0; }
+.pill2 { font-size: 11px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--link); white-space: nowrap; }
+.bookstrip { margin-bottom: 10px; }
+.brandchip { display: inline-flex; align-items: center; font-size: 11px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; padding: 3px 9px; border-radius: 999px; background: var(--gold-soft); color: var(--link); white-space: nowrap; }
+.wideselect { width: 100%; font-size: 17px; padding: 0; margin: 0; text-align: left; text-align-last: left; }
+.qreserve { background: var(--accent); color: var(--accent-ink); }
+.qreserve .tile { background: color-mix(in srgb, var(--accent-ink) 16%, transparent); color: var(--accent-ink); }

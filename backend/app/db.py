@@ -12,7 +12,7 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterable, Optional
 
-from .models import ExtractionResult, Job, JobStatus, Place, Reel, ReelMetadata, Trip, TripDetail
+from .models import Booking, ExtractionResult, Job, JobStatus, Place, Reel, ReelMetadata, Trip, TripDetail
 
 log = logging.getLogger(__name__)
 
@@ -115,6 +115,24 @@ CREATE TABLE IF NOT EXISTS trip_edits (
     created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS bookings (
+    id TEXT PRIMARY KEY,
+    trip_id TEXT NOT NULL REFERENCES trips(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL,
+    title TEXT NOT NULL,
+    start_at TEXT,
+    end_at TEXT,
+    origin TEXT,
+    destination TEXT,
+    address TEXT,
+    confirmation TEXT,
+    party_size INTEGER,
+    notes TEXT,
+    place_id TEXT REFERENCES places(id) ON DELETE SET NULL,
+    source TEXT NOT NULL DEFAULT 'manual',
+    created_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS menus (
     place_id TEXT PRIMARY KEY REFERENCES places(id) ON DELETE CASCADE,
     status TEXT NOT NULL,
@@ -150,6 +168,7 @@ MIGRATIONS = {
         ("must_do", "INTEGER NOT NULL DEFAULT 0"), ("start_time", "TEXT"),
         ("rating", "REAL"), ("rating_count", "INTEGER"), ("rating_checked_at", "TEXT"),
         ("website", "TEXT"), ("phone", "TEXT"), ("contact_checked_at", "TEXT"),
+        ("reserve_url", "TEXT"), ("reserve_provider", "TEXT"), ("reserve_checked_at", "TEXT"),
     ],
     "trips": [("share_token", "TEXT")],
 }
@@ -160,6 +179,11 @@ PLACE_COLUMNS = (
     "longitude", "maps_url", "resolved_name", "day_number", "day_order", "time_of_day", "day_note",
     "opening_hours", "hours_checked_at", "photos", "photos_checked_at", "must_do", "start_time",
     "rating", "rating_count", "rating_checked_at", "website", "phone", "contact_checked_at",
+    "reserve_url", "reserve_provider", "reserve_checked_at",
+)
+BOOKING_COLUMNS = (
+    "kind", "title", "start_at", "end_at", "origin", "destination", "address", "confirmation", "party_size",
+    "notes", "place_id", "source",
 )
 TRIP_COLUMNS = ("name", "city", "country", "start_date", "day_count", "day_titles", "plan_notes", "planned_by", "share_token")
 # Places plus the reels that mention them.
@@ -274,7 +298,8 @@ class Database:
         trip = self.get_trip(trip_id)
         if trip is None:
             return None
-        return TripDetail(**trip.model_dump(), places=self.list_places(trip_id), reels=self.list_reels(trip_id))
+        return TripDetail(**trip.model_dump(), places=self.list_places(trip_id), reels=self.list_reels(trip_id),
+                          bookings=self.list_bookings(trip_id))
 
     def find_trip_by_city(self, city: str) -> Optional[Trip]:
         key = normalize(city)
@@ -430,6 +455,30 @@ class Database:
 
     def set_setting(self, key: str, value: Any) -> None:
         self._exec("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (key, json.dumps(value, default=str)))
+
+    # ---------- Bookings ----------
+
+    def list_bookings(self, trip_id: str) -> list[Booking]:
+        rows = self._rows("SELECT * FROM bookings WHERE trip_id = ? ORDER BY COALESCE(start_at, '9999'), created_at, rowid", (trip_id,))
+        return [Booking(**dict(r)) for r in rows]
+
+    def get_booking(self, booking_id: str) -> Optional[Booking]:
+        rows = self._rows("SELECT * FROM bookings WHERE id = ?", (booking_id,))
+        return Booking(**dict(rows[0])) if rows else None
+
+    def add_booking(self, trip_id: str, **fields: Any) -> Booking:
+        booking_id = new_id()
+        fields = {k: v for k, v in fields.items() if k in BOOKING_COLUMNS}
+        columns = ["id", "trip_id", "created_at", *fields]
+        values = [booking_id, trip_id, now().isoformat(), *fields.values()]
+        self._exec(f"INSERT INTO bookings ({', '.join(columns)}) VALUES ({', '.join('?' for _ in columns)})", values)
+        return self.get_booking(booking_id)
+
+    def update_booking(self, booking_id: str, **changes: Any) -> None:
+        self._update("bookings", booking_id, BOOKING_COLUMNS, changes)
+
+    def delete_booking(self, booking_id: str) -> None:
+        self._exec("DELETE FROM bookings WHERE id = ?", (booking_id,))
 
     def get_menu(self, place_id: str) -> Optional[sqlite3.Row]:
         rows = self._rows("SELECT * FROM menus WHERE place_id = ?", (place_id,))

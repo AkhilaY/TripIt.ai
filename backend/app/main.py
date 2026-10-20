@@ -412,7 +412,7 @@ def _public_trip(trip: TripDetail, settings: Settings) -> dict:
     """What a shared link shows: everything but your own notes."""
     data = trip.model_dump(mode="json", exclude={"share_token"})
     for p in data["places"]:
-        for key in ("user_notes", "hours_checked_at", "photos_checked_at", "rating_checked_at"):
+        for key in ("user_notes", "hours_checked_at", "photos_checked_at", "rating_checked_at", "contact_checked_at"):
             p.pop(key, None)
     data["reels"] = [
         {k: r[k] for k in ("id", "url", "platform", "title", "creator")}

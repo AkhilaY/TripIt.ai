@@ -140,6 +140,7 @@ MIGRATIONS = {
         ("opening_hours", "TEXT"), ("hours_checked_at", "TEXT"), ("photos", "TEXT"), ("photos_checked_at", "TEXT"),
         ("must_do", "INTEGER NOT NULL DEFAULT 0"), ("start_time", "TEXT"),
         ("rating", "REAL"), ("rating_count", "INTEGER"), ("rating_checked_at", "TEXT"),
+        ("website", "TEXT"), ("phone", "TEXT"), ("contact_checked_at", "TEXT"),
     ],
     "trips": [("share_token", "TEXT")],
 }
@@ -149,7 +150,7 @@ PLACE_COLUMNS = (
     "user_notes", "confidence", "visited", "neighborhood", "address", "city", "country", "latitude",
     "longitude", "maps_url", "resolved_name", "day_number", "day_order", "time_of_day", "day_note",
     "opening_hours", "hours_checked_at", "photos", "photos_checked_at", "must_do", "start_time",
-    "rating", "rating_count", "rating_checked_at",
+    "rating", "rating_count", "rating_checked_at", "website", "phone", "contact_checked_at",
 )
 TRIP_COLUMNS = ("name", "city", "country", "start_date", "day_count", "day_titles", "plan_notes", "planned_by", "share_token")
 # Places plus the reels that mention them.

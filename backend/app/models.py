@@ -203,6 +203,9 @@ class Place(BaseModel):
     rating: Optional[float] = None  # Google's rating out of 5, when the place was found there
     rating_count: Optional[int] = None
     rating_checked_at: Optional[datetime] = None
+    website: Optional[str] = None
+    phone: Optional[str] = None
+    contact_checked_at: Optional[datetime] = None
     # Every saved reel that recommends this place (reel_id is the first one).
     reel_ids: list[str] = []
     mention_count: int = 0

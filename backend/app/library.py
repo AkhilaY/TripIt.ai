@@ -103,6 +103,7 @@ class Library:
             photos=merge_photos(self.db.photo_refs(place.id), match.photos, replace_sources=("google", "wikimedia")),
             photos_checked_at=datetime.now(timezone.utc),
             rating=match.rating, rating_count=match.rating_count, rating_checked_at=datetime.now(timezone.utc),
+            website=match.website, phone=match.phone, contact_checked_at=datetime.now(timezone.utc),
         )
         return True
 
@@ -168,6 +169,7 @@ class Library:
             opening_hours=match.hours, hours_checked_at=checked if match.hours or match.place_id else None,
             photos=merge_photos([], match.photos), photos_checked_at=checked if match.photos else None,
             rating=match.rating, rating_count=match.rating_count, rating_checked_at=checked if match.place_id else None,
+            website=match.website, phone=match.phone, contact_checked_at=checked if match.place_id else None,
         )
         return place, True
 
@@ -215,12 +217,14 @@ class Library:
             if updated >= limit:
                 break
             if (place.hours_checked_at is not None and place.photos_checked_at is not None
-                    and place.rating_checked_at is not None and place.latitude is not None):
+                    and place.rating_checked_at is not None and place.contact_checked_at is not None
+                    and place.latitude is not None):
                 continue  # already looked up; "Find" on the place page re-runs it on demand
             match = await self.geocoder.locate(place.name, place.neighborhood, place.city, place.country)
             if not match:
                 now = datetime.now(timezone.utc)
-                self.db.update_place(place.id, hours_checked_at=now, photos_checked_at=now, rating_checked_at=now)
+                self.db.update_place(place.id, hours_checked_at=now, photos_checked_at=now, rating_checked_at=now,
+                                     contact_checked_at=now)
                 continue
             if place.latitude is None:
                 await self.locate(place)
@@ -231,9 +235,11 @@ class Library:
                     photos=merge_photos(self.db.photo_refs(place.id), match.photos, replace_sources=("google", "wikimedia")),
                     photos_checked_at=datetime.now(timezone.utc),
                     rating=match.rating, rating_count=match.rating_count, rating_checked_at=datetime.now(timezone.utc),
+                    website=match.website, phone=match.phone, contact_checked_at=datetime.now(timezone.utc),
                 )
             else:  # the lookup found somewhere else; keep the pin, and don't look again
-                self.db.update_place(place.id, rating_checked_at=datetime.now(timezone.utc))
+                self.db.update_place(place.id, rating_checked_at=datetime.now(timezone.utc),
+                                     contact_checked_at=datetime.now(timezone.utc))
             updated += 1
         return updated
 

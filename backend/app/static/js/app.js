@@ -1197,6 +1197,7 @@ const VIEWS = {
       </div></div>` : ''}
 
       <div class="section"><div class="section-h">Details</div><div class="group tiles">
+        ${contactRows(p)}
         ${p.address ? `<div class="row">${tile('gray', 'pin')}<span class="main"><span class="s">Address</span><span class="t">${esc(p.address)}</span></span></div>` : ''}
         <label class="row" for="visited-toggle">${tile('green', 'done')}<span class="main"><span class="t">Visited</span></span>
           <input class="switch" type="checkbox" id="visited-toggle" data-act="visited" data-id="${p.id}" ${p.visited ? 'checked' : ''}></label>
@@ -1409,6 +1410,31 @@ function photoCaption(ph) {
   if (ph.source === 'reel') return ph.attribution || 'From the reel';
   if (ph.source === 'google') return ph.attribution ? `Google · ${ph.attribution}` : 'Google';
   return ph.attribution || 'Wikimedia Commons';
+}
+
+/** Rating, website and phone rows for a place's Details (only the ones we have). */
+function contactRows(p) {
+  const rows = [];
+  const googleLink = safeUrl(p.maps_url) && /^https?:\/\/([a-z0-9-]+\.)*(google\.[a-z.]+|goo\.gl)\//i.test(p.maps_url) ? p.maps_url : null;
+  if (p.rating) {
+    const body = `${tile('gold', 'star')}<span class="main"><span class="s">Google rating</span>
+      <span class="t">${p.rating.toFixed(1)}${p.rating_count ? ` · ${p.rating_count.toLocaleString()} reviews` : ' out of 5'}</span></span>`;
+    rows.push(googleLink
+      ? `<a class="row" href="${esc(googleLink)}" target="_blank" rel="noopener">${body}<span class="s link">Read reviews</span>${ICON.chev}</a>`
+      : `<div class="row">${body}</div>`);
+  }
+  const site = safeUrl(p.website);
+  if (site) {
+    let host = site;
+    try { host = new URL(site).hostname.replace(/^www\./, ''); } catch { /* show the address as is */ }
+    rows.push(`<a class="row" href="${esc(site)}" target="_blank" rel="noopener">${tile('blue', 'globe')}<span class="main"><span class="s">Website</span>
+      <span class="t link">${esc(host)}</span></span>${ICON.chev}</a>`);
+  }
+  if (p.phone) {
+    rows.push(`<a class="row" href="tel:${esc(p.phone.replace(/[^\d+]/g, ''))}">${tile('green', 'phone')}<span class="main"><span class="s">Phone</span>
+      <span class="t link">${esc(p.phone)}</span></span>${ICON.chev}</a>`);
+  }
+  return rows.join('');
 }
 
 function hoursSection(p) {

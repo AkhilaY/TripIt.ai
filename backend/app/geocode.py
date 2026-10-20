@@ -9,9 +9,11 @@
 import asyncio
 import logging
 import math
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Optional, Protocol
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -34,11 +36,40 @@ class GeoMatch:
     photos: list[dict] = field(default_factory=list)  # {"source", "ref", "attribution"}
     rating: Optional[float] = None  # Google's rating out of 5
     rating_count: Optional[int] = None
+    website: Optional[str] = None  # an http(s) address
+    phone: Optional[str] = None
     # Filled in by search()/details(), used when adding a place by hand.
     place_id: Optional[str] = None  # "google:<id>" or "osm:N123"
     category: Optional[str] = None
     city: Optional[str] = None
     country: Optional[str] = None
+
+
+def clean_website(value: Optional[str]) -> Optional[str]:
+    """Only plain http(s) addresses are kept, so a stored value is always safe to link to."""
+    value = (value or "").strip()
+    if not value or len(value) > 500 or any(ch.isspace() for ch in value):
+        return None
+    if "://" not in value:
+        value = "https://" + value
+    parts = urlsplit(value)
+    return value if parts.scheme in ("http", "https") and parts.netloc and "." in parts.netloc else None
+
+
+def clean_phone(value: Optional[str]) -> Optional[str]:
+    """A phone number as people write it: digits, spaces and + - ( ) . only."""
+    value = (value or "").split(";")[0].strip()  # OpenStreetMap sometimes lists several, separated by ;
+    if not (5 <= len(value) <= 40) or not re.fullmatch(r"[+\d][\d\s().\-/]*", value) or sum(ch.isdigit() for ch in value) < 5:
+        return None
+    return value
+
+
+def osm_website(tags: dict) -> Optional[str]:
+    return clean_website(tags.get("website") or tags.get("contact:website") or tags.get("url"))
+
+
+def osm_phone(tags: dict) -> Optional[str]:
+    return clean_phone(tags.get("phone") or tags.get("contact:phone"))
 
 
 class Geocoder(Protocol):
@@ -115,11 +146,12 @@ class GooglePlacesGeocoder:
     URL = "https://places.googleapis.com/v1/places:searchText"
     # Opening hours put this request in Google's "Enterprise" Text Search tier (smaller free allowance).
     FIELDS = ("places.displayName,places.formattedAddress,places.location,places.googleMapsUri,"
-              "places.regularOpeningHours,places.photos,places.rating,places.userRatingCount")
+              "places.regularOpeningHours,places.photos,places.rating,places.userRatingCount,"
+              "places.websiteUri,places.internationalPhoneNumber")
     # Search results only need enough to pick one; details() then fetches the rest for the chosen place.
     SEARCH_FIELDS = "places.id,places.displayName,places.formattedAddress,places.location,places.types"
     DETAIL_FIELDS = ("id,displayName,formattedAddress,location,googleMapsUri,regularOpeningHours,photos,types,"
-                     "addressComponents,rating,userRatingCount")
+                     "addressComponents,rating,userRatingCount,websiteUri,internationalPhoneNumber")
 
     def __init__(self, api_key: str, client: Optional[httpx.AsyncClient] = None):
         self.api_key = api_key
@@ -152,6 +184,7 @@ class GooglePlacesGeocoder:
             maps_url=p.get("googleMapsUri"),
             hours=from_google(p.get("regularOpeningHours")),
             rating=p.get("rating"), rating_count=p.get("userRatingCount"),
+            website=clean_website(p.get("websiteUri")), phone=clean_phone(p.get("internationalPhoneNumber")),
             photos=[
                 {"source": "google", "ref": photo["name"],
                  "attribution": ", ".join(a.get("displayName", "") for a in photo.get("authorAttributions", [])) or None}
@@ -208,6 +241,7 @@ class GooglePlacesGeocoder:
             latitude=loc["latitude"], longitude=loc["longitude"], address=p.get("formattedAddress"),
             maps_url=p.get("googleMapsUri"), hours=from_google(p.get("regularOpeningHours")),
             rating=p.get("rating"), rating_count=p.get("userRatingCount"),
+            website=clean_website(p.get("websiteUri")), phone=clean_phone(p.get("internationalPhoneNumber")),
             photos=[
                 {"source": "google", "ref": photo["name"],
                  "attribution": ", ".join(a.get("displayName", "") for a in photo.get("authorAttributions", [])) or None}
@@ -283,6 +317,7 @@ class NominatimGeocoder:
                     longitude=lon,
                     address=", ".join(p for p in (street, area) if p) or result.get("display_name"),
                     hours=parse_osm(extratags.get("opening_hours")),
+                    website=osm_website(extratags), phone=osm_phone(extratags),
                     photos=[image] if image else [],
                 )
         return None
@@ -320,6 +355,7 @@ class NominatimGeocoder:
         match = self._match(results[0])
         extratags = results[0].get("extratags") or {}
         match.hours = parse_osm(extratags.get("opening_hours"))
+        match.website, match.phone = osm_website(extratags), osm_phone(extratags)
         image = await wikidata_image(self.client, extratags.get("wikidata", ""))
         match.photos = [image] if image else []
         return match

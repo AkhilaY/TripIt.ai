@@ -96,7 +96,9 @@ class FakeGeocoder:
             from app.hours import parse_osm
             return GeoMatch(name=name, latitude=lat, longitude=lon, address="Somewhere St",
                             hours=parse_osm("Mo-Fr 11:00-23:00; Sa-Su 10:00-02:00"),
-                            rating=4.6 if name == "Joe's Pizza" else None, rating_count=1200 if name == "Joe's Pizza" else None)
+                            rating=4.6 if name == "Joe's Pizza" else None, rating_count=1200 if name == "Joe's Pizza" else None,
+                            website="https://www.joespizzanyc.com/" if name == "Joe's Pizza" else None,
+                            phone="+1 212-366-1182" if name == "Joe's Pizza" else None)
         return None
 
 
@@ -418,11 +420,15 @@ async def test_google_geocoder_parses_response():
         return httpx.Response(200, json={"places": [{
             "displayName": {"text": "Joe's Pizza"}, "formattedAddress": "7 Carmine St, New York",
             "location": {"latitude": 40.73, "longitude": -74.0}, "googleMapsUri": "https://maps.google.com/?cid=1",
+            "rating": 4.5, "userRatingCount": 18000, "websiteUri": "https://www.joespizzanyc.com/",
+            "internationalPhoneNumber": "+1 212-366-1182",
         }]})
 
     geo = GooglePlacesGeocoder("k", client=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
     match = await geo.locate("Joe's Pizza", "Greenwich Village", "New York", "USA")
     assert match.latitude == 40.73 and match.maps_url.startswith("https://maps.google.com")
+    assert match.rating == 4.5 and match.rating_count == 18000
+    assert match.website == "https://www.joespizzanyc.com/" and match.phone == "+1 212-366-1182"
 
 
 async def test_nominatim_geocoder_skips_far_results():
@@ -1180,7 +1186,8 @@ async def test_place_search_parsing_google_and_osm():
                                                          "types": ["pizza_restaurant", "restaurant"]}]})
         assert request.url.path == "/v1/places/ChIJabc"
         return httpx.Response(200, json={"id": "ChIJabc", "displayName": {"text": "Lucali"}, "location": {"latitude": 40.68, "longitude": -74.0},
-                                         "types": ["restaurant"], "addressComponents": [
+                                         "types": ["restaurant"], "rating": 4.7, "userRatingCount": 900,
+                                         "websiteUri": "javascript:alert(1)", "internationalPhoneNumber": "+1 718-858-4086", "addressComponents": [
                                              {"longText": "Brooklyn", "types": ["sublocality"]},
                                              {"longText": "New York", "types": ["locality", "political"]},
                                              {"longText": "United States", "types": ["country"]}]})
@@ -1190,6 +1197,8 @@ async def test_place_search_parsing_google_and_osm():
     assert found[0].place_id == "google:ChIJabc" and found[0].category == "food"
     detail = await g.details("google:ChIJabc")
     assert detail.city == "New York" and detail.country == "United States"
+    assert detail.rating == 4.7 and detail.rating_count == 900 and detail.phone == "+1 718-858-4086"
+    assert detail.website is None  # only http(s) addresses are kept
     assert await g.details("google:../../etc") is None and await g.details("osm:N1") is None
 
     def osm(request):
@@ -1197,7 +1206,8 @@ async def test_place_search_parsing_google_and_osm():
             assert request.url.params["osm_ids"] == "N123"
             return httpx.Response(200, json=[{"lat": "48.85", "lon": "2.33", "name": "Café de Flore", "osm_type": "node", "osm_id": 123,
                                               "category": "amenity", "type": "cafe", "address": {"city": "Paris", "country": "France"},
-                                              "extratags": {"opening_hours": "Mo-Su 07:30-01:30"}}])
+                                              "extratags": {"opening_hours": "Mo-Su 07:30-01:30", "contact:website": "cafedeflore.fr",
+                                                            "phone": "+33 1 45 48 55 26; +33 1 45 48 55 27"}}])
         return httpx.Response(200, json=[{"lat": "48.85", "lon": "2.33", "name": "Café de Flore", "osm_type": "node", "osm_id": 123,
                                           "category": "amenity", "type": "cafe", "address": {"city": "Paris", "country": "France"}}])
 
@@ -1207,10 +1217,38 @@ async def test_place_search_parsing_google_and_osm():
     assert results[0].place_id == "osm:N123" and results[0].category == "cafe" and results[0].city == "Paris"
     detail = await n.details("osm:N123")
     assert detail.hours.weekly and detail.country == "France"
+    assert detail.website == "https://cafedeflore.fr" and detail.phone == "+33 1 45 48 55 26"
     assert await n.details("osm:X1") is None
 
     assert google_category(["ice_cream_shop", "store"]) == "dessert" and google_category(["unknown"]) == "other"
     assert osm_category("shop", "shoes") == "shopping" and osm_category("tourism", "hotel") == "stay"
+
+
+def test_clean_website_and_phone():
+    from app.geocode import clean_phone, clean_website
+
+    assert clean_website("example.com/menu") == "https://example.com/menu"
+    assert clean_website("http://example.com") == "http://example.com"
+    assert clean_website(" https://ex ample.com ") is None
+    assert clean_website("javascript:alert(1)") is None and clean_website("ftp://example.com") is None
+    assert clean_website("localhost") is None and clean_website("") is None and clean_website(None) is None
+    assert clean_website("https://example.com/" + "a" * 600) is None
+    assert clean_phone("+1 (212) 366-1182") == "+1 (212) 366-1182"
+    assert clean_phone("020 7887 8888; 020 7887 8889") == "020 7887 8888"
+    assert clean_phone("call us") is None and clean_phone("12") is None and clean_phone("+1 212<script>") is None
+
+
+def test_website_and_phone_saved_and_backfilled(client):
+    job = import_reel(client)
+    joes = next(p for p in client.get(f"/v1/trips/{job['trip_id']}", headers=H).json()["places"] if p["name"] == "Joe's Pizza")
+    assert joes["website"] == "https://www.joespizzanyc.com/" and joes["phone"] == "+1 212-366-1182"
+    assert joes["contact_checked_at"] is not None
+
+    # A place checked by an earlier version (rating saved, no contact details yet) is looked up once more.
+    app.state.db.update_place(joes["id"], website=None, phone=None, contact_checked_at=None)
+    refreshed = client.post(f"/v1/trips/{job['trip_id']}/refresh-details", headers=H).json()
+    again = next(p for p in refreshed["places"] if p["id"] == joes["id"])
+    assert again["website"] == "https://www.joespizzanyc.com/" and again["contact_checked_at"] is not None
 
 
 # ---------- Taste profile, edits, concierge, briefings ----------

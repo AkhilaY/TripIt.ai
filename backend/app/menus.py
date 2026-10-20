@@ -105,6 +105,7 @@ class SafeFetcher:
         self.client = client or httpx.AsyncClient(
             timeout=httpx.Timeout(12.0, connect=5.0), headers=BROWSER_HEADERS)
         self._resolve = resolver
+        self.failures: dict[str, str] = {}  # url -> why the last fetch failed, for the lookup's trace
 
     async def allowed(self, url: str) -> bool:
         try:
@@ -124,8 +125,10 @@ class SafeFetcher:
         return bool(addresses) and all(is_public_address(a) for a in addresses)
 
     async def get(self, url: str, max_bytes: int) -> Optional[Fetched]:
+        first = url
         for _ in range(MAX_REDIRECTS + 1):
             if not await self.allowed(url):
+                self.failures[first] = "not a public web address"
                 return None
             try:
                 async with self.client.stream("GET", url, follow_redirects=False) as response:
@@ -133,6 +136,7 @@ class SafeFetcher:
                         url = urljoin(url, response.headers.get("location", ""))
                         continue
                     if response.status_code != 200:
+                        self.failures[first] = f"the site answered HTTP {response.status_code}"
                         return None
                     kind = response.headers.get("content-type", "").split(";")[0].strip().lower()
                     body = bytearray()
@@ -144,9 +148,12 @@ class SafeFetcher:
                                 del body[max_bytes:]
                                 truncated = True
                                 break
+                    self.failures.pop(first, None)
                     return Fetched(url=url, content_type=kind, body=bytes(body), truncated=truncated)
-            except (httpx.HTTPError, ValueError):
+            except (httpx.HTTPError, ValueError) as e:
+                self.failures[first] = f"couldn't connect ({type(e).__name__})"
                 return None
+        self.failures[first] = "too many redirects"
         return None
 
 
@@ -320,6 +327,7 @@ class MenuService:
         return PlaceMenu(
             status=row["status"], sections=data.get("sections", []), notes=data.get("notes"),
             source_kind=row["source_kind"], source_url=row["source_url"], fetched_at=row["fetched_at"],
+            trace=data.get("trace", []),
         )
 
     async def find(self, place: Place, refresh: bool = False) -> PlaceMenu:
@@ -339,13 +347,20 @@ class MenuService:
         result: Optional[MenuResult] = None
         kind: Optional[str] = None
         source: Optional[str] = None
+        trace: list[str] = []
+        host = lambda u: (urlsplit(u).hostname or u).removeprefix("www.")
 
-        website = place.website or await self._find_website(place)
+        website = place.website
         if website:
-            materials = await self.gather_website(website, place.name)
-            log.info("Menu for %s: %d item(s) read from the website's pages", place.name, len(materials))
+            trace.append(f"Website on file: {host(website)}")
+        else:
+            website = await self._find_website(place)
+            trace.append(f"No website was saved; looked one up: {host(website)}" if website else "No website is saved for this place, and none could be found")
+        if website:
+            materials = await self.gather_website(website, place.name, trace)
             if materials:
                 result = clean_menu(await self.claude.extract_menu(place, materials, from_photos=False))
+                trace.append(f"Claude read {len(materials)} item(s) from the website and {'found a menu' if result.found else 'found no menu in them'}")
                 if result.found:
                     kind = "website"
                     source = self._best_source(materials, website)
@@ -358,23 +373,35 @@ class MenuService:
                 result = clean_menu(await self.claude.extract_menu(place, materials, from_photos=True))
                 if result.found:
                     kind, source = "photos", None
-            log.info("Menu for %s: Google photos %s", place.name, "had it" if kind == "photos" else "had none")
-        if (result is None or not result.found) and website and self.renderer is not None:
-            # Last resort: open the site in a browser and click through to the menu, like a person would.
-            materials, links = await self.renderer.capture(website)
-            if links:  # the pop-up or tab it opened is often a list of PDFs: read the ones that are this restaurant's menus
-                materials += await self._read_links(await self._choose_links(links, place.name, website))
-            log.info("Menu for %s: browser visit gathered %d item(s)", place.name, len(materials))
-            if materials:
-                result = clean_menu(await self.claude.extract_menu(place, materials, from_photos=False))
-                if result.found:
-                    kind, source = "website", self._best_source(materials, website)
+                trace.append(f"Google Maps photos: checked {len(photos)}, {'found a menu' if result.found else 'none was a readable menu'}")
+            else:
+                trace.append("Google Maps photos: none available")
+        elif result is None or not result.found:
+            trace.append("Google Maps photos: skipped (" + ("turned off" if not self.settings.menu_google_photos else "no Google key") + ")")
+        if (result is None or not result.found) and website:
+            if self.renderer is None:
+                trace.append("Browser click-through: not available on this server")
+            else:
+                # Last resort: open the site in a browser and click through to the menu, like a person would.
+                materials, links = await self.renderer.capture(website)
+                trace.append(f"Browser click-through: {getattr(self.renderer, 'last_note', '') or 'ran'}")
+                if links:  # the pop-up or tab it opened is often a list of PDFs: read the ones that are this restaurant's menus
+                    chosen = await self._choose_links(links, place.name, website)
+                    read = await self._read_links(chosen)
+                    materials += read
+                    trace.append(f"Browser found {len(links)} link(s); {len(chosen)} looked like menus; {len(read)} could be read")
+                if materials:
+                    result = clean_menu(await self.claude.extract_menu(place, materials, from_photos=False))
+                    trace.append(f"Claude read {len(materials)} item(s) from the browser visit and {'found a menu' if result.found else 'found no menu in them'}")
+                    if result.found:
+                        kind, source = "website", self._best_source(materials, website)
+        log.info("Menu for %s: %s", place.name, " | ".join(trace))
 
         if result is not None and result.found:
-            self.db.save_menu(place.id, "found", {"sections": [s.model_dump() for s in result.sections], "notes": result.notes},
+            self.db.save_menu(place.id, "found", {"sections": [s.model_dump() for s in result.sections], "notes": result.notes, "trace": trace},
                               kind, source)
         else:
-            self.db.save_menu(place.id, "none", None, None, None)
+            self.db.save_menu(place.id, "none", {"trace": trace}, None, None)
         return self.stored(place.id)
 
     async def _find_website(self, place: Place) -> Optional[str]:
@@ -447,10 +474,13 @@ class MenuService:
                     out.append(Material("text", f"Web page: {label}", got.url, text=text_))
         return out
 
-    async def gather_website(self, website: str, name: str = "") -> list[Material]:
+    async def gather_website(self, website: str, name: str = "", trace: Optional[list[str]] = None) -> list[Material]:
+        trace = trace if trace is not None else []
         home = await self.fetcher.get(website, HTML_BYTES)
         if home is None:
+            trace.append(f"Couldn't open the website's home page: {self.fetcher.failures.get(website, 'no answer')}")
             return []
+        trace.append("Opened the website's home page")
         if home.content_type == "application/pdf" and not home.truncated:
             return [Material("pdf", "Menu PDF", home.url, data=home.body, media_type="application/pdf")]
         if home.content_type in IMAGE_TYPES and len(home.body) <= IMAGE_BYTES and not home.truncated:
@@ -462,6 +492,7 @@ class MenuService:
         materials: list[Material] = []
         pdfs = images = 0
         chosen = await self._choose_links(pages[0].links, name, home.url)
+        trace.append(f"The home page has {len(pages[0].links)} link(s); {len(chosen)} look like menus" + (": " + ", ".join(t or "(no text)" for _, t in chosen[:8]) if chosen else ""))
         candidates = [u for u, _ in chosen]
         link_text = dict((u, t) for u, t in chosen if t)
         for blob in pages[0].jsonld:  # a site can name its menu page in its structured data
@@ -532,6 +563,11 @@ class MenuService:
             if got and got.content_type in IMAGE_TYPES and not got.truncated:
                 images += 1
                 materials.append(Material("image", f"Menu image {images}", got.url, data=got.body, media_type=got.content_type))
+        kinds = [m.kind for m in materials]
+        if not kinds:
+            trace.append("Nothing readable was found on the website's pages")
+        else:
+            trace.append(f"Read {kinds.count('pdf')} PDF(s), {kinds.count('image')} image(s) and {kinds.count('text')} page(s) from the website")
         return materials
 
 

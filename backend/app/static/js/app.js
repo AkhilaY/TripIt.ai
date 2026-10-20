@@ -1472,15 +1472,17 @@ async function menuSection(p) {
     return `<div class="empty menuwait"><span class="spinner big"></span><h3>Looking for the menu</h3>
       <p>Checking ${site ? 'the website' : 'what’s online'} and reading it for you. This can take up to a minute.</p></div>`;
   }
+  const siteBtn = `<button class="linkbtn" data-act="menuwebsite" data-id="${p.id}">${site ? 'Use a different website' : 'Add the restaurant’s website'}</button>`;
   if (m.status === 'unknown') {
     return emptyState('accent', 'book', 'See the menu',
       `We’ll look for it ${site ? 'on the website' : 'online'} and lay it out neatly here.`,
-      `<button class="btn" data-act="findmenu" data-id="${p.id}">${ICON.search}Find the menu</button>`);
+      `<button class="btn" data-act="findmenu" data-id="${p.id}">${ICON.search}Find the menu</button>${siteBtn}`);
   }
   if (m.status === 'none') {
-    return emptyState('gray', 'book', 'No menu found',
+    return `${emptyState('gray', 'book', 'No menu found',
       'We couldn’t find a menu we could read. Some places only post theirs on Instagram or a delivery app.',
-      `<button class="btn tint" data-act="findmenu" data-id="${p.id}" data-refresh="1">Try again</button>${links}`);
+      `<button class="btn tint" data-act="findmenu" data-id="${p.id}" data-refresh="1">Try again</button>${siteBtn}${links}`)}
+      ${m.trace && m.trace.length ? `<div class="section"><div class="section-h">What we tried</div><div class="group"><div class="notecard"><ul class="trace">${m.trace.map((t) => `<li>${esc(t)}</li>`).join('')}</ul></div></div></div>` : ''}`;
   }
   const host = (() => { try { return new URL(m.source_url).hostname.replace(/^www\./, ''); } catch { return ''; } })();
   const source = m.source_kind === 'photos'
@@ -1501,6 +1503,20 @@ async function menuSection(p) {
         ${i.description ? `<span class="s">${esc(i.description)}</span>` : ''}</span>${i.price ? `<span class="price">${esc(i.price)}</span>` : ''}</div>`).join('')}</div></div>`).join('')
       || '<div class="section"><div class="section-f">Nothing on the menu matches that filter.</div></div>'}
     <div class="section"><div class="section-f">Menus change. Check with the restaurant for today’s dishes and prices.${m.source_kind === 'photos' ? ' Read from photos, so some items may be missing or misread.' : ''}</div></div>`;
+}
+
+async function runFindMenu(id, refresh) {
+  S.menuBusy[id] = true;
+  render();
+  try {
+    S.menu[id] = await api(`/v1/places/${id}/menu`, { method: 'POST', body: { refresh } });
+    if (S.menu[id].status === 'none') toast('No menu found');
+  } catch (e) {
+    toast(e.message, true);
+  } finally {
+    delete S.menuBusy[id];
+    render();
+  }
 }
 
 /** Rating, website and phone rows for a place's Details (only the ones we have). */
@@ -2827,19 +2843,32 @@ async function onAction(act, el) {
       openSheet({ type: 'actions', title: b.title, actions });
       return;
     }
-    case 'findmenu': {
-      const id = el.dataset.id;
-      S.menuBusy[id] = true;
-      render();
-      try {
-        S.menu[id] = await api(`/v1/places/${id}/menu`, { method: 'POST', body: { refresh: el.dataset.refresh === '1' } });
-        if (S.menu[id].status === 'none') toast('No menu found');
-      } catch (e) {
-        toast(e.message, true);
-      } finally {
-        delete S.menuBusy[id];
-        render();
-      }
+    case 'findmenu': await runFindMenu(el.dataset.id, el.dataset.refresh === '1'); return;
+    case 'menuwebsite': {
+      const p = findAnyPlace(el.dataset.id);
+      const st = { text: p.website || '' };
+      openSheet({
+        type: 'form', title: 'Restaurant website', confirm: 'Find the menu', st,
+        body: () => `<div class="section"><div class="group"><div class="row"><input class="field" type="url" inputmode="url" data-act="packfield" data-f="text" placeholder="https://…" value="${esc(st.text)}" aria-label="Website address" autocomplete="off"></div></div>
+          <div class="section-f">Paste the address of the restaurant’s own website. TripIt will look there for the menu.</div></div>`,
+        async ok() {
+          const url = st.text.trim();
+          if (!url) { toast('Paste the website address', true); return; }
+          S.sheet.busy = true; renderOverlay();
+          try {
+            const place = await api(`/v1/places/${p.id}`, { method: 'PATCH', body: { website: url } });
+            const t = S.trip[place.trip_id];
+            if (t) t.places = t.places.map((x) => (x.id === place.id ? place : x));
+            if (S.places) S.places = S.places.map((x) => (x.id === place.id ? place : x));
+            delete S.menu[p.id];
+            closeSheet();
+            await runFindMenu(p.id, true);
+          } catch (e) {
+            S.sheet.busy = false; renderOverlay();
+            toast(e.message, true);
+          }
+        },
+      });
       return;
     }
     case 'menudiet': S.menuDiet[el.dataset.id] = S.menuDiet[el.dataset.id] === el.dataset.tag ? null : el.dataset.tag; render(); return;

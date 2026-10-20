@@ -1887,6 +1887,43 @@ def test_browser_finds_a_popup_of_menu_pdfs(client):
     assert not any("private-dining" in u or "gift" in u for u in client.web_log)
 
 
+def test_menu_lookup_explains_what_it_tried(client):
+    pid = menu_place(client, website="https://joes.test/")  # nothing is served at that address
+    client.messages.outputs[MenuResult] = MenuResult(found=False, sections=[], notes=None)
+    menu = client.post(f"/v1/places/{pid}/menu", json={}, headers=H).json()
+    assert menu["status"] == "none"
+    trace = " | ".join(menu["trace"])
+    assert "Website on file: joes.test" in trace and "Couldn't open the website's home page: the site answered HTTP 404" in trace
+    assert "Google Maps photos: skipped (no Google key)" in trace and "Browser click-through: not available on this server" in trace
+    assert client.get(f"/v1/places/{pid}/menu", headers=H).json()["trace"] == menu["trace"]  # kept with the saved result
+
+    serve(client, "https://joes.test/", MENU_PAGE)
+    client.messages.outputs[MenuResult] = MENU_RESULT
+    found = client.post(f"/v1/places/{pid}/menu", json={"refresh": True}, headers=H).json()
+    assert found["status"] == "found" and any("Claude read" in t and "found a menu" in t for t in found["trace"])
+    assert any(t.startswith("The home page has") for t in found["trace"])
+
+    app.state.db.update_place(pid, website=None, contact_checked_at=app.state.db.get_place(pid).created_at)
+    none = client.post(f"/v1/places/{pid}/menu", json={"refresh": True}, headers=H).json()
+    assert "No website is saved for this place" in " | ".join(none["trace"])
+
+
+def test_place_website_can_be_set_by_hand(client):
+    pid = menu_place(client)
+    serve(client, "https://joes.test/", MENU_PAGE)
+    client.messages.outputs[MenuResult] = MENU_RESULT
+    client.post(f"/v1/places/{pid}/menu", json={}, headers=H)
+    app.state.db.update_place(pid, reserve_url="https://resy.com/cities/ny/x", reserve_provider="Resy")
+
+    r = client.patch(f"/v1/places/{pid}", json={"website": " new-site.test/menu "}, headers=H)
+    assert r.status_code == 200 and r.json()["website"] == "https://new-site.test/menu"
+    assert r.json()["reserve_url"] is None and r.json()["reserve_checked_at"] is None  # looked up again for the new site
+    assert client.get(f"/v1/places/{pid}/menu", headers=H).json()["status"] == "unknown"  # the old menu was for another site
+    for bad in ("javascript:alert(1)", "not a site", "ftp://x.test"):
+        assert client.patch(f"/v1/places/{pid}", json={"website": bad}, headers=H).status_code == 422, bad
+    assert client.patch(f"/v1/places/{pid}", json={"website": ""}, headers=H).json()["website"] is None
+
+
 def test_menu_page_named_in_structured_data(client):
     pid = menu_place(client)
     serve(client, "https://joes.test/", b'<html><head><script type="application/ld+json">{"@type": "Restaurant", "hasMenu": "https://joes.test/carta-del-dia"}</script></head>'

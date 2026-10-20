@@ -496,6 +496,9 @@ class Database:
     def delete_booking(self, booking_id: str) -> None:
         self._exec("DELETE FROM bookings WHERE id = ?", (booking_id,))
 
+    def delete_menu(self, place_id: str) -> None:
+        self._exec("DELETE FROM menus WHERE place_id = ?", (place_id,))
+
     def get_menu(self, place_id: str) -> Optional[sqlite3.Row]:
         rows = self._rows("SELECT * FROM menus WHERE place_id = ?", (place_id,))
         return rows[0] if rows else None

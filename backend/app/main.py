@@ -25,7 +25,7 @@ from .concierge import Curator
 from .config import Settings, get_settings
 from .db import Database
 from .exports import ExportError, ics, kml, schedule
-from .geocode import GooglePlacesGeocoder, NoGeocoder, make_geocoder
+from .geocode import GooglePlacesGeocoder, NoGeocoder, clean_website, make_geocoder
 from .jobs import JobStore
 from .library import Library
 from .llm import ClaudeError, ClaudeService
@@ -804,6 +804,14 @@ async def update_place(place_id: str, body: PlaceUpdate, request: Request) -> Pl
     fields = body.model_fields_set
     simple = {k: getattr(body, k) for k in ("name", "category", "visited", "user_notes", "must_do", "start_time")
               if k in fields and getattr(body, k) is not None}
+    if "website" in fields and body.website is not None:
+        site = clean_website(body.website) if body.website.strip() else None
+        if body.website.strip() and not site:
+            raise HTTPException(status_code=422, detail="That doesn't look like a website address")
+        # A new website means the old menu and booking link were for something else: look again.
+        db.update_place(place_id, website=site, contact_checked_at=datetime.now(timezone.utc), reserve_url=None,
+                        reserve_provider=None, reserve_checked_at=None)
+        db.delete_menu(place_id)
     if simple:
         db.update_place(place_id, **simple)
     if "day_number" in fields and body.day_number is not None:

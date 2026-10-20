@@ -70,18 +70,23 @@ class BrowserRenderer:
         self.fetcher = fetcher
         self.executable = executable or None
         self._busy = asyncio.Semaphore(1)
+        self.last_note = ""  # what the last visit did, for the lookup's trace
 
     async def capture(self, website: str) -> tuple[list[Material], list[tuple[str, str]]]:
         """(page text and screenshots from the website's menu, every link seen along the way). A pop-up listing
         menus as PDFs yields its links here, for the caller to download."""
         if not await self.fetcher.allowed(website):
+            self.last_note = "the address isn't a public website"
             return [], []
         async with self._busy:
+            self.last_note = ""
             try:
                 return await asyncio.wait_for(self._capture(website), timeout=TOTAL_TIMEOUT)
             except asyncio.TimeoutError:
+                self.last_note = "the site took too long to open"
                 log.info("Browser visit to %s timed out", website)
             except Exception as e:  # a broken site or browser must never break the menu lookup
+                self.last_note = f"couldn't run ({type(e).__name__}: {str(e).splitlines()[0][:100] if str(e) else ''})"
                 log.warning("Browser visit to %s failed: %s", website, e)
         return [], []
 
@@ -217,6 +222,7 @@ class BrowserRenderer:
             return menu_like
 
         targets = await self._targets(page, home)
+        self.last_note = f"opened the site; {len(targets)} Menu-like link(s) or tab(s)" + (": " + ", ".join(repr(t["text"]) for t in targets) if targets else "")
         if await take("Home page") and not targets:
             return materials, list(links.items())
         for t in targets:
@@ -240,4 +246,5 @@ class BrowserRenderer:
                     await self._targets(page, home)
                 except Exception:
                     break
+        self.last_note += f"; clicked through, read {len(materials)} item(s), saw {len(links)} link(s)"
         return materials, list(links.items())

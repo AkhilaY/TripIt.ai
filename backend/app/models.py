@@ -322,6 +322,7 @@ class PlaceMenu(BaseModel):
     source_kind: Optional[Literal["website", "photos"]] = None
     source_url: Optional[str] = None  # the page or file the menu was read from
     fetched_at: Optional[datetime] = None
+    trace: list[str] = []  # what the last lookup tried, so a miss can be understood
 
 
 class PickedLinks(BaseModel):
@@ -436,6 +437,7 @@ class PlaceUpdate(BaseModel):
     must_do: Optional[bool] = None
     start_time: Optional[str] = Field(default=None, pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
     clear_start_time: bool = False
+    website: Optional[str] = Field(default=None, max_length=500)  # "" clears it
 
 
 class PlanTripRequest(BaseModel):

@@ -33,6 +33,6 @@ primary_region = "iad"
     timeout = "5s"
 
 [[vm]]
-  memory = "1gb"
+  memory = "2gb"  # the menu finder runs Chromium, which needs room beside the Whisper model
   cpu_kind = "shared"
   cpus = 1

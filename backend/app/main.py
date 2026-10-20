@@ -78,6 +78,7 @@ from .models import (
     TripEdits,
     TripUpdate,
 )
+from .menu_browser import BrowserRenderer, browser_available
 from .menus import MENU_CATEGORIES, MenuService, SafeFetcher
 from .packing import PackingService
 from .photos import PhotoStore
@@ -107,7 +108,9 @@ def build_services(app: FastAPI, settings: Settings) -> None:
     app.state.push = Push(db, Path(settings.database_path).parent / "vapid_private.pem", settings.push_contact)
     app.state.curator = Curator(db, app.state.claude)
     app.state.packing = PackingService(db, app.state.claude, Weather(settings), app.state.library)
-    app.state.menus = MenuService(db, app.state.claude, SafeFetcher(), app.state.library.geocoder, settings)
+    fetcher = SafeFetcher()
+    renderer = BrowserRenderer(fetcher, settings.menu_browser_path) if settings.menu_browser and browser_available() else None
+    app.state.menus = MenuService(db, app.state.claude, fetcher, app.state.library.geocoder, settings, renderer)
     app.state.pipeline.on_finished = lambda job: notify_import(app, job)
 
 

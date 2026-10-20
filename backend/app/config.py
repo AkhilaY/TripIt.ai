@@ -16,6 +16,10 @@ class Settings(BaseSettings):
     # Menus: when a place's website has none, read menu photos listed for it on Google Maps. Google's terms
     # may not allow extracting text from its photos, so check them and turn this off if in doubt.
     menu_google_photos: bool = True
+    # When the plain fetch finds no menu, open the site in headless Chromium and click through to it. Needs
+    # Playwright and Chromium (the Docker image has them); off automatically when they are missing.
+    menu_browser: bool = True
+    menu_browser_path: str = ""  # a Chromium to use instead of the one Playwright installed
     # Packing lists use weather from Open-Meteo (no key). Its free service is for non-commercial use; a
     # public or paid app needs its commercial plan (set the key and URL below) or another provider.
     # "none" makes lists without weather.

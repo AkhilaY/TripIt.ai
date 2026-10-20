@@ -11,7 +11,8 @@ from app.db import Database, normalize
 from app.geocode import GeoMatch, GooglePlacesGeocoder, NominatimGeocoder
 from app.jobs import JobStore
 from app.library import Library
-from app.menus import MenuService, SafeFetcher
+from app.menu_browser import BrowserRenderer
+from app.menus import MenuService, SafeFetcher, Material
 from app.packing import PackingService
 from app.weather import Weather
 from app.llm import ClaudeService, _sanitize_plan
@@ -1788,6 +1789,144 @@ async def test_weather_lookup():
     off = Weather(Settings(app_api_key="secret", weather="none"))
     assert await off.days(40.7, -74.0, date.today(), 3) == [] and await w.days(40.7, -74.0, date.today(), 0) == []
     assert Weather(settings).enabled is True
+
+
+
+# ---------- Menus: finding harder-to-reach menus ----------
+
+
+def test_menu_found_at_the_usual_address_when_no_link_leads_there(client):
+    pid = menu_place(client)
+    serve(client, "https://joes.test/", b'<html><body><h1>Joe\'s Pizza</h1><p>Welcome to our home since 1975. Come hungry and stay awhile.</p></body></html>')
+    serve(client, "https://joes.test/menu", MENU_PAGE)
+    serve(client, "https://joes.test/food", b'<html><body><h1>Joe\'s Pizza</h1><p>Welcome to our home since 1975. Come hungry and stay awhile.</p></body></html>')  # catch-all copy of the home page
+    client.messages.outputs[MenuResult] = MENU_RESULT
+    menu = client.post(f"/v1/places/{pid}/menu", json={}, headers=H).json()
+    assert menu["status"] == "found" and menu["source_url"] == "https://joes.test/menu"
+    text = " ".join(b["text"] for b in client.messages.calls[-1]["messages"][0]["content"] if b["type"] == "text")
+    assert text.count("Welcome to our home") == 0 or text.count("Welcome to our home") == 1  # the copy of the home page isn't read twice
+    assert any(u.endswith("/menu") for u in client.web_log)
+
+
+def test_menu_page_named_in_structured_data(client):
+    pid = menu_place(client)
+    serve(client, "https://joes.test/", b'<html><head><script type="application/ld+json">{"@type": "Restaurant", "hasMenu": "https://joes.test/carta-del-dia"}</script></head>'
+          b'<body><p>Welcome to our home since 1975. Come hungry and stay awhile.</p></body></html>')
+    serve(client, "https://joes.test/carta-del-dia", MENU_PAGE)
+    client.messages.outputs[MenuResult] = MENU_RESULT
+    assert client.post(f"/v1/places/{pid}/menu", json={}, headers=H).json()["source_url"] == "https://joes.test/carta-del-dia"
+
+
+def test_menu_website_is_looked_up_when_the_place_has_none(client):
+    pid = menu_place(client, website=None)  # saved without a website; Joe's Pizza has one in the geocoder
+    app.state.db.update_place(pid, contact_checked_at=None)  # as for a place saved before contact details were kept
+    assert app.state.db.get_place(pid).website is None
+    serve(client, "https://www.joespizzanyc.com/", MENU_PAGE)
+    client.messages.outputs[MenuResult] = MENU_RESULT
+    menu = client.post(f"/v1/places/{pid}/menu", json={}, headers=H).json()
+    assert menu["status"] == "found" and menu["source_url"] == "https://www.joespizzanyc.com/"
+    place = app.state.db.get_place(pid)
+    assert place.website == "https://www.joespizzanyc.com/" and place.contact_checked_at is not None
+
+
+def test_menu_browser_is_the_last_resort(client):
+    pid = menu_place(client)
+    serve(client, "https://joes.test/", b"<html><body><div id=app></div></body></html>")  # drawn by JavaScript: nothing to read
+    calls = []
+
+    class Rendered:
+        async def capture(self, website):
+            calls.append(website)
+            return [Material("text", "After opening 'Menu' (text)", "https://joes.test/#menu", text="Plain slice $4.00\nPepperoni slice $4.50\nSicilian $5.00\nKnots $3.00\nPie $22.00"),
+                    Material("image", "After opening 'Menu', part 1", "https://joes.test/#menu", data=b"\xff\xd8\xff", media_type="image/jpeg")]
+
+    app.state.menus.renderer = Rendered()
+    client.messages.outputs[MenuResult] = [MENU_RESULT]  # the empty page gives Claude nothing to read, so it is asked once
+    menu = client.post(f"/v1/places/{pid}/menu", json={}, headers=H).json()
+    assert calls == ["https://joes.test/"] and menu["status"] == "found" and menu["source_kind"] == "website"
+    assert menu["source_url"] == "https://joes.test/#menu"
+    blocks = client.messages.calls[-1]["messages"][0]["content"]
+    assert [b["type"] for b in blocks].count("image") == 1 and "Plain slice $4.00" in str(blocks)
+
+    # Not used when the plain fetch already found the menu; and a failing browser doesn't break the lookup.
+    calls.clear()
+    serve(client, "https://joes.test/", MENU_PAGE)
+    client.messages.outputs[MenuResult] = [MENU_RESULT]
+    client.post(f"/v1/places/{pid}/menu", json={"refresh": True}, headers=H)
+    assert calls == []
+
+    class Broken:
+        async def capture(self, website):
+            return []
+
+    app.state.menus.renderer = Broken()
+    serve(client, "https://joes.test/", b"<html><body><div id=app></div></body></html>")
+    client.messages.outputs[MenuResult] = [MenuResult(found=False, sections=[], notes=None)]
+    assert client.post(f"/v1/places/{pid}/menu", json={"refresh": True}, headers=H).json()["status"] == "none"
+
+
+# A restaurant site whose menu is drawn by JavaScript after you click its Menu tab.
+JS_SITE = """<html><head><title>Trattoria</title></head><body>
+<nav><a href="#" id="about">About</a> <a href="#" id="tab">Menu</a> <a href="/gift">Gift cards</a></nav>
+<div id="content">Welcome to the trattoria.</div>
+<img src="__SECRET__/secret.png" alt="">
+<script>
+document.getElementById('tab').addEventListener('click', (e) => {
+  e.preventDefault();
+  setTimeout(() => { document.getElementById('content').innerHTML =
+    '<h2>Pizza</h2><p>Margherita $14</p><p>Diavola $16</p><p>Quattro Formaggi $17</p><p>Marinara $12</p><p>Capricciosa $18</p><h2>Dolci</h2><p>Tiramisu $9</p>'; }, 300);
+});
+</script></body></html>"""
+
+
+def chromium_for_tests():
+    import glob, os
+
+    found = os.environ.get("TRIPIT_TEST_CHROMIUM") or next(iter(sorted(glob.glob("/opt/pw-browsers/chromium-*/chrome-linux/chrome"))), None)
+    return found if found and os.path.exists(found) else None
+
+
+@pytest.mark.skipif(chromium_for_tests() is None, reason="needs Chromium and Playwright")
+async def test_browser_clicks_through_to_a_javascript_menu():
+    import threading
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    pytest.importorskip("playwright")
+    hits = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            hits.append((self.server.server_port, self.path))
+            body = JS_SITE.replace("__SECRET__", f"http://127.0.0.2:{secret.server_port}").encode() if self.path == "/" else b"x"
+            self.send_response(200 if self.path in ("/", "/secret.png") else 404)
+            self.send_header("Content-Type", "text/html" if self.path == "/" else "image/png")
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args):
+            pass
+
+    site = HTTPServer(("127.0.0.1", 0), Handler)
+    secret = HTTPServer(("127.0.0.2", 0), Handler)
+    for server in (site, secret):
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        fetcher = SafeFetcher()
+
+        async def allowed(url):  # these test servers are on loopback; only 127.0.0.1 counts as "public" here
+            return url.startswith(f"http://127.0.0.1:{site.server_port}/")
+
+        fetcher.allowed = allowed
+        renderer = BrowserRenderer(fetcher, chromium_for_tests())
+        materials = await renderer.capture(f"http://127.0.0.1:{site.server_port}/")
+        text = " ".join(m.text or "" for m in materials if m.kind == "text")
+        assert "Margherita $14" in text and "Tiramisu $9" in text  # drawn after the click
+        assert any("Menu" in m.label for m in materials)
+        assert not any(port == secret.server_port for port, _ in hits)  # the page's request to another address was blocked
+        assert await renderer.capture("http://10.0.0.5/") == []  # refused up front
+    finally:
+        for server in (site, secret):
+            server.shutdown()
 
 
 

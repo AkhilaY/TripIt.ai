@@ -16,6 +16,12 @@ class Settings(BaseSettings):
     # Menus: when a place's website has none, read menu photos listed for it on Google Maps. Google's terms
     # may not allow extracting text from its photos, so check them and turn this off if in doubt.
     menu_google_photos: bool = True
+    # Packing lists use weather from Open-Meteo (no key). Its free service is for non-commercial use; a
+    # public or paid app needs its commercial plan (set the key and URL below) or another provider.
+    # "none" makes lists without weather.
+    weather: str = "open-meteo"
+    weather_api_key: str = ""
+    weather_base_url: str = ""
 
     # Transcription (faster-whisper). "base" is a good CPU default; "small" is more accurate.
     whisper_model: str = "base"

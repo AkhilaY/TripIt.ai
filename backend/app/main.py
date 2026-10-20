@@ -55,6 +55,9 @@ from .models import (
     MenuRequest,
     PlaceMenu,
     MoveRequest,
+    PackingItemInput,
+    PackingList,
+    PackingRequest,
     Place,
     PlaceUpdate,
     PlanRequest,
@@ -76,11 +79,13 @@ from .models import (
     TripUpdate,
 )
 from .menus import MENU_CATEGORIES, MenuService, SafeFetcher
+from .packing import PackingService
 from .photos import PhotoStore
 from .reserve import find_reserve_link
 from .pipeline import Pipeline
 from .push import Push
 from .routing import Router
+from .weather import Weather
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 mimetypes.add_type("application/manifest+json", ".webmanifest")
@@ -101,6 +106,7 @@ def build_services(app: FastAPI, settings: Settings) -> None:
     app.state.router = Router(db, settings)
     app.state.push = Push(db, Path(settings.database_path).parent / "vapid_private.pem", settings.push_contact)
     app.state.curator = Curator(db, app.state.claude)
+    app.state.packing = PackingService(db, app.state.claude, Weather(settings), app.state.library)
     app.state.menus = MenuService(db, app.state.claude, SafeFetcher(), app.state.library.geocoder, settings)
     app.state.pipeline.on_finished = lambda job: notify_import(app, job)
 
@@ -361,6 +367,54 @@ async def tidy_trip(trip_id: str, body: TidyRequest, request: Request) -> TripDe
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     return _trip_or_404(request, trip_id)
+
+
+# ---------- Packing ----------
+
+
+@app.get("/v1/trips/{trip_id}/packing", response_model=Optional[PackingList], dependencies=[Auth])
+async def get_packing(trip_id: str, request: Request) -> Optional[PackingList]:
+    """The trip's packing list, or null when none has been made yet."""
+    _trip_or_404(request, trip_id)
+    return request.app.state.packing.get(trip_id)
+
+
+@app.post("/v1/trips/{trip_id}/packing", response_model=PackingList, dependencies=[Auth])
+async def make_packing(trip_id: str, request: Request, body: Optional[PackingRequest] = None) -> PackingList:
+    """Writes (or rewrites) the list from the trip's days, stops, weather and the person's taste. Items they
+    added stay, and ticked items stay ticked."""
+    trip = _trip_or_404(request, trip_id)
+    body = body or PackingRequest()
+    return await request.app.state.packing.generate(trip, request.app.state.curator.profile(), body.carry_on_only, body.keep_packed)
+
+
+@app.post("/v1/trips/{trip_id}/packing/items", response_model=PackingList, status_code=201, dependencies=[Auth])
+async def add_packing_item(trip_id: str, body: PackingItemInput, request: Request) -> PackingList:
+    _trip_or_404(request, trip_id)
+    if not body.text:
+        raise HTTPException(status_code=422, detail="What should be on the list?")
+    result = request.app.state.packing.add_item(trip_id, body.text, body.group or "other")
+    if result is None:
+        raise HTTPException(status_code=404, detail="Make the packing list first")
+    return result
+
+
+@app.patch("/v1/trips/{trip_id}/packing/items/{item_id}", response_model=PackingList, dependencies=[Auth])
+async def update_packing_item(trip_id: str, item_id: str, body: PackingItemInput, request: Request) -> PackingList:
+    _trip_or_404(request, trip_id)
+    result = request.app.state.packing.update_item(trip_id, item_id, body.model_dump(exclude_none=True))
+    if result is None:
+        raise HTTPException(status_code=404, detail="Item not found")
+    return result
+
+
+@app.delete("/v1/trips/{trip_id}/packing/items/{item_id}", response_model=PackingList, dependencies=[Auth])
+async def delete_packing_item(trip_id: str, item_id: str, request: Request) -> PackingList:
+    _trip_or_404(request, trip_id)
+    result = request.app.state.packing.delete_item(trip_id, item_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Item not found")
+    return result
 
 
 # ---------- Bookings ----------

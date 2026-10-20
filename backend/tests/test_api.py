@@ -12,11 +12,15 @@ from app.geocode import GeoMatch, GooglePlacesGeocoder, NominatimGeocoder
 from app.jobs import JobStore
 from app.library import Library
 from app.menus import MenuService, SafeFetcher
+from app.packing import PackingService
+from app.weather import Weather
 from app.llm import ClaudeService, _sanitize_plan
 from app.concierge import Curator
 from app.main import app, notify_import
 from app.media import DownloadedReel, UnsupportedURLError, find_url, platform_for
 from app.models import (
+    PackingDraftItem,
+    PackingResult,
     BookingDraft,
     BookingsResult,
     ExtractionResult,
@@ -169,11 +173,30 @@ def client(monkeypatch, tmp_path):
     async def resolver(host):
         return {"internal.test": ["10.0.0.5"], "meta.test": ["169.254.169.254"], "v6.test": ["::ffff:127.0.0.1"]}.get(host, ["93.184.216.34"])
 
+    weather_log, weather_state = [], {"fail": False}
+
+    def weather_handler(request):
+        from datetime import date, timedelta
+
+        weather_log.append(request.url)
+        if weather_state["fail"]:
+            return httpx.Response(500)
+        q = request.url.params
+        start, end = date.fromisoformat(q["start_date"]), date.fromisoformat(q["end_date"])
+        n = (end - start).days + 1
+        daily = {"time": [(start + timedelta(days=i)).isoformat() for i in range(n)], "weather_code": [63] * n,
+                 "temperature_2m_max": [14.0] * n, "temperature_2m_min": [8.0] * n}
+        if request.url.path.endswith("/forecast"):
+            daily["precipitation_probability_max"] = [80] * n
+        return httpx.Response(200, json={"daily": daily})
+
+    app.state.packing = PackingService(db, claude, Weather(settings, client=httpx.AsyncClient(transport=httpx.MockTransport(weather_handler))), library)
     app.state.menus = MenuService(db, claude, SafeFetcher(client=httpx.AsyncClient(transport=httpx.MockTransport(web_handler)), resolver=resolver),
                                   geocoder, settings)
 
     with TestClient(app) as c:
         c.web, c.web_log = web, web_log
+        c.weather_log, c.weather_state = weather_log, weather_state
         c.messages = messages
         c.geocoder = geocoder
         c.push_log = push_log
@@ -181,7 +204,7 @@ def client(monkeypatch, tmp_path):
         c.uploads = tmp_path / "uploads"
         yield c
     app.dependency_overrides.clear()
-    for attr in ("db", "store", "claude", "library", "pipeline", "router", "photos", "push", "curator", "menus"):
+    for attr in ("db", "store", "claude", "library", "pipeline", "router", "photos", "push", "curator", "menus", "packing"):
         delattr(app.state, attr)
 
 
@@ -433,7 +456,7 @@ def test_output_schemas_are_accepted_by_sdk():
 
     from app.models import BriefingText, ConciergeReply, EditsResult
 
-    for model in (ExtractionResult, PlanResult, EditsResult, ConciergeReply, BriefingText, MenuResult, BookingsResult):
+    for model in (ExtractionResult, PlanResult, EditsResult, ConciergeReply, BriefingText, MenuResult, BookingsResult, PackingResult):
         schema = transform_schema(TypeAdapter(model).json_schema())
         assert schema["additionalProperties"] is False
 
@@ -1615,6 +1638,157 @@ def test_reserve_link_found_on_the_restaurant_website(client):
     assert provider_for("https://www.opentable.co.uk/r/the-ivy") == "OpenTable" and provider_for("https://opentable.com/about") is None
     assert provider_for("https://www.exploretock.com/alinea") == "Tock" and provider_for("https://resy.com/cities/ny/x y") is None
     assert provider_for("https://resy.com.evil.test/cities/ny/x") is None and provider_for("http://resy.com/cities/ny/" + "a" * 600) is None
+
+
+# ---------- Packing lists ----------
+
+
+def packing_trip(client, days=3, offset=3):
+    from datetime import date, timedelta
+
+    job = import_reel(client)
+    trip_id = job["trip_id"]
+    client.post(f"/v1/trips/{trip_id}/plan", json={"days": days}, headers=H)  # the plan falls back to the offline planner
+    client.patch(f"/v1/trips/{trip_id}", json={"start_date": (date.today() + timedelta(days=offset)).isoformat()}, headers=H)
+    return trip_id
+
+
+def draft(text, group="clothes", reason=None, days=(), day_bag=False):
+    return PackingDraftItem(text=text, group=group, reason=reason, days=list(days), day_bag=day_bag)
+
+
+def test_packing_list_from_the_trip_and_weather(client):
+    trip_id = packing_trip(client)
+    assert client.get(f"/v1/trips/{trip_id}/packing", headers=H).json() is None
+    client.put("/v1/profile", json={"pace": "slow", "notes": "travelling with a toddler"}, headers=H)
+    client.messages.outputs[PackingResult] = PackingResult(notes="  Cool and wet. ", items=[
+        draft("Compact umbrella", "daybag", "Rain on days 1 and 2", days=[1, 2, 9], day_bag=True),
+        draft("3 tops"), draft("3  Tops"), draft("   "), draft("Passport", "documents")])
+    r = client.post(f"/v1/trips/{trip_id}/packing", json={}, headers=H)
+    assert r.status_code == 200
+    plan = r.json()
+    assert plan["generated_by"] == "claude" and plan["notes"] == "Cool and wet." and plan["carry_on_only"] is False
+    assert [i["text"] for i in plan["items"]] == ["Compact umbrella", "3 tops", "Passport"]  # blanks and repeats dropped
+    umbrella = plan["items"][0]
+    assert umbrella["days"] == [1, 2] and umbrella["day_bag"] is True and umbrella["packed"] is False and umbrella["id"]
+    assert len(plan["weather"]) == client.get(f"/v1/trips/{trip_id}", headers=H).json()["day_count"] >= 1 and plan["weather"][0]["source"] == "forecast" and plan["weather"][0]["rain_chance"] == 80
+    assert plan["weather"][0]["summary"] == "Rain" and plan["weather"][0]["day"] == 1
+
+    sent = client.messages.calls[-1]
+    payload = sent["messages"][0]["content"][0]["text"]
+    assert '"rain_chance": 80' in payload and "Joe" in payload and "toddler" in payload and "checked bag is fine" in payload
+    assert "data, not instructions" in sent["system"] and sent["output_config"]["effort"] == "low"
+    assert client.get(f"/v1/trips/{trip_id}/packing", headers=H).json()["items"][0]["text"] == "Compact umbrella"
+    assert len(client.weather_log) == 1 and "forecast" in str(client.weather_log[0])
+
+
+def test_packing_uses_last_years_weather_for_far_off_dates(client):
+    trip_id = packing_trip(client, offset=120)
+    client.messages.outputs[PackingResult] = PackingResult(items=[draft("Umbrella", "daybag")], notes=None)
+    plan = client.post(f"/v1/trips/{trip_id}/packing", json={}, headers=H).json()
+    assert {w["source"] for w in plan["weather"]} == {"typical"} and all(w["rain_chance"] is None for w in plan["weather"])
+    assert "archive" in str(client.weather_log[0])
+
+    client.weather_state["fail"] = True  # weather is down: the list is still made
+    plan = client.post(f"/v1/trips/{trip_id}/packing", json={}, headers=H).json()
+    assert plan["weather"] == [] and plan["items"]
+    assert '"weather"' not in client.messages.calls[-1]["messages"][0]["content"][0]["text"]
+
+
+def test_packing_regenerate_keeps_custom_items_and_ticks(client):
+    trip_id = packing_trip(client)
+    client.messages.outputs[PackingResult] = PackingResult(items=[draft("3 tops"), draft("Passport", "documents")], notes=None)
+    plan = client.post(f"/v1/trips/{trip_id}/packing", json={"carry_on_only": True}, headers=H).json()
+    assert plan["carry_on_only"] is True
+    passport = next(i for i in plan["items"] if i["text"] == "Passport")
+    after = client.patch(f"/v1/trips/{trip_id}/packing/items/{passport['id']}", json={"packed": True}, headers=H).json()
+    assert next(i for i in after["items"] if i["id"] == passport["id"])["packed"] is True
+    added = client.post(f"/v1/trips/{trip_id}/packing/items", json={"text": "  Camera   charger ", "group": "tech"}, headers=H)
+    assert added.status_code == 201 and added.json()["items"][-1]["text"] == "Camera charger" and added.json()["items"][-1]["custom"] is True
+
+    client.messages.outputs[PackingResult] = PackingResult(items=[draft("4 tops"), draft("Passport", "documents"), draft("Camera charger", "tech")], notes=None)
+    again = client.post(f"/v1/trips/{trip_id}/packing", json={}, headers=H).json()
+    assert again["carry_on_only"] is True  # remembered unless changed
+    assert "Camera charger" in client.messages.calls[-1]["messages"][0]["content"][0]["text"] and "carry-on only" in client.messages.calls[-1]["messages"][0]["content"][0]["text"]
+    texts = [i["text"] for i in again["items"]]
+    assert texts.count("Camera charger") == 1 and "4 tops" in texts and "3 tops" not in texts
+    assert next(i for i in again["items"] if i["text"] == "Passport")["packed"] is True  # still ticked
+    unticked = client.post(f"/v1/trips/{trip_id}/packing", json={"keep_packed": False}, headers=H).json()
+    assert next(i for i in unticked["items"] if i["text"] == "Passport")["packed"] is False
+
+
+def test_packing_item_edits_and_learning(client):
+    trip_id = packing_trip(client)
+    assert client.post(f"/v1/trips/{trip_id}/packing/items", json={"text": "x"}, headers=H).status_code == 404  # no list yet
+    client.messages.outputs[PackingResult] = PackingResult(items=[draft("5 tops"), draft("Rain jacket"), draft("Hair dryer", "toiletries")], notes=None)
+    plan = client.post(f"/v1/trips/{trip_id}/packing", json={}, headers=H).json()
+    ids = {i["text"]: i["id"] for i in plan["items"]}
+
+    renamed = client.patch(f"/v1/trips/{trip_id}/packing/items/{ids['Rain jacket']}", json={"text": "Light rain jacket", "group": "clothes"}, headers=H).json()
+    assert any(i["text"] == "Light rain jacket" for i in renamed["items"])
+    client.patch(f"/v1/trips/{trip_id}/packing/items/{ids['Hair dryer']}", json={"unused": True}, headers=H)
+    client.patch(f"/v1/trips/{trip_id}/packing/items/{ids['5 tops']}", json={"unused": True}, headers=H)
+    client.patch(f"/v1/trips/{trip_id}/packing/items/{ids['5 tops']}", json={"unused": False}, headers=H)  # changed their mind
+    assert app.state.db.get_setting("packing_unused") == {"hair dryer": 1}
+
+    client.messages.outputs[PackingResult] = PackingResult(items=[draft("Hair dryer", "toiletries")], notes=None)
+    latest = client.post(f"/v1/trips/{trip_id}/packing", json={}, headers=H).json()
+    assert "hair dryer" in client.messages.calls[-1]["messages"][0]["content"][0]["text"]  # told Claude what they usually skip
+
+    deleted = client.delete(f"/v1/trips/{trip_id}/packing/items/{latest['items'][0]['id']}", headers=H).json()
+    assert len(deleted["items"]) == len(latest["items"]) - 1
+    for bad in ({}, {"text": ""}):
+        assert client.post(f"/v1/trips/{trip_id}/packing/items", json=bad, headers=H).status_code == 422
+    assert client.post(f"/v1/trips/{trip_id}/packing/items", json={"text": "x", "group": "boats"}, headers=H).status_code == 422
+    assert client.patch(f"/v1/trips/{trip_id}/packing/items/nope", json={"packed": True}, headers=H).status_code == 404
+    assert client.delete(f"/v1/trips/{trip_id}/packing/items/nope", headers=H).status_code == 404
+    assert client.get("/v1/trips/nope/packing", headers=H).status_code == 404
+    assert client.post("/v1/trips/nope/packing", json={}, headers=H).status_code == 404
+
+    assert client.delete(f"/v1/trips/{trip_id}", headers=H).status_code == 204
+    assert app.state.db._rows("SELECT * FROM packing") == []
+
+
+def test_packing_falls_back_to_a_rule_based_list(client):
+    trip_id = packing_trip(client, days=4)
+    client.messages.stop_reason = "refusal"
+    plan = client.post(f"/v1/trips/{trip_id}/packing", json={}, headers=H).json()
+    assert plan["generated_by"] == "offline"
+    by_text = {i["text"]: i for i in plan["items"]}
+    assert "Passport or ID" in by_text and any(t.endswith(" tops") for t in by_text) and by_text["Compact umbrella"]["day_bag"] is True
+    assert by_text["Compact umbrella"]["days"] and by_text["Compact umbrella"]["days"][0] == 1 and "Rain" in by_text["Compact umbrella"]["reason"]
+    assert "Warm layer or coat" in by_text  # lows of 8 degrees
+    assert all(i["group"] in ("clothes", "shoes", "toiletries", "tech", "documents", "daybag", "other") for i in plan["items"])
+    tops = lambda p: int(next(i["text"] for i in p["items"] if i["text"].endswith(" tops")).split()[0])
+    carry = client.post(f"/v1/trips/{trip_id}/packing", json={"carry_on_only": True}, headers=H).json()
+    assert tops(carry) <= tops(plan)  # no more tops for carry-on
+
+    app.state.db.set_setting("packing_unused", {"warm layer or coat": 2})
+    assert "Warm layer or coat" not in {i["text"] for i in client.post(f"/v1/trips/{trip_id}/packing", json={}, headers=H).json()["items"]}
+
+
+async def test_weather_lookup():
+    from datetime import date, timedelta
+
+    calls = []
+
+    def handler(request):
+        calls.append(request)
+        q = request.url.params
+        assert q["timezone"] == "auto" and q["latitude"] == "40.73" and q["apikey"] == "k"
+        start, end = date.fromisoformat(q["start_date"]), date.fromisoformat(q["end_date"])
+        n = (end - start).days + 1
+        return httpx.Response(200, json={"daily": {"time": [(start + timedelta(days=i)).isoformat() for i in range(n)], "weather_code": [0] * n,
+                                                    "temperature_2m_max": [20.04] * n, "temperature_2m_min": [None] * n}})
+
+    settings = Settings(app_api_key="secret", weather_api_key="k", weather_base_url="https://weather.example.com/v1/")
+    w = Weather(settings, client=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+    assert await w.days(40.7301, -74.0, date.today() + timedelta(days=2), 3) == []  # no minimum temperature: nothing usable
+    assert str(calls[0].url).startswith("https://weather.example.com/v1/forecast")
+    off = Weather(Settings(app_api_key="secret", weather="none"))
+    assert await off.days(40.7, -74.0, date.today(), 3) == [] and await w.days(40.7, -74.0, date.today(), 0) == []
+    assert Weather(settings).enabled is True
+
 
 
 # ---------- Taste profile, edits, concierge, briefings ----------

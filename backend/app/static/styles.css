@@ -730,7 +730,7 @@ html[data-vt="seg"]::view-transition-new(root) { animation: vt-fade-only 0.26s e
 .pillbtn:active { transform: scale(0.95); }
 .pillbtn.on { background: var(--accent); color: var(--accent-ink); box-shadow: none; }
 .pillbtn:not(.on)::after { content: ""; width: 6px; height: 6px; border-right: 1.6px solid currentColor; border-bottom: 1.6px solid currentColor; transform: rotate(45deg) translate(-2px, -2px); opacity: 0.6; }
-.pillbtn[data-act="selecttoggle"]::after { display: none; }
+.pillbtn[data-act="selecttoggle"]::after, .pillbtn[data-act="packcarry"]::after { display: none; }
 .prow { gap: 12px; padding-right: 8px; }
 .starbtn { border: 0; background: none; color: var(--tertiary); width: 44px; height: 44px; margin: -6px 0 -6px 0; display: grid; place-items: center; cursor: pointer; flex-shrink: 0;
   border-radius: 22px; transition: transform 0.25s var(--spring), color 0.2s; }
@@ -794,3 +794,17 @@ button.row.sel { cursor: pointer; }
 .wideselect { width: 100%; font-size: 17px; padding: 0; margin: 0; text-align: left; text-align-last: left; }
 .qreserve { background: var(--accent); color: var(--accent-ink); }
 .qreserve .tile { background: color-mix(in srgb, var(--accent-ink) 16%, transparent); color: var(--accent-ink); }
+
+/* ---------- Packing list ---------- */
+.pitem { flex: 1; min-width: 0; display: flex; align-items: center; gap: 14px; border: 0; background: none; padding: 0; font: inherit; color: inherit; text-align: left; cursor: pointer; }
+.pitem .check { flex-shrink: 0; }
+.pitem.picked .check { background: var(--accent); color: var(--accent-ink); box-shadow: none; }
+.wxstrip { display: flex; gap: 10px; overflow-x: auto; padding: 2px 16px 6px; scrollbar-width: none; }
+.wxstrip::-webkit-scrollbar { display: none; }
+.wx { flex-shrink: 0; min-width: 104px; display: grid; gap: 2px; padding: 12px 14px; border-radius: 16px; background: var(--cell); }
+.wx .d { font-size: 11px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--secondary); }
+.wx .t { font-family: var(--serif); font-size: 24px; line-height: 1.1; }
+.wx .s { font-size: 13px; color: var(--secondary); }
+.packcard { display: block; text-decoration: none; color: inherit; }
+.packcard .row { cursor: pointer; }
+.empty .spinner.big { width: 34px; height: 34px; border-width: 3px; margin-bottom: 8px; }

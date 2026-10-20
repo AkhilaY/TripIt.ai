@@ -108,6 +108,8 @@ const S = {
   menuBusy: {},         // placeId -> true while a menu is being looked up
   menuDiet: {},         // placeId -> dietary filter on the menu
   bkflow: null,         // confirmations read by Claude, being checked one by one
+  packing: {},          // tripId -> packing list (null when none yet)
+  packBusy: {},         // tripId -> true while a list is being made
   reserveTried: {},     // placeId -> already looked for a booking link this visit
 };
 
@@ -184,17 +186,18 @@ function route() {
   if (parts[0] === 'trip' && parts[1]) return { name: 'trip', id: parts[1], mode: parts[2] || 'places', params };
   if (parts[0] === 'place' && parts[1]) return { name: 'place', id: parts[1], mode: parts[2] === 'menu' ? 'menu' : 'overview', params };
   if (parts[0] === 'today' && parts[1]) return { name: 'today', id: parts[1], params };
+  if (parts[0] === 'packing' && parts[1]) return { name: 'packing', id: parts[1], params };
   if (parts[0] === 'edit' && parts[1] && parts[2]) return { name: 'edit', id: parts[1], editId: parts[2], params };
   if (['map', 'imports', 'settings', 'setup', 'add', 'concierge', 'taste'].includes(parts[0])) return { name: parts[0], params };
   return { name: 'trips', params };
 }
 
 const TAB_FOR = {
-  trips: 'trips', trip: 'trips', place: 'trips', today: 'trips', edit: 'trips', map: 'map', concierge: 'concierge',
+  trips: 'trips', trip: 'trips', place: 'trips', today: 'trips', edit: 'trips', packing: 'trips', map: 'map', concierge: 'concierge',
   imports: 'imports', settings: 'settings', taste: 'settings', add: 'trips',
 };
 const TAB_INDEX = { trips: 0, map: 1, concierge: 2, imports: 3, settings: 4 };
-const DEPTH = { trip: 1, today: 1, taste: 1, edit: 2, place: 2 };
+const DEPTH = { trip: 1, today: 1, taste: 1, packing: 1, edit: 2, place: 2 };
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
 let renderToken = 0;
 let lastKey = '';
@@ -1069,7 +1072,13 @@ const VIEWS = {
       <div class="subtitle"><span>${esc(meta)}</span><span class="tiles-inline" aria-hidden="true">${cats.slice(0, 6).map((c) => catTile(c, 'sm')).join('')}</span>
         ${trip.share_token ? `<button class="chip-shared" data-act="sharetrip" data-id="${trip.id}">${ICON.link}Shared</button>` : ''}</div>${seg}`;
 
-    if (mode === 'places') return head + editsSection(trip) + placesList(trip);
+    if (mode === 'places') {
+      if (S.packing[trip.id] === undefined) { // for the packing card's progress
+        S.packing[trip.id] = null;
+        api(`/v1/trips/${trip.id}/packing`).then((list) => { S.packing[trip.id] = list; render({ quiet: true }); }).catch(() => { delete S.packing[trip.id]; });
+      }
+      return head + packingCard(trip) + editsSection(trip) + placesList(trip);
+    }
     if (mode === 'itinerary') return { html: head + itinerary(trip), after: () => loadLegs(trip) };
     if (mode === 'bookings') return head + bookingsView(trip);
 
@@ -1085,6 +1094,13 @@ const VIEWS = {
         ${missing ? `<div class="mapnote">${plural(missing, 'place')} not on the map yet</div>` : ''}</div>`,
       after: () => renderMap($('#trip-map'), shown, { route: !!day, popup: popupHtml, newIds: S.newIds, pad: { top: chips ? 70 : 40, bottom: 120 } }),
     };
+  },
+
+  async packing(r) {
+    const trip = await cachedTrip(r.id);
+    const body = await packingView(trip);
+    return `${navbar('Packing', { back: `#/trip/${trip.id}`, backLabel: trip.name })}<h1 class="largetitle" data-anchor>Packing</h1>
+      <div class="subtitle"><span>${esc([trip.name, trip.start_date ? dayDate(trip.start_date, 1) : '', trip.day_count ? plural(trip.day_count, 'day') : ''].filter(Boolean).join(' · '))}</span></div>${body}`;
   },
 
   async today(r) {
@@ -1118,10 +1134,12 @@ const VIEWS = {
         ? `<div class="row"><a class="rowlink" href="#/place/${p.id}">${inner}</a><button class="linkbtn" data-act="undone" data-id="${p.id}" aria-label="Mark ${esc(p.name)} not visited">Undo</button></div>`
         : `<a class="row" href="#/place/${p.id}">${inner}${ICON.chev}</a>`;
     };
+    const bag = await todayBag(trip, day);
     const html = `${head(title)}<h1 class="largetitle" data-anchor>${title}</h1>
       <div class="subtitle"><span>${esc([dayDate(trip.start_date, day), trip.name, trip.day_titles[day - 1]].filter(Boolean).join(' · '))}</span></div>
       ${pills}
       ${dayBookings(trip, day).length ? `<div class="section"><div class="section-h">Booked today</div>${bookingRows(dayBookings(trip, day))}</div>` : ''}
+      ${bag}
       <div class="section"><div class="progress big" aria-label="${done.length} of ${list.length} stops done"><i style="width:${list.length ? Math.round((done.length / list.length) * 100) : 0}%"></i></div>
         <div class="section-f">${done.length} of ${plural(list.length, 'stop')} done</div></div>
       ${list.length ? `<div class="section"><div class="briefing" id="briefing">${S.briefing[briefKey] ? briefingHtml(S.briefing[briefKey]) : '<div class="brief-skel"></div>'}</div></div>` : ''}
@@ -2141,6 +2159,108 @@ function checkReservePending() {
     { title: `Did you book ${p.name}?` });
 }
 
+// ---------- Packing list ----------
+
+const PACK_GROUPS = [['clothes', 'Clothes'], ['shoes', 'Shoes & accessories'], ['toiletries', 'Toiletries & health'], ['tech', 'Tech & power'],
+  ['documents', 'Documents & money'], ['daybag', 'Day bag'], ['other', 'Other']];
+const useFahrenheit = /^en-US/i.test(navigator.language || '');
+const fmtTemp = (c) => `${Math.round(useFahrenheit ? (c * 9) / 5 + 32 : c)}°`;
+const dayList = (days) => (days.length > 3 ? `Days ${days[0]}–${days[days.length - 1]}` : `Day${days.length > 1 ? 's' : ''} ${days.join(', ')}`);
+
+function weatherStrip(list) {
+  if (!list.weather.length) return '';
+  const typical = list.weather.every((w) => w.source === 'typical');
+  return `<div class="section"><div class="section-h">${ICON.sun}Weather</div><div class="wxstrip">${list.weather.map((w) => `<div class="wx">
+      <span class="d">${w.date ? esc(fmtDay(parseWhen(w.date).day)) : `Day ${w.day}`}</span><span class="t">${fmtTemp(w.temp_max)} / ${fmtTemp(w.temp_min)}</span>
+      <span class="s">${esc(w.summary)}${w.rain_chance != null ? ` · ${w.rain_chance}%` : ''}</span></div>`).join('')}</div>
+    <div class="section-f">${typical ? 'Too far ahead for a forecast, so these are last year’s conditions for the same dates.' : 'Forecast. It can change, so check again before you pack.'}</div></div>`;
+}
+
+function packItem(i) {
+  return `<div class="row prow"><button class="pitem${i.packed ? ' picked' : ''}" data-act="packtick" data-id="${i.id}" aria-pressed="${i.packed}">
+      <span class="check" aria-hidden="true">${i.packed ? ICON.done : ''}</span>
+      <span class="main"><span class="t ${i.packed ? 'strike' : ''}">${esc(i.text)}</span>
+        ${i.reason || i.days.length ? `<span class="s">${esc(i.reason || '')}${i.days.length ? `<span class="daychip">${esc(dayList(i.days))}</span>` : ''}</span>` : ''}</span></button>
+    <button class="starbtn" data-act="packmenu" data-id="${i.id}" aria-label="Options for ${esc(i.text)}">${ICON.more}</button></div>`;
+}
+
+async function packingView(trip) {
+  if (S.packing[trip.id] === undefined) {
+    try { S.packing[trip.id] = await api(`/v1/trips/${trip.id}/packing`); } catch (e) { return `<div class="error" role="alert">${esc(e.message)}</div>`; }
+  }
+  const list = S.packing[trip.id];
+  if (S.packBusy[trip.id]) {
+    return `<div class="empty"><span class="spinner big"></span><h3>Packing for ${esc(trip.city || trip.name)}</h3>
+      <p>Looking at your days, the weather and your taste. This can take up to a minute.</p></div>`;
+  }
+  if (!list) {
+    return emptyState('teal', 'bag', 'A packing list for this trip',
+      `Built from your ${trip.day_count ? plural(trip.day_count, 'planned day') : 'saved places'}${trip.start_date ? ', the weather on your dates' : ''} and your taste, with a reason for what’s on it. Not a list you could write in a notes app.`,
+      `<button class="btn" data-act="makepacking" data-id="${trip.id}">${ICON.sparkle}Make my list</button>
+       ${trip.start_date ? '' : '<div class="section-f">Add a start date to your trip and it will use the weather too.</div>'}`);
+  }
+  const packed = list.items.filter((i) => i.packed).length;
+  const groups = PACK_GROUPS.map(([id, label]) => [id, label, list.items.filter((i) => i.group === id)]).filter(([, , items]) => items.length);
+  return `<div class="planbar"><span class="planned-by">${list.generated_by === 'claude' ? `${ICON.sparkle}Made for this trip` : 'Basic list (Claude unavailable)'}</span>
+      <span class="planlinks"><button class="linkbtn" data-act="makepacking" data-id="${trip.id}" data-again="1">Remake</button></span></div>
+    <div class="homectl"><button class="pillbtn${list.carry_on_only ? ' on' : ''}" data-act="packcarry" data-id="${trip.id}" aria-pressed="${list.carry_on_only}">Carry-on only</button></div>
+    ${list.notes ? `<div class="section"><div class="group"><div class="notecard">${esc(list.notes)}</div></div></div>` : ''}
+    ${weatherStrip(list)}
+    <div class="section"><div class="progress big" aria-label="${packed} of ${list.items.length} packed"><i style="width:${list.items.length ? Math.round((packed / list.items.length) * 100) : 0}%"></i></div>
+      <div class="section-f">${packed} of ${list.items.length} packed</div></div>
+    ${groups.map(([id, label, items]) => `<div class="section"><h2 class="section-title">${esc(label)}<span class="count">${items.length}</span></h2>
+      <div class="group thumbs">${items.map(packItem).join('')}</div></div>`).join('')}
+    <div class="section"><button class="btn tint wide" data-act="packadd" data-id="${trip.id}">${ICON.plus}Add an item</button>
+      <div class="section-f">Back from the trip? Tap ••• on anything you didn’t use and it’s left off next time. Things you add stay when you remake the list.</div></div>`;
+}
+
+function packingCard(trip) {
+  const list = S.packing[trip.id];
+  const packed = list ? list.items.filter((i) => i.packed).length : 0;
+  return `<div class="section"><a class="group tiles packcard" href="#/packing/${trip.id}"><span class="row">${tile('teal', 'bag')}<span class="main"><span class="t">Packing list</span>
+    <span class="s">${list ? `${packed} of ${list.items.length} packed` : 'Made for this trip, with the weather'}</span></span>${ICON.chev}</span></a></div>`;
+}
+
+/** Today's bag: what to carry out for the day, from the trip's packing list. */
+async function todayBag(trip, day) {
+  try { S.packing[trip.id] = await api(`/v1/trips/${trip.id}/packing`); } catch { /* offline or none: use what we have */ }
+  const list = S.packing[trip.id];
+  if (!list) return '';
+  const items = list.items.filter((i) => i.day_bag && (!i.days.length || i.days.includes(day)));
+  if (!items.length) return '';
+  return `<div class="section"><div class="section-h">${ICON.bag}Today’s bag</div><div class="group tiles">${items.map((i) => `<a class="row" href="#/packing/${trip.id}">
+    <span class="main"><span class="t">${esc(i.text)}</span>${i.reason ? `<span class="s">${esc(i.reason)}</span>` : ''}</span></a>`).join('')}</div></div>`;
+}
+
+function packAddSheet(trip) {
+  const st = { text: '', group: 'other' };
+  openSheet({
+    type: 'form', title: 'Add an item', confirm: 'Add', st,
+    body: () => `<div class="section"><div class="group"><div class="row"><input class="field" data-act="packfield" data-f="text" placeholder="e.g. Camera charger" value="${esc(st.text)}" aria-label="Item" autocomplete="off"></div>
+      <div class="row"><label class="main"><span class="s">Group</span><select class="select wideselect" data-act="packfield" data-f="group">
+        ${PACK_GROUPS.map(([id, label]) => `<option value="${id}" ${st.group === id ? 'selected' : ''}>${label}</option>`).join('')}</select></label></div></div></div>`,
+    async ok() {
+      if (!st.text.trim()) { toast('What should be on the list?', true); return; }
+      S.packing[trip.id] = await api(`/v1/trips/${trip.id}/packing/items`, { method: 'POST', body: { text: st.text.trim(), group: st.group } });
+      closeSheet();
+      render();
+    },
+  });
+}
+
+async function makePacking(trip, body = {}) {
+  S.packBusy[trip.id] = true;
+  render();
+  try {
+    S.packing[trip.id] = await api(`/v1/trips/${trip.id}/packing`, { method: 'POST', body });
+  } catch (e) {
+    toast(e.message, true);
+  } finally {
+    delete S.packBusy[trip.id];
+    render();
+  }
+}
+
 /** Brings a trip's places into the caches after the itinerary changed on the server. */
 function syncTrip(res) {
   S.trip[res.id] = res;
@@ -2340,6 +2460,7 @@ async function saveOffline(tripId, quiet = false) {
     urls.push(photoUrl(ph, 1000));
   }));
   for (let d = 1; d <= trip.day_count; d++) urls.push(`/v1/trips/${tripId}/days/${d}/legs`);
+  urls.push(`/v1/trips/${tripId}/packing`);
   if (!quiet) toast(`Saving ${trip.name} for offline…`);
   let failed = 0;
   for (let i = 0; i < urls.length; i += 6) {
@@ -2511,6 +2632,7 @@ async function onAction(act, el) {
       const actions = [
         { label: t.day_count ? 'Re-plan trip' : 'Plan my trip', run: () => planSheet(t) },
         { label: 'Add a place', run: () => addSheet({ tripId: t.id }) },
+        { label: 'Packing list', run: () => go(`#/packing/${t.id}`) },
         { label: 'Save for offline', run: () => saveOffline(t.id) },
         { label: 'Rename', run: () => renameSheet(t) },
         { label: 'Update hours, photos & ratings', run: async () => {
@@ -2641,6 +2763,37 @@ async function onAction(act, el) {
       return;
     }
     case 'tidy': tidySheet(S.trip[el.dataset.id]); return;
+    case 'makepacking': await makePacking(S.trip[el.dataset.id]); return;
+    case 'packcarry': {
+      const trip = S.trip[el.dataset.id];
+      await makePacking(trip, { carry_on_only: !(S.packing[trip.id] && S.packing[trip.id].carry_on_only) });
+      return;
+    }
+    case 'packadd': packAddSheet(S.trip[el.dataset.id]); return;
+    case 'packfield': S.sheet.st[el.dataset.f] = el.value; return;
+    case 'packtick': {
+      const trip = Object.values(S.trip).find((t) => S.packing[t.id] && S.packing[t.id].items.some((i) => i.id === el.dataset.id));
+      const item = trip && S.packing[trip.id].items.find((i) => i.id === el.dataset.id);
+      if (!item) return;
+      item.packed = !item.packed; // instant; the server catches up
+      render({ quiet: true });
+      try {
+        S.packing[trip.id] = await api(`/v1/trips/${trip.id}/packing/items/${item.id}`, { method: 'PATCH', body: { packed: item.packed } });
+      } catch (e) { item.packed = !item.packed; toast(e.message, true); }
+      render({ quiet: true });
+      return;
+    }
+    case 'packmenu': {
+      const trip = Object.values(S.trip).find((t) => S.packing[t.id] && S.packing[t.id].items.some((i) => i.id === el.dataset.id));
+      const item = trip && S.packing[trip.id].items.find((i) => i.id === el.dataset.id);
+      if (!item) return;
+      const patch = async (body, message) => { S.packing[trip.id] = await api(`/v1/trips/${trip.id}/packing/items/${item.id}`, { method: 'PATCH', body }); if (message) toast(message); render(); };
+      openSheet({ type: 'actions', title: item.text, actions: [
+        { label: item.unused ? 'I did use this' : 'I didn’t use this', run: () => patch({ unused: !item.unused }, item.unused ? 'Noted' : 'Noted. It’s left off next time') },
+        { label: 'Delete', destructive: true, run: async () => { S.packing[trip.id] = await api(`/v1/trips/${trip.id}/packing/items/${item.id}`, { method: 'DELETE' }); render(); } },
+      ] });
+      return;
+    }
     case 'link': return;
     case 'addbooking': addBookingSheet(S.trip[el.dataset.id]); return;
     case 'bkmanual': bookingForm(S.trip[el.dataset.id], {}, {}); return;
@@ -2884,6 +3037,7 @@ document.addEventListener('input', (ev) => {
   const el = ev.target;
   if (el.dataset && ['notes', 'prefs'].includes(el.dataset.act)) onAction(el.dataset.act, el);
   if (el.dataset && el.dataset.act === 'bkfield' && el.dataset.f !== 'kind' && S.sheet && S.sheet.st) onAction('bkfield', el);
+  if (el.dataset && el.dataset.act === 'packfield' && el.dataset.f === 'text' && S.sheet && S.sheet.st) onAction('packfield', el);
   if (el.dataset && el.dataset.act === 'addinput') addInputChanged(el.value);
   if (el.dataset && el.dataset.act === 'tastenotes' && S.taste) S.taste.p.notes = el.value;
   if (el.dataset && el.dataset.act === 'tidytext' && S.sheet && S.sheet.st) S.sheet.st.text = el.value;

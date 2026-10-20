@@ -133,6 +133,12 @@ CREATE TABLE IF NOT EXISTS bookings (
     created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS packing (
+    trip_id TEXT PRIMARY KEY REFERENCES trips(id) ON DELETE CASCADE,
+    data TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS menus (
     place_id TEXT PRIMARY KEY REFERENCES places(id) ON DELETE CASCADE,
     status TEXT NOT NULL,
@@ -455,6 +461,16 @@ class Database:
 
     def set_setting(self, key: str, value: Any) -> None:
         self._exec("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (key, json.dumps(value, default=str)))
+
+    # ---------- Packing ----------
+
+    def get_packing(self, trip_id: str) -> Optional[dict]:
+        rows = self._rows("SELECT data FROM packing WHERE trip_id = ?", (trip_id,))
+        return json.loads(rows[0]["data"]) if rows else None
+
+    def save_packing(self, trip_id: str, data: dict) -> None:
+        self._exec("INSERT OR REPLACE INTO packing (trip_id, data, updated_at) VALUES (?, ?, ?)",
+                   (trip_id, json.dumps(data, default=str), now().isoformat()))
 
     # ---------- Bookings ----------
 

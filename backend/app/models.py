@@ -229,6 +229,68 @@ class ReadBookingsRequest(BaseModel):
     images: list[str] = Field(default=[], max_length=6, description="Base64 JPEG images (data: URLs are fine).")
 
 
+# ---------- Packing ----------
+
+PackingGroup = Literal["clothes", "shoes", "toiletries", "tech", "documents", "daybag", "other"]
+
+
+class WeatherDay(BaseModel):
+    day: int  # trip day, from 1
+    date: str  # YYYY-MM-DD
+    summary: str  # "Light rain", "Sunny", ...
+    temp_min: float  # degrees Celsius
+    temp_max: float
+    rain_chance: Optional[int] = None  # percent; known for forecasts only
+    source: Literal["forecast", "typical"]  # typical = the same dates last year
+
+
+class PackingDraftItem(BaseModel):
+    text: str = Field(description="The thing to pack, with a quantity when it matters: '5 tops', 'Compact umbrella'.")
+    group: PackingGroup
+    reason: Optional[str] = Field(description="Why it's on this trip's list, under 14 words, tied to the weather, a stop or a day. Null for obvious basics.")
+    days: list[int] = Field(description="Trip days (from 1) when it matters, for rain gear or an outfit for one evening. Empty when it applies to the whole trip.")
+    day_bag: bool = Field(description="True when it goes in the bag carried out each day (umbrella, sunscreen, scarf for a temple, charger).")
+
+
+class PackingResult(BaseModel):
+    items: list[PackingDraftItem]
+    notes: Optional[str] = Field(description="One short line on the trip's conditions and what they mean for packing, or null.")
+
+
+class PackingItem(BaseModel):
+    id: str
+    text: str
+    group: PackingGroup = "other"
+    reason: Optional[str] = None
+    days: list[int] = []
+    day_bag: bool = False
+    packed: bool = False
+    unused: bool = False  # marked after the trip: left out of future lists
+    custom: bool = False  # added by the person, kept when the list is made again
+
+
+class PackingList(BaseModel):
+    trip_id: str
+    items: list[PackingItem]
+    weather: list[WeatherDay] = []
+    notes: Optional[str] = None
+    carry_on_only: bool = False
+    generated_by: Literal["claude", "offline"] = "offline"
+    generated_at: datetime
+
+
+class PackingRequest(BaseModel):
+    carry_on_only: Optional[bool] = None
+    keep_packed: bool = True
+
+
+class PackingItemInput(BaseModel):
+    text: Optional[str] = Field(default=None, min_length=1, max_length=120)
+    group: Optional[PackingGroup] = None
+    packed: Optional[bool] = None
+    unused: Optional[bool] = None
+
+
 # ---------- Menus ----------
 
 MenuTag = Literal["vegetarian", "vegan", "gluten_free", "spicy"]

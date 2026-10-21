@@ -1487,12 +1487,12 @@ async function menuSection(p) {
     <button class="linkbtn" data-act="menuupload" data-id="${p.id}">Add a photo or PDF of the menu</button>`;
   if (m.status === 'unknown') {
     return emptyState('accent', 'book', 'See the menu',
-      `We’ll look for it ${site ? 'on the website' : 'online'} and lay it out neatly here.`,
+      `We’ll look for it ${site ? 'on the website' : 'online'} and lay it out neatly here. If it’s only on Google, a screenshot works too.`,
       `<button class="btn" data-act="findmenu" data-id="${p.id}">${ICON.search}Find the menu</button>${siteBtn}`);
   }
   if (m.status === 'none') {
     return `${emptyState('gray', 'book', 'No menu found',
-      'We couldn’t find a menu we could read. Some places only post theirs on Instagram or a delivery app.',
+      'We couldn’t find a menu we could read. Some places only post theirs on Instagram or a delivery app. Seen it on Google? Screenshot the menu there and add it here.',
       `<button class="btn tint" data-act="findmenu" data-id="${p.id}" data-refresh="1">Try again</button>${siteBtn}${links}`)}
       ${m.trace && m.trace.length ? `<div class="section"><div class="section-h">What we tried</div><div class="group"><div class="notecard"><ul class="trace">${m.trace.map((t) => `<li>${esc(t)}</li>`).join('')}</ul></div></div></div>` : ''}`;
   }

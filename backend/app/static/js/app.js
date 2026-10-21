@@ -109,6 +109,8 @@ const S = {
   menuDiet: {},         // placeId -> dietary filter on the menu
   bkflow: null,         // confirmations read by Claude, being checked one by one
   packing: {},          // tripId -> packing list (null when none yet)
+  events: {},           // tripId -> events during the trip (null while loading)
+  eventFilter: {},      // tripId -> chosen filter on the events page
   packBusy: {},         // tripId -> true while a list is being made
   reserveTried: {},     // placeId -> already looked for a booking link this visit
 };
@@ -187,17 +189,18 @@ function route() {
   if (parts[0] === 'place' && parts[1]) return { name: 'place', id: parts[1], mode: parts[2] === 'menu' ? 'menu' : 'overview', params };
   if (parts[0] === 'today' && parts[1]) return { name: 'today', id: parts[1], params };
   if (parts[0] === 'packing' && parts[1]) return { name: 'packing', id: parts[1], params };
+  if (parts[0] === 'events' && parts[1]) return { name: 'events', id: parts[1], params };
   if (parts[0] === 'edit' && parts[1] && parts[2]) return { name: 'edit', id: parts[1], editId: parts[2], params };
   if (['map', 'imports', 'settings', 'setup', 'add', 'concierge', 'taste'].includes(parts[0])) return { name: parts[0], params };
   return { name: 'trips', params };
 }
 
 const TAB_FOR = {
-  trips: 'trips', trip: 'trips', place: 'trips', today: 'trips', edit: 'trips', packing: 'trips', map: 'map', concierge: 'concierge',
+  trips: 'trips', trip: 'trips', place: 'trips', today: 'trips', edit: 'trips', packing: 'trips', events: 'trips', map: 'map', concierge: 'concierge',
   imports: 'imports', settings: 'settings', taste: 'settings', add: 'trips',
 };
 const TAB_INDEX = { trips: 0, map: 1, concierge: 2, imports: 3, settings: 4 };
-const DEPTH = { trip: 1, today: 1, taste: 1, packing: 1, edit: 2, place: 2 };
+const DEPTH = { trip: 1, today: 1, taste: 1, packing: 1, events: 1, edit: 2, place: 2 };
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
 let renderToken = 0;
 let lastKey = '';
@@ -772,7 +775,7 @@ const TASTE_STEPS = [
   { key: 'food', q: 'What do you look for at the table?', options: ['Fine dining', 'Neighbourhood favourites', 'Street food',
     'Cafés & bakeries', 'Natural wine', 'Cocktail bars', 'Seafood', 'Vegetarian-friendly'] },
   { key: 'interests', q: 'What makes a trip for you?', options: ['Design & architecture', 'Art & museums', 'Fashion & boutiques',
-    'Views & nature', 'Wellness & spas', 'Nightlife', 'History', 'Markets'] },
+    'Views & nature', 'Wellness & spas', 'Nightlife', 'History', 'Markets', 'Live music', 'Theatre & comedy', 'Sports'] },
   { key: 'mornings', q: 'And your mornings?', single: true, notes: true, options: [
     ['early', 'Early riser', 'First in line, golden light'], ['late', 'Late starts', 'Nothing before ten']] },
 ];
@@ -1077,7 +1080,8 @@ const VIEWS = {
         S.packing[trip.id] = null;
         api(`/v1/trips/${trip.id}/packing`).then((list) => { S.packing[trip.id] = list; render({ quiet: true }); }).catch(() => { delete S.packing[trip.id]; });
       }
-      return head + packingCard(trip) + editsSection(trip) + placesList(trip);
+      loadEvents(trip.id);
+      return head + packingCard(trip) + eventsCard(trip) + editsSection(trip) + placesList(trip);
     }
     if (mode === 'itinerary') return { html: head + itinerary(trip), after: () => loadLegs(trip) };
     if (mode === 'bookings') return head + bookingsView(trip);
@@ -1101,6 +1105,12 @@ const VIEWS = {
     const body = await packingView(trip);
     return `${navbar('Packing', { back: `#/trip/${trip.id}`, backLabel: trip.name })}<h1 class="largetitle" data-anchor>Packing</h1>
       <div class="subtitle"><span>${esc([trip.name, trip.start_date ? dayDate(trip.start_date, 1) : '', trip.day_count ? plural(trip.day_count, 'day') : ''].filter(Boolean).join(' · '))}</span></div>${body}`;
+  },
+
+  async events(r) {
+    const trip = await cachedTrip(r.id);
+    return `${navbar('What’s on', { back: `#/trip/${trip.id}`, backLabel: trip.name })}<h1 class="largetitle" data-anchor>What’s on</h1>
+      <div class="subtitle"><span>${esc([trip.name, trip.start_date ? dayDate(trip.start_date, 1) : ''].filter(Boolean).join(' · '))}</span></div>${eventsView(trip)}`;
   },
 
   async today(r) {
@@ -1140,6 +1150,7 @@ const VIEWS = {
       ${pills}
       ${dayBookings(trip, day).length ? `<div class="section"><div class="section-h">Booked today</div>${bookingRows(dayBookings(trip, day))}</div>` : ''}
       ${bag}
+      ${tonightEvents(trip, day)}
       <div class="section"><div class="progress big" aria-label="${done.length} of ${list.length} stops done"><i style="width:${list.length ? Math.round((done.length / list.length) * 100) : 0}%"></i></div>
         <div class="section-f">${done.length} of ${plural(list.length, 'stop')} done</div></div>
       ${list.length ? `<div class="section"><div class="briefing" id="briefing">${S.briefing[briefKey] ? briefingHtml(S.briefing[briefKey]) : '<div class="brief-skel"></div>'}</div></div>` : ''}
@@ -2316,6 +2327,88 @@ async function makePacking(trip, body = {}) {
   }
 }
 
+// ---------- What's on: events during the trip ----------
+
+const EVENT_FILTERS = [['all', 'All'], ['match', 'For you'], ['music', 'Music'], ['arts', 'Arts & theatre'], ['sports', 'Sports'], ['family', 'Family'], ['other', 'More']];
+const fmtMoney = (n, cur) => { try { return new Intl.NumberFormat(undefined, { style: 'currency', currency: cur || 'USD', maximumFractionDigits: 0 }).format(n); } catch { return `${Math.round(n)}`; } };
+const eventPrice = (e) => (e.price_min != null ? (e.price_max && e.price_max > e.price_min ? `${fmtMoney(e.price_min, e.currency)} – ${fmtMoney(e.price_max, e.currency)}` : `From ${fmtMoney(e.price_min, e.currency)}`) : '');
+
+function loadEvents(tripId, force = false) {
+  if (!force && S.events[tripId] !== undefined) return;
+  S.events[tripId] = null; // asked; the answer renders quietly when it arrives
+  api(`/v1/trips/${tripId}/events`).then((ev) => { S.events[tripId] = ev; render({ quiet: true }); }).catch(() => { delete S.events[tripId]; });
+}
+
+/** A card on the trip page: how many events, and a way in. Hidden when the feature isn't set up or finds nothing. */
+function eventsCard(trip) {
+  const ev = S.events[trip.id];
+  if (!ev || ev.status === 'disabled' || ev.status === 'error' || ev.status === 'no_location') return '';
+  if (ev.status === 'no_dates') {
+    return `<div class="section"><a class="group tiles packcard" href="#/events/${trip.id}"><span class="row">${tile('pink', 'ticket')}<span class="main"><span class="t">What’s on</span>
+      <span class="s">Add dates to your trip to see events</span></span>${ICON.chev}</span></a></div>`;
+  }
+  if (!ev.events.length) return '';
+  const mine = ev.events.filter((e) => e.match).length;
+  return `<div class="section"><a class="group tiles packcard" href="#/events/${trip.id}"><span class="row">${tile('pink', 'ticket')}<span class="main"><span class="t">What’s on</span>
+    <span class="s">${plural(ev.events.length, 'event')} during your trip${mine ? `, ${mine} picked for you` : ''}</span></span>${ICON.chev}</span></a></div>`;
+}
+
+function eventCard(e, trip) {
+  const s = parseWhen(e.start_at);
+  const onTrip = trip.places.some((p) => p.name.toLowerCase() === e.name.toLowerCase());
+  const meta = [s && s.time ? fmtClock(s.time) : 'Time to be confirmed', e.venue].filter(Boolean).join(' · ');
+  const flag = e.status === 'postponed' || e.status === 'rescheduled' ? `<span class="pill2 warnpill">${e.status === 'postponed' ? 'Postponed' : 'Rescheduled'}</span>` : '';
+  return `<article class="evcard${e.match ? ' pick' : ''}">
+    ${e.image ? `<img class="evimg" src="${esc(e.image)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" onerror="this.remove()">` : ''}
+    <div class="evbody"><div class="evtop"><span class="pill2">${esc(e.genre || { music: 'Music', arts: 'Arts & theatre', sports: 'Sports', family: 'Family', other: 'Event' }[e.category])}</span>${e.match ? '<span class="brandchip">For you</span>' : ''}${flag}</div>
+      <h3 class="evname">${esc(e.name)}</h3>
+      <div class="s">${esc(meta)}</div>
+      ${e.why ? `<div class="daynote">${esc(e.why)}</div>` : ''}
+      ${eventPrice(e) ? `<div class="s">${esc(eventPrice(e))}</div>` : ''}
+      <div class="evactions"><a class="btn small" href="${esc(e.url)}" target="_blank" rel="noopener" data-act="link">Tickets</a>
+        ${onTrip ? `<span class="s evon">${ICON.done}On your trip</span>` : `<button class="btn tint small" data-act="addevent" data-id="${e.id}" data-trip="${trip.id}">Add to Day ${e.day}</button>`}</div></div></article>`;
+}
+
+function eventsView(trip) {
+  const ev = S.events[trip.id];
+  if (ev === undefined || ev === null) {
+    loadEvents(trip.id);
+    return '<div class="empty"><span class="spinner big"></span><h3>Looking for events</h3><p>Checking what’s on near where you’re staying.</p></div>';
+  }
+  if (ev.status === 'disabled') return emptyState('gray', 'ticket', 'Events aren’t switched on', 'Add a free Ticketmaster key to the server to see concerts, theatre and sport during your trips. The README says how.');
+  if (ev.status === 'no_dates') return emptyState('pink', 'ticket', 'Add dates to see what’s on', 'Set a start date for this trip (••• then Plan, or Re-plan) and TripIt will look for events on those days.');
+  if (ev.status === 'no_location') return emptyState('gray', 'pinslash', 'No places on the map yet', 'Save a few places so TripIt knows where you’ll be, then it can look for events nearby.');
+  if (ev.status === 'error') return emptyState('gray', 'warn', 'Couldn’t load events', 'Ticketmaster didn’t answer. Try again in a moment.', `<button class="btn tint" data-act="eventsrefresh" data-id="${trip.id}">Try again</button>`);
+  const filter = S.eventFilter[trip.id] || 'all';
+  const has = (id) => id === 'all' || ev.events.some((e) => (id === 'match' ? e.match : e.category === id));
+  const shown = ev.events.filter((e) => filter === 'all' || (filter === 'match' ? e.match : e.category === filter)).sort((a, b) => a.start_at.localeCompare(b.start_at) || Number(b.match) - Number(a.match));
+  const chips = `<div class="fchips" role="group" aria-label="Filter events">${EVENT_FILTERS.filter(([id]) => has(id)).map(([id, label]) =>
+    `<button class="fchip${filter === id ? ' on' : ''}" data-act="eventfilter" data-trip="${trip.id}" data-f="${id}" aria-pressed="${filter === id}">${label}</button>`).join('')}</div>`;
+  const groups = [];
+  shown.forEach((e) => {
+    const key = e.start_at.slice(0, 10);
+    const last = groups[groups.length - 1];
+    if (last && last.key === key) last.items.push(e); else groups.push({ key, items: [e] });
+  });
+  return `${ev.events.length ? chips : ''}
+    ${groups.map((g) => `<div class="datehead">${esc(fmtDay(parseWhen(g.key).day))}${g.items[0].day ? ` · Day ${g.items[0].day}` : ''}</div>${g.items.map((e) => eventCard(e, trip)).join('')}`).join('')
+      || emptyState('gray', 'ticket', ev.events.length ? 'Nothing in this filter' : 'Nothing found for these dates', ev.events.length ? 'Try another filter.' : 'Ticketmaster has no events near where you’ll be on these days. Coverage is best in North America and parts of Europe.')}
+    <div class="section"><div class="section-f">Events and ticket links from Ticketmaster, which sells the tickets. TripIt doesn’t sell or hold tickets, and prices and availability can change. Picked for you using your taste profile.</div>
+      <button class="linkbtn" data-act="eventsrefresh" data-id="${trip.id}">Refresh</button></div>`;
+}
+
+/** Tonight's events for the Today view (evening ones, the ones picked for you first). */
+function tonightEvents(trip, day) {
+  const ev = S.events[trip.id];
+  if (ev === undefined) loadEvents(trip.id);
+  if (!ev || ev.status !== 'ok') return '';
+  const list = ev.events.filter((e) => e.day === day && (!parseWhen(e.start_at).time || parseWhen(e.start_at).time >= '16:00'))
+    .sort((a, b) => Number(b.match) - Number(a.match)).slice(0, 3);
+  if (!list.length) return '';
+  return `<div class="section"><div class="section-h">${ICON.ticket}On nearby</div><div class="group tiles">${list.map((e) => `<a class="row" href="#/events/${trip.id}">
+    <span class="main"><span class="t">${esc(e.name)}</span><span class="s">${esc([parseWhen(e.start_at).time ? fmtClock(parseWhen(e.start_at).time) : '', e.venue].filter(Boolean).join(' · '))}</span></span>${ICON.chev}</a>`).join('')}</div></div>`;
+}
+
 /** Brings a trip's places into the caches after the itinerary changed on the server. */
 function syncTrip(res) {
   S.trip[res.id] = res;
@@ -2818,6 +2911,22 @@ async function onAction(act, el) {
       return;
     }
     case 'tidy': tidySheet(S.trip[el.dataset.id]); return;
+    case 'eventfilter': S.eventFilter[el.dataset.trip] = el.dataset.f; render(); return;
+    case 'eventsrefresh': {
+      const id = el.dataset.id;
+      S.events[id] = null; render();
+      try { S.events[id] = await api(`/v1/trips/${id}/events/refresh`, { method: 'POST' }); } catch (e) { delete S.events[id]; toast(e.message, true); }
+      render();
+      return;
+    }
+    case 'addevent': {
+      const trip = S.trip[el.dataset.trip];
+      const ev = S.events[trip.id].events.find((x) => x.id === el.dataset.id);
+      syncTrip(await api(`/v1/trips/${trip.id}/events/${ev.id}/add`, { method: 'POST' }));
+      toast(`Added to Day ${ev.day}`);
+      render();
+      return;
+    }
     case 'makepacking': await makePacking(S.trip[el.dataset.id]); return;
     case 'packcarry': {
       const trip = S.trip[el.dataset.id];

@@ -15,6 +15,10 @@ class Settings(BaseSettings):
     claude_effort: str = "medium"
     # Menus: when a place's website has none, read menu photos listed for it on Google Maps. Google's terms
     # may not allow extracting text from its photos, so check them and turn this off if in doubt.
+    # Events during a trip (the "What's on" section), from the Ticketmaster Discovery API. A free key from
+    # developer.ticketmaster.com; without one the feature stays hidden.
+    ticketmaster_api_key: str = ""
+    events_radius_km: int = 40
     menu_google_photos: bool = True
     # When the plain fetch finds no menu, open the site in headless Chromium and click through to it. Needs
     # Playwright and Chromium (the Docker image has them); off automatically when they are missing.

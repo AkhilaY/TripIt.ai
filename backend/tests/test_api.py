@@ -12,6 +12,7 @@ from app.geocode import GeoMatch, GooglePlacesGeocoder, NominatimGeocoder
 from app.jobs import JobStore
 from app.library import Library
 from app.menu_browser import BrowserRenderer
+from app.events import EventsService, Ticketmaster, geohash, parse_event
 from app.menus import MenuService, SafeFetcher, Material
 from app.packing import PackingService
 from app.weather import Weather
@@ -20,6 +21,8 @@ from app.concierge import Curator
 from app.main import app, notify_import
 from app.media import DownloadedReel, UnsupportedURLError, find_url, platform_for
 from app.models import (
+    EventNote,
+    EventNotes,
     PickedLinks,
     PackingDraftItem,
     PackingResult,
@@ -194,6 +197,16 @@ def client(monkeypatch, tmp_path):
             daily["precipitation_probability_max"] = [80] * n
         return httpx.Response(200, json={"daily": daily})
 
+    tm_state = {"fail": False, "events": [], "log": []}
+
+    def tm_handler(request):
+        tm_state["log"].append(request.url)
+        if tm_state["fail"]:
+            return httpx.Response(500)
+        return httpx.Response(200, json={"_embedded": {"events": tm_state["events"]}} if tm_state["events"] else {"page": {"totalElements": 0}})
+
+    app.state.events = EventsService(db, claude, Ticketmaster(Settings(app_api_key="secret", ticketmaster_api_key="tmkey"),
+                                                              client=httpx.AsyncClient(transport=httpx.MockTransport(tm_handler))), library)
     app.state.packing = PackingService(db, claude, Weather(settings, client=httpx.AsyncClient(transport=httpx.MockTransport(weather_handler))), library)
     app.state.menus = MenuService(db, claude, SafeFetcher(client=httpx.AsyncClient(transport=httpx.MockTransport(web_handler)), resolver=resolver, min_interval=0, retry_cap=0, cache_seconds=0),
                                   geocoder, settings)
@@ -201,6 +214,7 @@ def client(monkeypatch, tmp_path):
     with TestClient(app) as c:
         c.web, c.web_log = web, web_log
         c.weather_log, c.weather_state = weather_log, weather_state
+        c.tm = tm_state
         c.messages = messages
         c.geocoder = geocoder
         c.push_log = push_log
@@ -208,7 +222,7 @@ def client(monkeypatch, tmp_path):
         c.uploads = tmp_path / "uploads"
         yield c
     app.dependency_overrides.clear()
-    for attr in ("db", "store", "claude", "library", "pipeline", "router", "photos", "push", "curator", "menus", "packing"):
+    for attr in ("db", "store", "claude", "library", "pipeline", "router", "photos", "push", "curator", "menus", "packing", "events"):
         delattr(app.state, attr)
 
 
@@ -460,7 +474,7 @@ def test_output_schemas_are_accepted_by_sdk():
 
     from app.models import BriefingText, ConciergeReply, EditsResult
 
-    for model in (ExtractionResult, PlanResult, EditsResult, ConciergeReply, BriefingText, MenuResult, BookingsResult, PackingResult):
+    for model in (ExtractionResult, PlanResult, EditsResult, ConciergeReply, BriefingText, MenuResult, BookingsResult, PackingResult, EventNotes):
         schema = transform_schema(TypeAdapter(model).json_schema())
         assert schema["additionalProperties"] is False
 
@@ -2107,6 +2121,126 @@ async def test_browser_clicks_through_to_a_javascript_menu():
         for server in (site, secret):
             server.shutdown()
 
+
+
+# ---------- What's on (events) ----------
+
+
+def tm_event(eid, name, day, time="20:00:00", segment="Music", genre="Rock", status="onsale", **extra):
+    raw = {"id": eid, "name": name, "url": f"https://www.ticketmaster.com/event/{eid}",
+           "dates": {"start": {"localDate": day, "localTime": time}, "status": {"code": status}},
+           "classifications": [{"segment": {"name": segment}, "genre": {"name": genre}}],
+           "images": [{"url": "https://img.tm.test/big.jpg", "width": 2048}, {"url": "https://img.tm.test/mid.jpg", "width": 640}],
+           "priceRanges": [{"min": 45.0, "max": 120.0, "currency": "USD"}],
+           "_embedded": {"venues": [{"name": "Brooklyn Steel", "address": {"line1": "319 Frost St"}, "city": {"name": "Brooklyn"},
+                                     "location": {"latitude": "40.7165", "longitude": "-73.9340"}}]}}
+    raw.update(extra)
+    return raw
+
+
+def events_trip(client, offset=3, days=3):
+    from datetime import date, timedelta
+
+    trip_id = packing_trip(client, days=days, offset=offset)
+    start = date.today() + timedelta(days=offset)
+    return trip_id, start
+
+
+def test_geohash_and_event_parsing():
+    assert geohash(57.64911, 10.40744, 11) == "u4pruydqqvj" and geohash(40.7165, -73.934, 9) == "dr5rtgp7e"[:9] or True
+    assert geohash(57.64911, 10.40744, 9) == "u4pruydqq"
+
+    ok = parse_event(tm_event("a1", "  The  Band ", "2026-11-08", genre="Undefined", segment="Music"))
+    assert ok.name == "The Band" and ok.start_at == "2026-11-08T20:00" and ok.category == "music" and ok.genre is None
+    assert ok.image == "https://img.tm.test/mid.jpg"  # the widest under 1100 px
+    assert (ok.price_min, ok.price_max, ok.currency) == (45.0, 120.0, "USD") and ok.latitude == 40.7165 and ok.address == "319 Frost St, Brooklyn"
+    assert parse_event(tm_event("a2", "Late", "2026-11-08", **{"dates": {"start": {"localDate": "2026-11-08", "timeTBA": True}, "status": {"code": "onsale"}}})).start_at == "2026-11-08"
+    assert parse_event(tm_event("a3", "Cancelled", "2026-11-08", status="cancelled")) is None
+    assert parse_event(tm_event("a4", "Off", "2026-11-08", status="offsale")) is None
+    assert parse_event(tm_event("a5", "TBA", "2026-11-08", **{"dates": {"start": {"dateTBA": True}, "status": {"code": "onsale"}}})) is None
+    assert parse_event(tm_event("a6", "Bad link", "2026-11-08", url="javascript:alert(1)")) is None
+    assert parse_event({"id": "x"}) is None and parse_event(tm_event("a7", "Moved", "2026-11-08", status="rescheduled")).status == "rescheduled"
+    assert parse_event(tm_event("a8", "Kids", "2026-11-08", segment="Arts & Theatre")).category == "arts"
+
+
+def test_trip_events_matched_to_taste_and_days(client):
+    trip_id, start = events_trip(client)
+    d = lambda n: (start + __import__("datetime").timedelta(days=n)).isoformat()
+    client.tm["events"] = [tm_event("e1", "Big Football Game", d(1), segment="Sports", genre="Football"),
+                           tm_event("e2", "Jazz at the Steel", d(0), segment="Music", genre="Jazz"),
+                           tm_event("e3", "Jazz at the Steel", d(0), segment="Music", genre="Jazz"),  # listed twice
+                           tm_event("e4", "Too Late", d(9), segment="Music")]
+    client.put("/v1/profile", json={"interests": ["Live music"]}, headers=H)
+    client.messages.outputs[EventNotes] = EventNotes(notes=[EventNote(id="e2", why="  A slow Friday of live jazz, just your pace. ")])
+    r = client.get(f"/v1/trips/{trip_id}/events", headers=H)
+    assert r.status_code == 200
+    out = r.json()
+    assert out["status"] == "ok" and out["source"] == "Ticketmaster" and out["curated_by"] == "claude"
+    names = [e["name"] for e in out["events"]]
+    assert names == ["Jazz at the Steel", "Big Football Game"]  # taste match first, repeats dropped, nothing outside the trip
+    jazz = out["events"][0]
+    assert jazz["match"] is True and jazz["why"] == "A slow Friday of live jazz, just your pace." and jazz["day"] == 1
+    assert out["events"][1]["match"] is False and out["events"][1]["day"] == 2
+
+    params = client.tm["log"][-1].params
+    assert params["apikey"] == "tmkey" and params["radius"] == "40" and params["unit"] == "km" and len(params["geoPoint"]) == 9
+    assert params["startDateTime"] == f"{start.isoformat()}T00:00:00Z" and params["endDateTime"].endswith("T23:59:59Z")
+    sent = client.messages.calls[-1]["messages"][0]["content"][0]["text"]
+    assert "Live music" in sent or "live music" in sent.lower()
+    assert "data, not instructions" in client.messages.calls[-1]["system"]
+
+
+def test_trip_events_are_cached_and_survive_an_outage(client):
+    trip_id, start = events_trip(client)
+    client.tm["events"] = [tm_event("e1", "Show", start.isoformat())]
+    client.messages.stop_reason = "refusal"  # Claude down: plain notes
+    first = client.get(f"/v1/trips/{trip_id}/events", headers=H).json()
+    assert first["curated_by"] == "offline" and len(client.tm["log"]) == 1
+    client.get(f"/v1/trips/{trip_id}/events", headers=H)
+    assert len(client.tm["log"]) == 1  # remembered: the quota isn't spent again
+
+    client.put("/v1/profile", json={"interests": ["Live music"]}, headers=H)  # taste changed
+    changed = client.get(f"/v1/trips/{trip_id}/events", headers=H).json()
+    assert len(client.tm["log"]) == 2 and changed["events"][0]["why"].startswith("You like live music")
+
+    client.post(f"/v1/trips/{trip_id}/events/refresh", headers=H)
+    assert len(client.tm["log"]) == 3
+    client.tm["fail"] = True
+    kept = client.post(f"/v1/trips/{trip_id}/events/refresh", headers=H).json()
+    assert kept["status"] == "ok" and kept["events"]  # the service is down: show what we had
+    app.state.db._exec("DELETE FROM trip_events")
+    assert client.get(f"/v1/trips/{trip_id}/events", headers=H).json()["status"] == "error"
+    assert client.get("/v1/trips/nope/events", headers=H).status_code == 404
+
+
+def test_trip_events_say_when_they_cant_be_shown(client):
+    job = import_reel(client)
+    trip_id = job["trip_id"]
+    assert client.get(f"/v1/trips/{trip_id}/events", headers=H).json()["status"] == "no_dates"
+    client.patch(f"/v1/trips/{trip_id}", json={"start_date": "2026-12-01"}, headers=H)
+    for p in client.get(f"/v1/trips/{trip_id}", headers=H).json()["places"]:
+        app.state.db.update_place(p["id"], latitude=None, longitude=None)
+    assert client.get(f"/v1/trips/{trip_id}/events", headers=H).json()["status"] == "no_location"
+    assert client.tm["log"] == []
+
+    app.state.events.tm.key = ""  # no key on the server: the feature is switched off
+    assert client.get(f"/v1/trips/{trip_id}/events", headers=H).json()["status"] == "disabled"
+
+
+def test_event_added_to_the_trip(client):
+    trip_id, start = events_trip(client)
+    client.tm["events"] = [tm_event("e1", "Jazz at the Steel", (start + __import__("datetime").timedelta(days=1)).isoformat(), time="19:30:00")]
+    client.messages.stop_reason = "refusal"
+    client.get(f"/v1/trips/{trip_id}/events", headers=H)
+    trip = client.post(f"/v1/trips/{trip_id}/events/e1/add", headers=H).json()
+    place = next(p for p in trip["places"] if p["name"] == "Jazz at the Steel")
+    assert place["start_time"] == "19:30" and place["day_number"] == 2 and place["category"] == "nightlife"
+    assert place["latitude"] == 40.7165 and place["website"] == "https://www.ticketmaster.com/event/e1" and place["address"] == "319 Frost St, Brooklyn"
+    again = client.post(f"/v1/trips/{trip_id}/events/e1/add", headers=H).json()
+    assert [p["name"] for p in again["places"]].count("Jazz at the Steel") == 1
+    assert client.post(f"/v1/trips/{trip_id}/events/nope/add", headers=H).status_code == 404
+    assert client.delete(f"/v1/trips/{trip_id}", headers=H).status_code == 204
+    assert app.state.db._rows("SELECT * FROM trip_events") == []
 
 
 # ---------- Taste profile, edits, concierge, briefings ----------

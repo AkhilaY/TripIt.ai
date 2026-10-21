@@ -133,6 +133,13 @@ CREATE TABLE IF NOT EXISTS bookings (
     created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS trip_events (
+    trip_id TEXT PRIMARY KEY REFERENCES trips(id) ON DELETE CASCADE,
+    data TEXT NOT NULL,
+    signature TEXT NOT NULL,
+    fetched_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS packing (
     trip_id TEXT PRIMARY KEY REFERENCES trips(id) ON DELETE CASCADE,
     data TEXT NOT NULL,
@@ -461,6 +468,16 @@ class Database:
 
     def set_setting(self, key: str, value: Any) -> None:
         self._exec("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (key, json.dumps(value, default=str)))
+
+    # ---------- Events ----------
+
+    def get_trip_events(self, trip_id: str) -> Optional[sqlite3.Row]:
+        rows = self._rows("SELECT * FROM trip_events WHERE trip_id = ?", (trip_id,))
+        return rows[0] if rows else None
+
+    def save_trip_events(self, trip_id: str, data: dict, signature: str) -> None:
+        self._exec("INSERT OR REPLACE INTO trip_events (trip_id, data, signature, fetched_at) VALUES (?, ?, ?, ?)",
+                   (trip_id, json.dumps(data, default=str), signature, now().isoformat()))
 
     # ---------- Packing ----------
 

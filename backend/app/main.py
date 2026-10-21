@@ -24,6 +24,7 @@ from fastapi.staticfiles import StaticFiles
 from .concierge import Curator
 from .config import Settings, get_settings
 from .db import Database
+from .events import EventsService, Ticketmaster
 from .exports import ExportError, ics, kml, schedule
 from .geocode import GooglePlacesGeocoder, NoGeocoder, clean_website, make_geocoder
 from .jobs import JobStore
@@ -72,6 +73,7 @@ from .models import (
     ScreenshotJobRequest,
     SearchPlacesRequest,
     TidyRequest,
+    TripEvents,
     ShareLink,
     Trip,
     TasteProfile,
@@ -108,6 +110,7 @@ def build_services(app: FastAPI, settings: Settings) -> None:
     app.state.router = Router(db, settings)
     app.state.push = Push(db, Path(settings.database_path).parent / "vapid_private.pem", settings.push_contact)
     app.state.curator = Curator(db, app.state.claude)
+    app.state.events = EventsService(db, app.state.claude, Ticketmaster(settings), app.state.library)
     app.state.packing = PackingService(db, app.state.claude, Weather(settings), app.state.library)
     fetcher = SafeFetcher()
     renderer = BrowserRenderer(fetcher, settings.menu_browser_path) if settings.menu_browser and browser_available() else None
@@ -370,6 +373,32 @@ async def tidy_trip(trip_id: str, body: TidyRequest, request: Request) -> TripDe
         await _library(request).tidy_trip(trip_id, body.instruction, request.app.state.claude)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
+    return _trip_or_404(request, trip_id)
+
+
+# ---------- What's on ----------
+
+
+@app.get("/v1/trips/{trip_id}/events", response_model=TripEvents, dependencies=[Auth])
+async def trip_events(trip_id: str, request: Request) -> TripEvents:
+    """Events near the trip during its dates, matched to the person's taste (Ticketmaster)."""
+    trip = _trip_or_404(request, trip_id)
+    return await request.app.state.events.get(trip, request.app.state.curator.profile())
+
+
+@app.post("/v1/trips/{trip_id}/events/refresh", response_model=TripEvents, dependencies=[Auth])
+async def refresh_trip_events(trip_id: str, request: Request) -> TripEvents:
+    trip = _trip_or_404(request, trip_id)
+    return await request.app.state.events.get(trip, request.app.state.curator.profile(), refresh=True)
+
+
+@app.post("/v1/trips/{trip_id}/events/{event_id}/add", response_model=TripDetail, dependencies=[Auth])
+async def add_event_to_trip(trip_id: str, event_id: str, request: Request) -> TripDetail:
+    """Saves an event as a stop on the trip, on its day with its start time."""
+    trip = _trip_or_404(request, trip_id)
+    place, _created = await request.app.state.events.add_to_trip(trip, event_id)
+    if place is None:
+        raise HTTPException(status_code=404, detail="That event isn't in the list any more. Refresh it.")
     return _trip_or_404(request, trip_id)
 
 

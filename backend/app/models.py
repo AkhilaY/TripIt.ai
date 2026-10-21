@@ -229,6 +229,49 @@ class ReadBookingsRequest(BaseModel):
     images: list[str] = Field(default=[], max_length=6, description="Base64 JPEG images (data: URLs are fine).")
 
 
+# ---------- Events ----------
+
+EventCategory = Literal["music", "arts", "sports", "family", "other"]
+
+
+class EventItem(BaseModel):
+    id: str
+    name: str
+    url: str  # the event's page on Ticketmaster, where tickets are bought
+    image: Optional[str] = None
+    start_at: str  # local "YYYY-MM-DDTHH:MM", or "YYYY-MM-DD" when the time isn't set
+    status: Literal["onsale", "postponed", "rescheduled", "unknown"] = "unknown"
+    venue: Optional[str] = None
+    address: Optional[str] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    category: EventCategory = "other"
+    genre: Optional[str] = None
+    price_min: Optional[float] = None
+    price_max: Optional[float] = None
+    currency: Optional[str] = None
+    day: Optional[int] = None  # trip day, when the trip has dates
+    match: bool = False  # fits the person's taste
+    why: Optional[str] = None
+
+
+class TripEvents(BaseModel):
+    status: Literal["ok", "disabled", "no_dates", "no_location", "error"]
+    events: list[EventItem] = []
+    fetched_at: Optional[datetime] = None
+    source: str = "Ticketmaster"
+    curated_by: Optional[Literal["claude", "offline"]] = None
+
+
+class EventNote(BaseModel):
+    id: str
+    why: str = Field(description="One line, under 16 words, on why this event suits this traveller, in a warm, polished voice. Mention the taste it matches.")
+
+
+class EventNotes(BaseModel):
+    notes: list[EventNote]
+
+
 # ---------- Packing ----------
 
 PackingGroup = Literal["clothes", "shoes", "toiletries", "tech", "documents", "daybag", "other"]

@@ -809,3 +809,16 @@ button.row.sel { cursor: pointer; }
 .packcard .row { cursor: pointer; }
 .empty .spinner.big { width: 34px; height: 34px; border-width: 3px; margin-bottom: 8px; }
 .trace { margin: 0; padding: 0 0 0 18px; display: grid; gap: 6px; font-size: 14px; color: var(--secondary); }
+
+/* ---------- What's on ---------- */
+.evcard { margin: 0 16px 12px; background: var(--cell); border-radius: 20px; overflow: hidden; }
+.evcard.pick { box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--gold) 55%, transparent); }
+.evimg { display: block; width: 100%; height: 150px; object-fit: cover; background: var(--fill); }
+.evbody { padding: 14px 16px 16px; display: grid; gap: 6px; }
+.evtop { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.evname { margin: 0; font-family: var(--serif); font-size: 26px; font-weight: 500; line-height: 1.1; letter-spacing: -0.005em; }
+.evactions { display: flex; align-items: center; gap: 10px; margin-top: 6px; }
+.evactions .btn { text-decoration: none; display: inline-flex; align-items: center; }
+.evon { display: inline-flex; align-items: center; gap: 6px; color: var(--green); font-weight: 600; }
+.evon svg { width: 15px; height: 15px; }
+.warnpill { color: var(--warn); }

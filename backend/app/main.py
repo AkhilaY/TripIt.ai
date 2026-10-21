@@ -26,6 +26,7 @@ from .config import Settings, get_settings
 from .db import Database
 from .discover import DiscoverService
 from .events import EventsService, Ticketmaster
+from .lounges import LoungeService
 from .exports import ExportError, ics, kml, schedule
 from .geocode import GooglePlacesGeocoder, NoGeocoder, clean_website, make_geocoder
 from .jobs import JobStore
@@ -57,6 +58,7 @@ from .models import (
     DiscoverKind,
     DiscoverResult,
     HomeRequest,
+    LoungeResult,
     HomeSetting,
     LocateRequest,
     MenuRequest,
@@ -118,6 +120,7 @@ def build_services(app: FastAPI, settings: Settings) -> None:
     app.state.push = Push(db, Path(settings.database_path).parent / "vapid_private.pem", settings.push_contact)
     app.state.curator = Curator(db, app.state.claude)
     app.state.discover = DiscoverService(db, app.state.claude, app.state.library.geocoder, photos)
+    app.state.lounges = LoungeService(db, app.state.claude)
     app.state.needs = NeedsService(db, app.state.claude)
     app.state.events = EventsService(db, app.state.claude, Ticketmaster(settings), app.state.library)
     app.state.packing = PackingService(db, app.state.claude, Weather(settings), app.state.library)
@@ -555,6 +558,15 @@ def _check_booking_place(request: Request, trip_id: str, place_id: Optional[str]
         place = _db(request).get_place(place_id)
         if place is None or place.trip_id != trip_id:
             raise HTTPException(status_code=422, detail="That place isn't in this trip")
+
+
+@app.get("/v1/trips/{trip_id}/bookings/{booking_id}/lounges", response_model=LoungeResult, dependencies=[Auth])
+async def booking_lounges(trip_id: str, booking_id: str, request: Request, refresh: bool = False) -> LoungeResult:
+    """Lounges at the airport a flight departs from: name, terminal, and how to get in. From Claude's knowledge, so to be checked."""
+    booking = _booking_or_404(request, trip_id, booking_id)
+    if booking.kind != "flight":
+        raise HTTPException(status_code=422, detail="Lounges are for flights")
+    return await request.app.state.lounges.lookup(booking.origin, refresh)
 
 
 @app.post("/v1/trips/{trip_id}/bookings/read", response_model=list[BookingDraft], dependencies=[Auth])

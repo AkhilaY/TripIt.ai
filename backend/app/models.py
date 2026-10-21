@@ -292,6 +292,27 @@ class DiscoverNotes(BaseModel):
 # ---------- Booking needs ----------
 
 
+class Lounge(BaseModel):
+    name: str = Field(description="The lounge's name as travellers know it, e.g. 'The Centurion Lounge'.")
+    terminal: Optional[str] = Field(description="Terminal or concourse, e.g. 'Terminal 4', or null if not sure.")
+    location: Optional[str] = Field(description="Where in the terminal, e.g. 'Airside, near gate B22, level 2', under 14 words, or null.")
+    access: list[str] = Field(description="Ways in, each under 12 words: 'Priority Pass', 'Amex Platinum card holders', 'Business class on Delta', 'Day pass about $50', 'Oneworld Emerald/Sapphire'. Only ones you are confident of.")
+    hours: Optional[str] = Field(description="Typical opening hours like '5:00-22:00', or null if not sure.")
+
+
+class LoungeList(BaseModel):
+    airport_name: Optional[str] = Field(description="Full name of the airport, or null if the code or name is not a real airport.")
+    lounges: list[Lounge] = Field(description="Up to 8 lounges at this airport that you are confident exist. Empty when unsure; never invent one.")
+
+
+class LoungeResult(BaseModel):
+    status: Literal["ok", "no_airport", "error"]
+    airport: Optional[str] = None
+    airport_name: Optional[str] = None
+    lounges: list[Lounge] = []
+    checked_at: Optional[str] = None
+
+
 class BookingNeedItem(BaseModel):
     id: str
     kind: Literal["reservation", "tickets", "none"] = Field(description="reservation for a table at a restaurant, bar or cafe; tickets for entry to an attraction, show or activity; none when you can simply walk in or enter free.")

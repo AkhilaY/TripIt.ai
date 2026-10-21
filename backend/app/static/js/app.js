@@ -2104,11 +2104,39 @@ function bookingCard(b) {
   const place = b.place_id ? `<a class="linkbtn pl" href="#/place/${b.place_id}" data-act="link">Open place</a>` : '';
   const directions = b.kind === 'hotel' && b.address
     ? `<a class="linkbtn pl" href="${esc(mapsSearch(`${b.title} ${b.address}`))}" target="_blank" rel="noopener" data-act="link">Directions</a>` : '';
+  const lounges = b.kind === 'flight' && b.origin
+    ? `<button class="linkbtn pl" data-act="lounges" data-id="${b.id}">${ICON.sparkle}Lounges at ${esc(b.origin)}</button>` : '';
   return `<div class="bcard" data-act="bookingmenu" data-id="${b.id}" role="button" tabindex="0" aria-label="${esc(label)}: ${esc(b.title)}. Tap for options">
     <div class="top">${tile(color, icon)}<span class="main"><span class="t">${esc(b.title)}</span><span class="s">${esc(sub)}</span></span><span class="pill2">${esc(label)}</span></div>
     ${route}
     ${meta || b.confirmation ? `<div class="meta"><span>${esc(meta)}</span>${b.confirmation ? `<span class="conf">${esc(b.confirmation)}</span>` : ''}</div>` : ''}
-    ${place || directions ? `<div class="bactions">${directions}${place}</div>` : ''}</div>`;
+    ${place || directions || lounges ? `<div class="bactions">${directions}${place}${lounges}</div>` : ''}</div>`;
+}
+
+/** Lounges at the airport a flight leaves from: name, terminal, how to get in. */
+async function loungeSheet(trip, b, refresh = false) {
+  const st = { res: null, error: '' };
+  const draw = () => { if (S.sheet && S.sheet.st === st) renderOverlay(); };
+  openSheet({
+    type: 'form', title: `Lounges at ${b.origin || 'the airport'}`, confirm: 'Done', st,
+    body: () => {
+      if (st.error) return `<div class="section"><div class="section-f">${esc(st.error)}</div></div>`;
+      if (!st.res) return '<div class="section"><div class="section-f"><span class="spinner"></span> Looking up lounges…</div></div>';
+      if (st.res.status === 'no_airport') return '<div class="section"><div class="section-f">We couldn’t tell which airport this is. Edit the flight and put the departure airport’s code (like JFK) in From.</div></div>';
+      if (st.res.status === 'error') return '<div class="section"><div class="section-f">Couldn’t look up lounges right now. Try again in a moment.</div></div>';
+      const { lounges, airport_name: name } = st.res;
+      if (!lounges.length) return `<div class="section"><div class="section-f">No lounges we’re confident about at ${esc(name || b.origin)}.</div></div>`;
+      return `<div class="section"><div class="section-h">${esc(name || b.origin)}</div>${lounges.map((l) => `<div class="group tiles"><div class="row lounge">
+        <span class="main"><span class="t">${esc(l.name)}</span>
+        <span class="s">${esc([l.terminal, l.location, l.hours ? `Open ${l.hours}` : ''].filter(Boolean).join(' · ') || 'Terminal not confirmed')}</span>
+        ${l.access.length ? `<span class="s"><b>Access:</b> ${esc(l.access.join(' · '))}</span>` : '<span class="s">Access rules not confirmed</span>'}</span></div></div>`).join('')}
+        <div class="section-f">From Claude’s knowledge, not a live feed. Lounges change hours, terminals and access rules, so check with the airport, your card or your airline before you rely on one.</div></div>`;
+    },
+    ok: async () => closeSheet(),
+  });
+  try { st.res = await api(`/v1/trips/${trip.id}/bookings/${b.id}/lounges${refresh ? '?refresh=true' : ''}`); }
+  catch (e) { st.error = e.message; }
+  draw();
 }
 
 function bookingsView(trip) {
@@ -3166,11 +3194,18 @@ async function onAction(act, el) {
       bookingForm(S.trip[p.trip_id], { kind: 'reservation', title: p.name, place_id: p.id, source: 'manual', address: p.address || null }, { title: `Booked at ${p.name}` });
       return;
     }
+    case 'lounges': {
+      const trip = Object.values(S.trip).find((t) => (t.bookings || []).some((x) => x.id === el.dataset.id));
+      const b = trip && trip.bookings.find((x) => x.id === el.dataset.id);
+      if (b) loungeSheet(trip, b);
+      return;
+    }
     case 'bookingmenu': {
       const trip = Object.values(S.trip).find((t) => (t.bookings || []).some((b) => b.id === el.dataset.id));
       const b = trip && trip.bookings.find((x) => x.id === el.dataset.id);
       if (!b) return;
       const actions = [{ label: 'Edit', run: () => bookingForm(trip, b, { id: b.id }) }];
+      if (b.kind === 'flight' && b.origin) actions.unshift({ label: `Airport lounges at ${b.origin}`, run: () => loungeSheet(trip, b) });
       if (b.place_id) actions.push({ label: 'Open place', run: () => go(`#/place/${b.place_id}`) });
       if (b.confirmation) actions.push({ label: 'Copy confirmation number', run: async () => { try { await navigator.clipboard.writeText(b.confirmation); toast('Copied'); } catch { toast(b.confirmation); } } });
       actions.push({ label: 'Delete booking', destructive: true, run: async () => {

@@ -842,3 +842,6 @@ button.row.sel { cursor: pointer; }
 .saved-tag svg { width: 14px; height: 14px; }
 .homectl .pillbtn { white-space: nowrap; }
 .homectl .pillbtn svg { width: 14px; height: 14px; }
+.bactions .linkbtn { display: inline-flex; align-items: center; gap: 6px; }
+.bactions .linkbtn svg { width: 16px; height: 16px; }
+.lounge .main { gap: 3px; }

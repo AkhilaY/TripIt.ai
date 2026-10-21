@@ -27,6 +27,8 @@ from app.models import (
     BookingNeedResult,
     EventNote,
     DiscoverNotes,
+    Lounge,
+    LoungeList,
     DiscoverNote,
     EventNotes,
     PickedLinks,
@@ -204,6 +206,8 @@ def client(monkeypatch, tmp_path):
         return httpx.Response(200, json={"daily": daily})
 
     app.state.needs = NeedsService(db, claude)
+    from app.lounges import LoungeService
+    app.state.lounges = LoungeService(db, claude)
     from app.discover import DiscoverService
     app.state.discover = DiscoverService(db, claude, geocoder, app.state.photos)
     tm_state = {"fail": False, "events": [], "log": []}
@@ -231,7 +235,7 @@ def client(monkeypatch, tmp_path):
         c.uploads = tmp_path / "uploads"
         yield c
     app.dependency_overrides.clear()
-    for attr in ("db", "store", "claude", "library", "pipeline", "router", "photos", "push", "curator", "menus", "packing", "events", "needs", "discover"):
+    for attr in ("db", "store", "claude", "library", "pipeline", "router", "photos", "push", "curator", "menus", "packing", "events", "needs", "discover", "lounges"):
         delattr(app.state, attr)
 
 
@@ -483,7 +487,7 @@ def test_output_schemas_are_accepted_by_sdk():
 
     from app.models import BriefingText, ConciergeReply, EditsResult
 
-    for model in (ExtractionResult, PlanResult, EditsResult, ConciergeReply, BriefingText, MenuResult, BookingsResult, PackingResult, EventNotes, BookingNeedResult, DiscoverNotes):
+    for model in (ExtractionResult, PlanResult, EditsResult, ConciergeReply, BriefingText, MenuResult, BookingsResult, PackingResult, EventNotes, BookingNeedResult, DiscoverNotes, LoungeList):
         schema = transform_schema(TypeAdapter(model).json_schema())
         assert schema["additionalProperties"] is False
 
@@ -2497,3 +2501,33 @@ def test_discover_keeps_old_results_when_google_fails(client):
     state["fail"] = True
     assert client.get("/v1/discover?refresh=true", headers=H).json()["status"] == "ok"
     assert client.get("/v1/discover?kind=bars", headers=H).json()["status"] == "error"
+
+
+# ---------- Lounges ----------
+
+
+def test_flight_lounges_lookup_and_cache(client):
+    tid = import_reel(client)["trip_id"]
+    flight = client.post(f"/v1/trips/{tid}/bookings", json={"kind": "flight", "title": "BA 178", "origin": "JFK", "destination": "LHR"}, headers=H).json()["bookings"][0]
+    hotel = client.post(f"/v1/trips/{tid}/bookings", json={"kind": "hotel", "title": "Hoxton"}, headers=H).json()["bookings"][-1]
+    client.messages.outputs[LoungeList] = LoungeList(airport_name="John F. Kennedy International Airport", lounges=[
+        Lounge(name="The Centurion Lounge", terminal="Terminal 4", location="Airside, near gate B20", access=["Amex Platinum card holders", "Day pass about $50"], hours="5:00-22:00")])
+    url = f"/v1/trips/{tid}/bookings/{flight['id']}/lounges"
+    r = client.get(url, headers=H).json()
+    assert r["status"] == "ok" and r["airport"] == "JFK" and r["lounges"][0]["terminal"] == "Terminal 4"
+    assert r["lounges"][0]["access"][0] == "Amex Platinum card holders"
+    calls = len(client.messages.calls)
+    client.get(url, headers=H)
+    assert len(client.messages.calls) == calls  # cached
+    client.get(url + "?refresh=true", headers=H)
+    assert len(client.messages.calls) == calls + 1
+    assert client.get(f"/v1/trips/{tid}/bookings/{hotel['id']}/lounges", headers=H).status_code == 422
+
+
+def test_lounges_need_a_real_airport(client):
+    tid = import_reel(client)["trip_id"]
+    no_origin = client.post(f"/v1/trips/{tid}/bookings", json={"kind": "flight", "title": "XX 1"}, headers=H).json()["bookings"][0]
+    assert client.get(f"/v1/trips/{tid}/bookings/{no_origin['id']}/lounges", headers=H).json()["status"] == "no_airport"
+    fake = client.post(f"/v1/trips/{tid}/bookings", json={"kind": "flight", "title": "XX 2", "origin": "Nowhere"}, headers=H).json()["bookings"][-1]
+    client.messages.outputs[LoungeList] = LoungeList(airport_name=None, lounges=[])
+    assert client.get(f"/v1/trips/{tid}/bookings/{fake['id']}/lounges", headers=H).json()["status"] == "no_airport"

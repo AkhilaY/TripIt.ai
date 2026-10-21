@@ -75,6 +75,8 @@ function mapsLinks(p, trip) {
 // ---------- State & cached data ----------
 
 const S = {
+  disc: { kind: 'restaurants', area: 'home', tripId: null, data: {} },
+  homeCity: undefined,  // home city setting (null when unset)
   trips: null,          // list from /v1/trips
   trip: {},             // id -> TripDetail
   places: null,         // all places (map tab)
@@ -192,16 +194,16 @@ function route() {
   if (parts[0] === 'packing' && parts[1]) return { name: 'packing', id: parts[1], params };
   if (parts[0] === 'events' && parts[1]) return { name: 'events', id: parts[1], params };
   if (parts[0] === 'edit' && parts[1] && parts[2]) return { name: 'edit', id: parts[1], editId: parts[2], params };
-  if (['map', 'imports', 'settings', 'setup', 'add', 'concierge', 'taste'].includes(parts[0])) return { name: parts[0], params };
+  if (['map', 'imports', 'settings', 'setup', 'add', 'concierge', 'taste', 'discover'].includes(parts[0])) return { name: parts[0], params };
   return { name: 'trips', params };
 }
 
 const TAB_FOR = {
   trips: 'trips', trip: 'trips', place: 'trips', today: 'trips', edit: 'trips', packing: 'trips', events: 'trips', map: 'map', concierge: 'concierge',
-  imports: 'imports', settings: 'settings', taste: 'settings', add: 'trips',
+  imports: 'settings', discover: 'discover', settings: 'settings', taste: 'settings', add: 'trips',
 };
-const TAB_INDEX = { trips: 0, map: 1, concierge: 2, imports: 3, settings: 4 };
-const DEPTH = { trip: 1, today: 1, taste: 1, packing: 1, events: 1, edit: 2, place: 2 };
+const TAB_INDEX = { trips: 0, map: 1, discover: 2, concierge: 3, settings: 4 };
+const DEPTH = { imports: 1, trip: 1, today: 1, taste: 1, packing: 1, events: 1, edit: 2, place: 2 };
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
 let renderToken = 0;
 let lastKey = '';
@@ -544,7 +546,7 @@ function emptyState(color, icon, title, text, extra = '') {
 function tripCard(t, i) {
   const cats = t.categories.length ? t.categories : ['other'];
   const g2 = cats[1] ? `var(--c-${cats[1]})` : 'var(--c-indigo)';
-  const meta = [t.country, plural(t.place_count, 'place')].filter(Boolean).join(' · ');
+  const meta = [t.kind === 'local' ? 'Near home' : t.country, plural(t.place_count, 'place')].filter(Boolean).join(' · ');
   const cover = t.cover_photo
     ? `<img src="${esc(photoUrl(t.cover_photo, 900))}" alt="" ${i > 1 ? 'loading="lazy"' : ''} decoding="async" onerror="this.remove()">` : '';
   return `<a class="card" href="#/trip/${t.id}" style="--g1: var(--c-${cats[0]}); --g2: ${g2}">
@@ -1040,7 +1042,78 @@ function selBar() {
     <button class="btn small" data-act="selectadd" ${n ? '' : 'disabled'}>${ICON.calendarPlus}Add to itinerary</button></div>`;
 }
 
+// ---------- Discover ----------
+
+const DISC_KINDS = [['restaurants', 'Restaurants'], ['coffee', 'Coffee'], ['bars', 'Bars'], ['dessert', 'Dessert'], ['things', 'Things to do']];
+const PRICE_SIGNS = ['', '$', '$$', '$$$', '$$$$'];
+
+function discKey() {
+  const d = S.disc;
+  return `${d.area}|${d.area === 'trip' ? d.tripId : ''}|${d.kind}`;
+}
+
+async function loadDiscover(force = false) {
+  const d = S.disc;
+  const key = discKey();
+  if (!force && d.data[key] !== undefined) return;
+  d.data[key] = null; // asked; renders quietly when the answer arrives
+  const q = new URLSearchParams({ kind: d.kind, area: d.area });
+  try {
+    if (d.area === 'trip') q.set('trip_id', d.tripId);
+    if (d.area === 'here') { const pos = await getPosition(); q.set('lat', pos.latitude); q.set('lon', pos.longitude); }
+    if (force) q.set('refresh', 'true');
+    d.data[key] = await api(`/v1/discover?${q}`);
+  } catch (e) {
+    d.data[key] = { status: 'error', items: [], message: e.message };
+  }
+  render({ quiet: true });
+}
+
+function discoverCard(it) {
+  const meta = [it.kind_label, it.price_level ? PRICE_SIGNS[it.price_level] : null, it.distance_m != null ? `${fmtDistance(it.distance_m)} away` : null].filter(Boolean);
+  const rating = it.rating ? `<span class="s">★ ${it.rating.toFixed(1)}${it.rating_count ? ` · ${it.rating_count.toLocaleString()} reviews` : ''}</span>` : '';
+  const img = it.photo ? `<span class="dthumb"><img src="${esc(it.photo)}" alt="" loading="lazy" decoding="async" onerror="this.remove()"></span>` : `<span class="dthumb">${ICON.pin}</span>`;
+  const save = it.saved ? `<span class="saved-tag">${ICON.check}Saved</span>`
+    : `<button class="btn tint small" data-act="discsave" data-id="${esc(it.id)}">Save</button>`;
+  return `<div class="row prow dcard">${img}<span class="main">
+    <span class="t">${esc(it.name)}</span><span class="s">${esc(meta.join(' · '))}</span>${rating}
+    ${it.award ? `<span class="award">${ICON.sparkle}${esc(it.award)}</span>` : ''}
+    ${it.why ? `<span class="s why">${esc(it.why)}</span>` : ''}
+    ${it.maps_url ? `<a class="s link" href="${esc(it.maps_url)}" target="_blank" rel="noopener">Open in Google Maps</a>` : ''}</span>${save}</div>`;
+}
+
+async function discoverView() {
+  const d = S.disc;
+  if (S.homeCity === undefined) S.homeCity = await api('/v1/home').catch(() => null);
+  if (d.area === 'home' && !S.homeCity) d.area = 'here';
+  const trips = (await cachedTrips()).filter((t) => t.kind !== 'local' && t.place_count);
+  if (d.area === 'trip' && !trips.some((t) => t.id === d.tripId)) d.area = S.homeCity ? 'home' : 'here';
+  loadDiscover();
+  const res = d.data[discKey()];
+  const areaLabel = d.area === 'home' ? S.homeCity.city : d.area === 'here' ? 'Near me' : (trips.find((t) => t.id === d.tripId) || {}).name;
+  const chips = `<div class="fchips" role="group" aria-label="Kind of place">${DISC_KINDS.map(([k, label]) =>
+    `<button class="fchip${d.kind === k ? ' on' : ''}" data-act="disckind" data-kind="${k}" aria-pressed="${d.kind === k}">${label}</button>`).join('')}</div>`;
+  const controls = `<div class="homectl"><button class="pillbtn" data-act="discarea">${ICON.pin}${esc(areaLabel || 'Choose area')}</button>
+    <button class="pillbtn" data-act="discrefresh">Refresh</button></div>`;
+  let body;
+  if (res === undefined || res === null) body = '<div class="empty"><span class="spinner"></span><p>Finding the best nearby…</p></div>';
+  else if (res.status === 'disabled') body = emptyState('gray', 'compass', 'Discover isn’t switched on', 'It needs a Google Maps key on the server (GOOGLE_MAPS_API_KEY).');
+  else if (res.status === 'no_area') body = emptyState('gray', 'pin', 'Where should we look?', 'Set your home city in Settings, or choose Near me.',
+    '<a class="btn" href="#/settings">Open Settings</a>');
+  else if (res.status === 'error') body = emptyState('gray', 'warn', 'Couldn’t load recommendations', esc(res.message || 'Try again in a moment.'),
+    '<button class="btn tint" data-act="discrefresh">Try again</button>');
+  else if (!res.items.length) body = emptyState('gray', 'pinslash', 'Nothing well-rated found here', 'Try another kind of place or a wider area.');
+  else {
+    body = `<div class="section"><div class="group thumbs">${res.items.map(discoverCard).join('')}</div>
+      <div class="section-f">Ranked by Google ratings and your taste. Awards such as Michelin stars come from Claude’s own knowledge, not a live feed, so check the Michelin Guide before you go.</div></div>`;
+  }
+  return `${navbar('Discover', { right: addButton })}<h1 class="largetitle" data-anchor>Discover</h1>
+    <div class="subtitle"><span>Well-rated places${areaLabel ? ` · ${esc(areaLabel)}` : ''}</span></div>${chips}${controls}${body}`;
+}
+
 const VIEWS = {
+  async discover() { return discoverView(); },
+
   async trips() {
     const trips = await cachedTrips();
     if (S.home.tab === 'places') return placesHome(trips);
@@ -1063,21 +1136,24 @@ const VIEWS = {
 
   async trip(r) {
     const trip = await cachedTrip(r.id);
-    if (trip.places.some((p) => !p.booking_checked_at)) ensureNeeds([trip.id]);
-    const mode = ['places', 'itinerary', 'bookings', 'map'].includes(r.mode) ? r.mode : 'places';
+    if (trip.kind !== 'local' && trip.places.some((p) => !p.booking_checked_at)) ensureNeeds([trip.id]);
+    const local = trip.kind === 'local';
+    const modes = local ? ['places', 'map'] : ['places', 'itinerary', 'bookings', 'map'];
+    const mode = modes.includes(r.mode) ? r.mode : 'places';
     const right = `<span class="gcluster">${r.mode === 'bookings' ? `<button class="gbtn" data-act="addbooking" data-id="${trip.id}" aria-label="Add a booking">${ICON.plus}</button>` : ''}<button class="gbtn" data-act="sharetrip" data-id="${trip.id}" aria-label="Share trip">${ICON.share}</button>
       <button class="gbtn" data-act="tripmenu" data-id="${trip.id}" aria-label="More">${ICON.more}</button></span>`;
-    const seg = segControl(`seg:${trip.id}`, ['places', 'itinerary', 'bookings', 'map'].map((m) => ({
+    const seg = segControl(`seg:${trip.id}`, modes.map((m) => ({
       on: m === mode,
       html: `<a href="#/trip/${trip.id}${m === 'places' ? '' : `/${m}`}" class="${m === mode ? 'on' : ''}" ${m === mode ? 'aria-current="page"' : ''}>${{ itinerary: 'Plan' }[m] || cap(m)}</a>`,
     })));
-    const meta = [trip.country, plural(trip.places.length, 'place'), trip.day_count ? `${trip.day_count}-day plan` : ''].filter(Boolean).join(' · ');
+    const meta = [local ? 'Near home' : trip.country, plural(trip.places.length, 'place'), trip.day_count ? `${trip.day_count}-day plan` : ''].filter(Boolean).join(' · ');
     const cats = [...new Set(trip.places.map((p) => p.category))].sort((a, b) => CAT_ORDER.indexOf(a) - CAT_ORDER.indexOf(b));
     const head = `${navbar(trip.name, { back: '#/', backLabel: 'Trips', right })}
       <h1 class="largetitle" data-anchor>${esc(trip.name)}</h1>
       <div class="subtitle"><span>${esc(meta)}</span><span class="tiles-inline" aria-hidden="true">${cats.slice(0, 6).map((c) => catTile(c, 'sm')).join('')}</span>
         ${trip.share_token ? `<button class="chip-shared" data-act="sharetrip" data-id="${trip.id}">${ICON.link}Shared</button>` : ''}</div>${seg}`;
 
+    if (mode === 'places' && local) return head + placesList(trip);
     if (mode === 'places') {
       if (S.packing[trip.id] === undefined) { // for the packing card's progress
         S.packing[trip.id] = null;
@@ -1376,7 +1452,7 @@ const VIEWS = {
   async imports() {
     revalidate('jobs', loadJobs);
     schedulePoll();
-    return `${navbar('Imports', { right: addButton })}
+    return `${navbar('Imports', { back: '#/settings', backLabel: 'Settings', right: addButton })}
       <h1 class="largetitle" data-anchor>Imports</h1>
       ${S.jobs.length ? `<div class="section"><div class="group tiles">${S.jobs.map(jobRow).join('')}</div>
         <div class="section-f">Tap a finished import to open its trip.</div></div>`
@@ -1386,6 +1462,7 @@ const VIEWS = {
   async settings() {
     if (!S.config) { S.config = await api('/v1/config'); configureMaps({ googleMapsKey: S.config.google_maps_key }); }
     if (!S.profile) await loadProfile().catch(() => {});
+    if (S.homeCity === undefined) S.homeCity = await api('/v1/home').catch(() => null);
     const origin = location.origin;
     const key = getKey();
     const geocoder = { google: 'Google Places', openstreetmap: 'OpenStreetMap', none: 'Off' }[S.config.geocoder] || S.config.geocoder;
@@ -1401,6 +1478,10 @@ const VIEWS = {
     return `${navbar('Settings')}<h1 class="largetitle" data-anchor>Settings</h1>
 
       <div class="section"><div class="section-h">Personal</div><div class="group tiles">
+        <button class="row" data-act="homecity">${tile('green', 'pin')}<span class="main"><span class="t">Home city</span>
+          <span class="s">${esc(S.homeCity ? [S.homeCity.city, S.homeCity.country].filter(Boolean).join(', ') : 'Places here are saved as local favourites, not trips')}</span></span>${ICON.chev}</button>
+        <a class="row" href="#/imports">${tile('blue', 'tray')}<span class="main"><span class="t">Imports</span>
+          <span class="s">${S.jobs.some((j) => ACTIVE.has(j.status)) ? 'Working on a reel…' : 'Reels you’ve shared and their status'}</span></span>${ICON.chev}</a>
         <a class="row" href="#/taste">${tile('gold', 'sparkle')}<span class="main"><span class="t">Your travel taste</span>
           <span class="s">${esc(tasteSummary(S.profile) || 'Tailors your edits, briefings and concierge')}</span></span>${ICON.chev}</a>
       </div></div>
@@ -2830,10 +2911,17 @@ async function onAction(act, el) {
 
     case 'tripmenu': {
       const t = S.trip[el.dataset.id];
+      const setKind = (kind) => async () => {
+        S.trip[t.id] = await api(`/v1/trips/${t.id}`, { method: 'PATCH', body: { kind } });
+        fetchedAt.trips = 0;
+        toast(kind === 'local' ? 'Saved as a local collection' : 'Now a trip');
+        render();
+      };
       const actions = [
-        { label: t.day_count ? 'Re-plan trip' : 'Plan my trip', run: () => planSheet(t) },
+        ...(t.kind === 'local' ? [] : [{ label: t.day_count ? 'Re-plan trip' : 'Plan my trip', run: () => planSheet(t) }]),
         { label: 'Add a place', run: () => addSheet({ tripId: t.id }) },
-        { label: 'Packing list', run: () => go(`#/packing/${t.id}`) },
+        ...(t.kind === 'local' ? [{ label: 'Turn into a trip', run: setKind('trip') }] : [{ label: 'Mark as near home', run: setKind('local') }]),
+        ...(t.kind === 'local' ? [] : [{ label: 'Packing list', run: () => go(`#/packing/${t.id}`) }]),
         { label: 'Save for offline', run: () => saveOffline(t.id) },
         { label: 'Rename', run: () => renameSheet(t) },
         { label: 'Update hours, photos & ratings', run: async () => {
@@ -2924,6 +3012,54 @@ async function onAction(act, el) {
     case 'homecat': S.home.cat = el.dataset.cat; saveHome(); render(); return;
     case 'homestarred': S.home.starred = !S.home.starred; render(); return;
     case 'homeclear': S.home.cat = 'all'; S.home.starred = false; S.home.trip = 'all'; saveHome(); render(); return;
+    case 'disckind': S.disc.kind = el.dataset.kind; render(); return;
+    case 'discrefresh': loadDiscover(true); render({ quiet: true }); return;
+    case 'discarea': {
+      const trips = (S.trips || []).filter((t) => t.kind !== 'local' && t.place_count);
+      const mark = (on) => (on ? '✓ ' : '');
+      openSheet({ type: 'actions', title: 'Look near', actions: [
+        { label: `${mark(S.disc.area === 'here')}My location`, run: () => { S.disc.area = 'here'; render(); } },
+        ...(S.homeCity ? [{ label: `${mark(S.disc.area === 'home')}${S.homeCity.city} (home)`, run: () => { S.disc.area = 'home'; render(); } }] : []),
+        ...trips.map((t) => ({ label: `${mark(S.disc.area === 'trip' && S.disc.tripId === t.id)}${t.name}`, run: () => { S.disc.area = 'trip'; S.disc.tripId = t.id; render(); } })),
+      ] });
+      return;
+    }
+    case 'discsave': {
+      const res = S.disc.data[discKey()];
+      const it = res && res.items.find((x) => x.id === el.dataset.id);
+      if (!it) return;
+      el.disabled = true;
+      try {
+        const out = await api('/v1/places', { method: 'POST', body: { candidate_id: it.id, trip_id: S.disc.area === 'trip' ? S.disc.tripId : null } });
+        it.saved = true;
+        fetchedAt.trips = 0; S.places = null;
+        toast(out.created ? `Saved ${out.place.name}` : `${out.place.name} was already saved`);
+      } catch (e) { toast(e.message, true); }
+      render({ quiet: true });
+      return;
+    }
+    case 'homecity': {
+      const st = { city: S.homeCity ? S.homeCity.city : '' };
+      openSheet({
+        type: 'form', title: 'Home city', confirm: 'Save', st,
+        body: () => `<div class="section"><div class="group"><div class="row"><input class="field" id="home-city" value="${esc(st.city)}" placeholder="e.g. Brooklyn, NY" maxlength="120" autocomplete="off" aria-label="Home city"></div></div>
+          <div class="section-f">Places you save in or near this city go to a local collection instead of a trip, and Discover looks here first.</div></div>
+          ${S.homeCity ? '<div class="section"><div class="group"><button class="row" data-act="homeclear2"><span class="main"><span class="t" style="color:var(--warn)">Remove home city</span></span></button></div></div>' : ''}`,
+        async ok() {
+          const city = $('#home-city').value.trim();
+          if (!city) return;
+          S.homeCity = await api('/v1/home', { method: 'PUT', body: { city } });
+          S.disc.data = {};
+          closeSheet(); toast(`Home is ${S.homeCity.city}`); render();
+        },
+      });
+      return;
+    }
+    case 'homeclear2':
+      await api('/v1/home', { method: 'DELETE' });
+      S.homeCity = null; S.disc.data = {};
+      closeSheet(); render();
+      return;
     case 'hometrip': {
       const mark = (on) => (on ? '✓ ' : '');
       openSheet({ type: 'actions', title: 'Show places from', actions: [

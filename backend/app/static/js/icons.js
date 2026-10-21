@@ -23,6 +23,7 @@ export const ICON = {
   more: sv('<circle cx="12" cy="12" r="9.5"/><circle cx="8" cy="12" r=".6" fill="currentColor"/><circle cx="12" cy="12" r=".6" fill="currentColor"/><circle cx="16" cy="12" r=".6" fill="currentColor"/>'),
   trips: sv(P('M4 8h16v12H4zM9 8V5h6v3M4 13h16')),
   map: sv(P('M9 4L3 6.5v13.5L9 17.5l6 2.5 6-2.5V4l-6 2.5zM9 4v13.5M15 6.5V20')),
+  compass: sv(P('M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM15.5 8.5l-2 5-5 2 2-5z')),
   tray: sv(P('M12 3v10M8 9l4 4 4-4M3 14l2-8h3M21 14l-2-8h-3M3 14v6h18v-6h-5a4 4 0 0 1-8 0z')),
   gear: sv('<circle cx="12" cy="12" r="3"/>' + P('M12 2v3M12 19v3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M2 12h3M19 12h3M4.9 19.1L7 17M17 7l2.1-2.1')),
   calendar: sv(P('M4 6h16v14H4zM4 10h16M8 3v4M16 3v4')),

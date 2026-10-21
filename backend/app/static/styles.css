@@ -822,3 +822,10 @@ button.row.sel { cursor: pointer; }
 .evon { display: inline-flex; align-items: center; gap: 6px; color: var(--green); font-weight: 600; }
 .evon svg { width: 15px; height: 15px; }
 .warnpill { color: var(--warn); }
+
+/* ---------- Booking needs ---------- */
+.needchip { display: inline-block; margin-left: 8px; padding: 2px 8px; border-radius: 999px; font-size: 10px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; white-space: nowrap; vertical-align: 1px; }
+.needchip.required { color: var(--warn); background: color-mix(in srgb, var(--warn) 13%, transparent); }
+.needchip.recommended { color: var(--link); background: var(--gold-soft); }
+.needline { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px; font-size: 14px; color: var(--secondary); }
+.needline .needchip { margin-left: 0; }

@@ -182,6 +182,7 @@ MIGRATIONS = {
         ("rating", "REAL"), ("rating_count", "INTEGER"), ("rating_checked_at", "TEXT"),
         ("website", "TEXT"), ("phone", "TEXT"), ("contact_checked_at", "TEXT"),
         ("reserve_url", "TEXT"), ("reserve_provider", "TEXT"), ("reserve_checked_at", "TEXT"),
+        ("booking_kind", "TEXT"), ("booking_need", "TEXT"), ("booking_note", "TEXT"), ("booking_checked_at", "TEXT"),
     ],
     "trips": [("share_token", "TEXT")],
 }
@@ -192,7 +193,7 @@ PLACE_COLUMNS = (
     "longitude", "maps_url", "resolved_name", "day_number", "day_order", "time_of_day", "day_note",
     "opening_hours", "hours_checked_at", "photos", "photos_checked_at", "must_do", "start_time",
     "rating", "rating_count", "rating_checked_at", "website", "phone", "contact_checked_at",
-    "reserve_url", "reserve_provider", "reserve_checked_at",
+    "reserve_url", "reserve_provider", "reserve_checked_at", "booking_kind", "booking_need", "booking_note", "booking_checked_at",
 )
 BOOKING_COLUMNS = (
     "kind", "title", "start_at", "end_at", "origin", "destination", "address", "confirmation", "party_size",

@@ -83,6 +83,7 @@ from .models import (
 )
 from .menu_browser import BrowserRenderer, browser_available
 from .menus import MENU_CATEGORIES, MenuService, SafeFetcher
+from .needs import NeedsService
 from .packing import PackingService
 from .photos import PhotoStore
 from .reserve import find_reserve_link
@@ -110,6 +111,7 @@ def build_services(app: FastAPI, settings: Settings) -> None:
     app.state.router = Router(db, settings)
     app.state.push = Push(db, Path(settings.database_path).parent / "vapid_private.pem", settings.push_contact)
     app.state.curator = Curator(db, app.state.claude)
+    app.state.needs = NeedsService(db, app.state.claude)
     app.state.events = EventsService(db, app.state.claude, Ticketmaster(settings), app.state.library)
     app.state.packing = PackingService(db, app.state.claude, Weather(settings), app.state.library)
     fetcher = SafeFetcher()
@@ -376,6 +378,17 @@ async def tidy_trip(trip_id: str, body: TidyRequest, request: Request) -> TripDe
     return _trip_or_404(request, trip_id)
 
 
+@app.post("/v1/trips/{trip_id}/booking-needs", response_model=TripDetail, dependencies=[Auth])
+async def check_booking_needs(trip_id: str, request: Request) -> TripDetail:
+    """Marks which places need a reservation or tickets (once per place; Claude's best judgement)."""
+    trip = _trip_or_404(request, trip_id)
+    try:
+        await request.app.state.needs.check(trip)
+    except ClaudeError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    return _trip_or_404(request, trip_id)
+
+
 # ---------- What's on ----------
 
 
@@ -578,7 +591,7 @@ def _public_trip(trip: TripDetail, settings: Settings) -> dict:
     """What a shared link shows: everything but your own notes."""
     data = trip.model_dump(mode="json", exclude={"share_token", "bookings"})
     for p in data["places"]:
-        for key in ("user_notes", "hours_checked_at", "photos_checked_at", "rating_checked_at", "contact_checked_at", "reserve_checked_at"):
+        for key in ("user_notes", "hours_checked_at", "photos_checked_at", "rating_checked_at", "contact_checked_at", "reserve_checked_at", "booking_checked_at"):
             p.pop(key, None)
     data["reels"] = [
         {k: r[k] for k in ("id", "url", "platform", "title", "creator")}

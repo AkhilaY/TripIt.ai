@@ -229,6 +229,20 @@ class ReadBookingsRequest(BaseModel):
     images: list[str] = Field(default=[], max_length=6, description="Base64 JPEG images (data: URLs are fine).")
 
 
+# ---------- Booking needs ----------
+
+
+class BookingNeedItem(BaseModel):
+    id: str
+    kind: Literal["reservation", "tickets", "none"] = Field(description="reservation for a table at a restaurant, bar or cafe; tickets for entry to an attraction, show or activity; none when you can simply walk in or enter free.")
+    need: Literal["required", "recommended", "none", "unknown"] = Field(description="required: you usually can't get in without booking ahead; recommended: booking ahead is wise; none: walk-ins are normal; unknown: you can't tell.")
+    note: Optional[str] = Field(description="Under 12 words, e.g. 'Books out weeks ahead' or 'Timed tickets; buy online'. Null when there is nothing useful to add.")
+
+
+class BookingNeedResult(BaseModel):
+    items: list[BookingNeedItem]
+
+
 # ---------- Events ----------
 
 EventCategory = Literal["music", "arts", "sports", "family", "other"]
@@ -418,6 +432,10 @@ class Place(BaseModel):
     rating: Optional[float] = None  # Google's rating out of 5, when the place was found there
     rating_count: Optional[int] = None
     rating_checked_at: Optional[datetime] = None
+    booking_kind: Optional[Literal["reservation", "tickets"]] = None  # what a visit needs booking: a table or entry tickets
+    booking_need: Optional[Literal["required", "recommended"]] = None  # None = no booking needed, or not known
+    booking_note: Optional[str] = None
+    booking_checked_at: Optional[datetime] = None
     reserve_url: Optional[str] = None  # the restaurant's own page on Resy, OpenTable, Tock or SevenRooms
     reserve_provider: Optional[str] = None
     reserve_checked_at: Optional[datetime] = None

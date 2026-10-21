@@ -110,6 +110,7 @@ const S = {
   bkflow: null,         // confirmations read by Claude, being checked one by one
   packing: {},          // tripId -> packing list (null when none yet)
   events: {},           // tripId -> events during the trip (null while loading)
+  needsTried: {},       // tripId -> already asked which places need booking this visit
   eventFilter: {},      // tripId -> chosen filter on the events page
   packBusy: {},         // tripId -> true while a list is being made
   reserveTried: {},     // placeId -> already looked for a booking link this visit
@@ -511,7 +512,7 @@ function placeRow(p, { home = false } = {}) {
     ? `<span class="distchip">${fmtDistance(distanceTo(p))} away</span>` : '';
   const body = `${thumb(p, 56)}
     <span class="main"><span class="t ${p.visited ? 'strike' : ''}">${esc(p.name)}${isNew(p)}${p.latitude == null ? ' <span class="flag" title="Not on the map yet">●</span>' : ''}</span>
-    <span class="s">${esc(sub.join(' · '))}${ratingChip(p)}${hotChip(p)}${dayChip(p)}${dist}</span>
+    <span class="s">${esc(sub.join(' · '))}${needChip(p)}${ratingChip(p)}${hotChip(p)}${dayChip(p)}${dist}</span>
     ${p.recommended_items.length ? `<span class="s clip">Try: ${esc(p.recommended_items.join(', '))}</span>` : ''}
     ${hoursLine(p)}${hereChip(p)}</span>`;
   if (S.sel.on) {
@@ -987,6 +988,7 @@ const homeSwitch = () => segControl('home', [['trips', 'Trips'], ['places', 'Pla
 
 async function placesHome(trips) {
   const places = await cachedPlaces();
+  ensureNeeds([...new Set(places.filter((p) => !p.booking_checked_at).map((p) => p.trip_id))]);
   const h = S.home;
   if (h.trip !== 'all' && !trips.some((t) => t.id === h.trip)) h.trip = 'all';
   const tripName = Object.fromEntries(trips.map((t) => [t.id, t.name]));
@@ -1061,6 +1063,7 @@ const VIEWS = {
 
   async trip(r) {
     const trip = await cachedTrip(r.id);
+    if (trip.places.some((p) => !p.booking_checked_at)) ensureNeeds([trip.id]);
     const mode = ['places', 'itinerary', 'bookings', 'map'].includes(r.mode) ? r.mode : 'places';
     const right = `<span class="gcluster">${r.mode === 'bookings' ? `<button class="gbtn" data-act="addbooking" data-id="${trip.id}" aria-label="Add a booking">${ICON.plus}</button>` : ''}<button class="gbtn" data-act="sharetrip" data-id="${trip.id}" aria-label="Share trip">${ICON.share}</button>
       <button class="gbtn" data-act="tripmenu" data-id="${trip.id}" aria-label="More">${ICON.more}</button></span>`;
@@ -1220,6 +1223,7 @@ const VIEWS = {
         <h1 data-anchor>${esc(p.name)}${isNew(p)}</h1>
         <span class="loc">${esc([p.neighborhood, p.city].filter(Boolean).join(' · '))}</span>
         ${p.must_do ? `<span class="mustline">${ICON.star}Starred: first in your lists, and the planner always fits it in</span>` : ''}
+        ${p.booking_need && NEED_LABEL[p.booking_kind] ? `<span class="needline">${needChip(p)}${p.booking_note ? ` ${esc(p.booking_note)}` : ''}</span>` : ''}
         ${p.mention_count >= 2 ? `<span class="hotline">${ICON.flame}Recommended in ${p.mention_count} of your saved reels</span>` : ''}
         ${st ? `<span class="status hours-${st.state}">${esc(st.label)}</span>` : ''}
         ${p.resolved_name ? `<span class="s">On maps as ${esc(p.resolved_name)}</span>` : ''}
@@ -1681,7 +1685,7 @@ function itinerary(trip) {
         const inner = `<span class="stopnum" style="${cvar(p.category)}">${i + 1}</span>
           ${thumb(p, 52)}
           <span class="main"><span class="t ${p.visited ? 'strike' : ''}">${esc(p.name)}${starMark(p)}${isNew(p)}</span>
-          <span class="s">${esc([p.start_time ? fmtClock(p.start_time) : cap(p.time_of_day || ''), CATS[p.category], p.neighborhood].filter(Boolean).join(' · '))}</span>
+          <span class="s">${esc([p.start_time ? fmtClock(p.start_time) : cap(p.time_of_day || ''), CATS[p.category], p.neighborhood].filter(Boolean).join(' · '))}${needChip(p)}</span>
           ${todays && !conflict ? `<span class="s">${ICON.clock.replace('<svg', '<svg class="inline-ic"')}${esc(todays)}</span>` : ''}
           ${conflict ? `<span class="warnline">${ICON.warn}${esc(conflict)}${todays && todays !== 'Closed' ? ` (${esc(todays)})` : ''}</span>` : ''}
           ${p.day_note ? `<span class="daynote">${esc(p.day_note)}</span>` : ''}
@@ -2197,10 +2201,13 @@ function reservationSection(p, trip) {
         <span class="s">${esc([booking.party_size ? `Table for ${booking.party_size}` : '', booking.confirmation ? `Confirmation ${booking.confirmation}` : ''].filter(Boolean).join(' · '))}</span></span>${ICON.chev}</button>
       ${link ? `<a class="row" href="${esc(link)}" target="_blank" rel="noopener" data-act="link">${tile('gray', 'link')}<span class="main"><span class="t link">Change or cancel on ${provider}</span></span>${ICON.chev}</a>` : ''}</div></div>`;
   }
-  if (!link) return '';
+  const chatgpt = `<button class="row" data-act="chatgptbook" data-id="${p.id}">${tile('green', 'sparkle')}<span class="main"><span class="t">Book with ChatGPT</span><span class="s">Opens ChatGPT with the details filled in</span></span>${ICON.chev}</button>`;
+  if (!MENU_CATS.has(p.category)) return '';
+  if (!link) return `<div class="section"><div class="section-h">Reservation</div><div class="group tiles">${chatgpt}</div></div>`;
   return `<div class="section"><div class="section-h">Reservation</div><div class="group tiles">
     <a class="row" href="${esc(link)}" target="_blank" rel="noopener" data-reserve="${p.id}" data-act="link">${tile('gold', 'calendarPlus')}<span class="main"><span class="t">Reserve a table</span>
       <span class="s">Opens ${provider} in your browser</span></span><span class="brandchip">${provider}</span>${ICON.chev}</a>
+    ${chatgpt}
     <button class="row" data-act="bookedplace" data-id="${p.id}">${tile('green', 'done')}<span class="main"><span class="t">I already booked</span><span class="s">Add the time and confirmation</span></span>${ICON.chev}</button></div>
     <div class="section-f">TripIt can’t see availability. It takes you to the restaurant’s own booking page, then asks whether you booked so it can save the time.</div></div>`;
 }
@@ -2407,6 +2414,52 @@ function tonightEvents(trip, day) {
   if (!list.length) return '';
   return `<div class="section"><div class="section-h">${ICON.ticket}On nearby</div><div class="group tiles">${list.map((e) => `<a class="row" href="#/events/${trip.id}">
     <span class="main"><span class="t">${esc(e.name)}</span><span class="s">${esc([parseWhen(e.start_at).time ? fmtClock(parseWhen(e.start_at).time) : '', e.venue].filter(Boolean).join(' · '))}</span></span>${ICON.chev}</a>`).join('')}</div></div>`;
+}
+
+// ---------- Booking ahead: which places need a reservation or tickets, and a ChatGPT handoff ----------
+
+const NEED_LABEL = {
+  reservation: { required: 'Reservation required', recommended: 'Book ahead' },
+  tickets: { required: 'Tickets required', recommended: 'Book tickets ahead' },
+};
+const needChip = (p) => (p.booking_need && NEED_LABEL[p.booking_kind]
+  ? `<span class="needchip ${p.booking_need}" title="${esc(p.booking_note || '')}">${NEED_LABEL[p.booking_kind][p.booking_need]}</span>` : '');
+
+/** Asks the server (once per place) which places need a reservation or tickets, then repaints quietly. */
+function ensureNeeds(tripIds) {
+  tripIds.filter((id) => !S.needsTried[id]).slice(0, 2).forEach((id) => {
+    S.needsTried[id] = true;
+    api(`/v1/trips/${id}/booking-needs`, { method: 'POST' }).then((res) => { syncTrip(res); render({ quiet: true }); }).catch(() => { /* try again next visit */ });
+  });
+}
+
+function dateOfPlace(trip, p) {
+  if (!trip.start_date || !p.day_number) return '';
+  const [y, m, d] = trip.start_date.split('-').map(Number);
+  return isoDate(new Date(y, m - 1, d + p.day_number - 1));
+}
+
+/** "Book with ChatGPT": a message with the restaurant and the details filled in, opened in ChatGPT. */
+function chatgptSheet(p, trip) {
+  const st = { date: dateOfPlace(trip, p), time: p.start_time || '19:30', guests: 2, text: (S.profile && S.profile.notes) || '' };
+  openSheet({
+    type: 'form', title: 'Book with ChatGPT', confirm: 'Open ChatGPT', st,
+    body: () => `<div class="section"><div class="group">
+      <div class="row">${tile('red', 'calendar')}<label class="main"><span class="s">Date</span><input class="field" type="date" data-act="packfield" data-f="date" value="${esc(st.date)}"></label></div>
+      <div class="row">${tile('indigo', 'clock')}<label class="main"><span class="s">Time</span><input class="field" type="time" data-act="packfield" data-f="time" value="${esc(st.time)}"></label></div>
+      <div class="row">${tile('teal', 'trips')}<label class="main"><span class="s">Guests</span><input class="field" type="number" min="1" max="20" inputmode="numeric" data-act="packfield" data-f="guests" value="${esc(st.guests)}"></label></div>
+      <div class="row">${tile('gray', 'note')}<label class="main"><span class="s">Anything else? (allergies, a special occasion, seating)</span><input class="field" data-act="packfield" data-f="text" placeholder="Optional" value="${esc(st.text)}" autocomplete="off"></label></div></div>
+      <div class="section-f">This opens ChatGPT with a message about ${esc(p.name)} already written. ChatGPT can book through OpenTable, Resy and Yelp where it’s available, and you’ll need to be signed in to ChatGPT. It sends what’s shown here, plus the restaurant’s phone, website and map link.</div></div>`,
+    ok() {
+      const where = [p.address || [p.neighborhood, p.city].filter(Boolean).join(', ')].filter(Boolean).join('');
+      const when = st.date ? ` on ${new Date(`${st.date}T12:00`).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}${st.time ? ` at around ${fmtClock(st.time)}` : ''}` : (st.time ? ` at around ${fmtClock(st.time)} (please ask me which day)` : '');
+      const extras = [p.phone && `Phone: ${p.phone}`, safeUrl(p.website) && `Website: ${p.website}`, `Map: ${mapsLinks(p, trip).google}`].filter(Boolean).join('\n');
+      const prompt = `Please book a table for ${Number(st.guests) || 2} at ${p.name}${where ? ` (${where})` : ''}${when}.\n\nFind real availability on OpenTable, Resy or Yelp, show me the open times, and book the best one once I confirm. If nothing fits, suggest the closest times or similar places nearby.\n\n${extras}${st.text.trim() ? `\n\nNotes: ${st.text.trim()}` : ''}`.slice(0, 1500);
+      noteReserveClick(p.id); // when you come back, TripIt asks whether you booked
+      window.open(`https://chatgpt.com/?q=${encodeURIComponent(prompt)}`, '_blank', 'noopener');
+      closeSheet();
+    },
+  });
 }
 
 /** Brings a trip's places into the caches after the itinerary changed on the server. */
@@ -2911,6 +2964,7 @@ async function onAction(act, el) {
       return;
     }
     case 'tidy': tidySheet(S.trip[el.dataset.id]); return;
+    case 'chatgptbook': { const p = findAnyPlace(el.dataset.id); chatgptSheet(p, S.trip[p.trip_id]); return; }
     case 'eventfilter': S.eventFilter[el.dataset.trip] = el.dataset.f; render(); return;
     case 'eventsrefresh': {
       const id = el.dataset.id;
@@ -3215,7 +3269,7 @@ document.addEventListener('input', (ev) => {
   const el = ev.target;
   if (el.dataset && ['notes', 'prefs'].includes(el.dataset.act)) onAction(el.dataset.act, el);
   if (el.dataset && el.dataset.act === 'bkfield' && el.dataset.f !== 'kind' && S.sheet && S.sheet.st) onAction('bkfield', el);
-  if (el.dataset && el.dataset.act === 'packfield' && el.dataset.f === 'text' && S.sheet && S.sheet.st) onAction('packfield', el);
+  if (el.dataset && el.dataset.act === 'packfield' && S.sheet && S.sheet.st) onAction('packfield', el);
   if (el.dataset && el.dataset.act === 'addinput') addInputChanged(el.value);
   if (el.dataset && el.dataset.act === 'tastenotes' && S.taste) S.taste.p.notes = el.value;
   if (el.dataset && el.dataset.act === 'tidytext' && S.sheet && S.sheet.st) S.sheet.st.text = el.value;

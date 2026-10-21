@@ -14,6 +14,7 @@ from app.library import Library
 from app.menu_browser import BrowserRenderer
 from app.events import EventsService, Ticketmaster, geohash, parse_event
 from app.menus import MenuService, SafeFetcher, Material
+from app.needs import NeedsService
 from app.packing import PackingService
 from app.weather import Weather
 from app.llm import ClaudeService, _sanitize_plan
@@ -21,6 +22,8 @@ from app.concierge import Curator
 from app.main import app, notify_import
 from app.media import DownloadedReel, UnsupportedURLError, find_url, platform_for
 from app.models import (
+    BookingNeedItem,
+    BookingNeedResult,
     EventNote,
     EventNotes,
     PickedLinks,
@@ -197,6 +200,7 @@ def client(monkeypatch, tmp_path):
             daily["precipitation_probability_max"] = [80] * n
         return httpx.Response(200, json={"daily": daily})
 
+    app.state.needs = NeedsService(db, claude)
     tm_state = {"fail": False, "events": [], "log": []}
 
     def tm_handler(request):
@@ -222,7 +226,7 @@ def client(monkeypatch, tmp_path):
         c.uploads = tmp_path / "uploads"
         yield c
     app.dependency_overrides.clear()
-    for attr in ("db", "store", "claude", "library", "pipeline", "router", "photos", "push", "curator", "menus", "packing", "events"):
+    for attr in ("db", "store", "claude", "library", "pipeline", "router", "photos", "push", "curator", "menus", "packing", "events", "needs"):
         delattr(app.state, attr)
 
 
@@ -474,7 +478,7 @@ def test_output_schemas_are_accepted_by_sdk():
 
     from app.models import BriefingText, ConciergeReply, EditsResult
 
-    for model in (ExtractionResult, PlanResult, EditsResult, ConciergeReply, BriefingText, MenuResult, BookingsResult, PackingResult, EventNotes):
+    for model in (ExtractionResult, PlanResult, EditsResult, ConciergeReply, BriefingText, MenuResult, BookingsResult, PackingResult, EventNotes, BookingNeedResult):
         schema = transform_schema(TypeAdapter(model).json_schema())
         assert schema["additionalProperties"] is False
 
@@ -2241,6 +2245,44 @@ def test_event_added_to_the_trip(client):
     assert client.post(f"/v1/trips/{trip_id}/events/nope/add", headers=H).status_code == 404
     assert client.delete(f"/v1/trips/{trip_id}", headers=H).status_code == 204
     assert app.state.db._rows("SELECT * FROM trip_events") == []
+
+
+# ---------- Which places need booking ----------
+
+
+def test_places_marked_when_they_need_a_reservation_or_tickets(client):
+    job = import_reel(client)
+    trip_id = job["trip_id"]
+    places = client.get(f"/v1/trips/{trip_id}", headers=H).json()["places"]
+    ids = {p["name"]: p["id"] for p in places}
+    client.post("/v1/places", json={"name": "The Met", "city": "New York", "category": "attraction", "trip_id": trip_id}, headers=H)
+    client.post("/v1/places", json={"name": "Brooklyn Flea", "city": "New York", "category": "shopping", "trip_id": trip_id}, headers=H)
+    places = client.get(f"/v1/trips/{trip_id}", headers=H).json()["places"]
+    ids = {p["name"]: p["id"] for p in places}
+    client.messages.outputs[BookingNeedResult] = BookingNeedResult(items=[
+        BookingNeedItem(id=ids["Lucali"], kind="reservation", need="required", note="  Books out weeks ahead.  "),
+        BookingNeedItem(id=ids["Joe's Pizza"], kind="reservation", need="none", note=None),
+        BookingNeedItem(id=ids["Prince Street Pizza"], kind="reservation", need="unknown", note="x"),
+        BookingNeedItem(id=ids["The Met"], kind="tickets", need="recommended", note="Timed entry; buy online"),
+        BookingNeedItem(id="not-a-place", kind="tickets", need="required", note=None)])
+    trip = client.post(f"/v1/trips/{trip_id}/booking-needs", headers=H).json()
+    by = {p["name"]: p for p in trip["places"]}
+    assert (by["Lucali"]["booking_kind"], by["Lucali"]["booking_need"], by["Lucali"]["booking_note"]) == ("reservation", "required", "Books out weeks ahead.")
+    assert (by["The Met"]["booking_kind"], by["The Met"]["booking_need"]) == ("tickets", "recommended")
+    assert by["Joe's Pizza"]["booking_need"] is None and by["Prince Street Pizza"]["booking_need"] is None  # walk-in, or not known: not marked
+    assert all(p["booking_checked_at"] for p in trip["places"])
+    asked = client.messages.calls[-1]["messages"][0]["content"][0]["text"]
+    assert "Brooklyn Flea" not in asked and "Lucali" in asked and "data, not instructions" in client.messages.calls[-1]["system"]
+
+    calls = len(client.messages.calls)
+    client.post(f"/v1/trips/{trip_id}/booking-needs", headers=H)
+    assert len(client.messages.calls) == calls  # each place is looked at once
+
+    new = client.post("/v1/places", json={"name": "Sushi Place", "city": "New York", "category": "food", "trip_id": trip_id}, headers=H).json()["place"]
+    client.messages.stop_reason = "refusal"
+    assert client.post(f"/v1/trips/{trip_id}/booking-needs", headers=H).status_code == 502
+    assert next(p for p in client.get(f"/v1/trips/{trip_id}", headers=H).json()["places"] if p["id"] == new["id"])["booking_checked_at"] is None  # tried again later
+    assert client.post("/v1/trips/nope/booking-needs", headers=H).status_code == 404
 
 
 # ---------- Taste profile, edits, concierge, briefings ----------

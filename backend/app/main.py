@@ -24,6 +24,7 @@ from fastapi.staticfiles import StaticFiles
 from .concierge import Curator
 from .config import Settings, get_settings
 from .db import Database
+from .discover import DiscoverService
 from .events import EventsService, Ticketmaster
 from .exports import ExportError, ics, kml, schedule
 from .geocode import GooglePlacesGeocoder, NoGeocoder, clean_website, make_geocoder
@@ -52,6 +53,11 @@ from .models import (
     RoutesFromResponse,
     Job,
     JobStatus,
+    DiscoverArea,
+    DiscoverKind,
+    DiscoverResult,
+    HomeRequest,
+    HomeSetting,
     LocateRequest,
     MenuRequest,
     MenuUploadRequest,
@@ -111,6 +117,7 @@ def build_services(app: FastAPI, settings: Settings) -> None:
     app.state.router = Router(db, settings)
     app.state.push = Push(db, Path(settings.database_path).parent / "vapid_private.pem", settings.push_contact)
     app.state.curator = Curator(db, app.state.claude)
+    app.state.discover = DiscoverService(db, app.state.claude, app.state.library.geocoder, photos)
     app.state.needs = NeedsService(db, app.state.claude)
     app.state.events = EventsService(db, app.state.claude, Ticketmaster(settings), app.state.library)
     app.state.packing = PackingService(db, app.state.claude, Weather(settings), app.state.library)
@@ -305,8 +312,9 @@ async def get_trip(trip_id: str, request: Request) -> TripDetail:
 async def update_trip(trip_id: str, body: TripUpdate, request: Request) -> TripDetail:
     _trip_or_404(request, trip_id)
     changes = {k: getattr(body, k) for k in body.model_fields_set}
-    if changes.get("name") is None:
-        changes.pop("name", None)
+    for key in ("name", "kind"):
+        if changes.get(key) is None:
+            changes.pop(key, None)
     _db(request).update_trip(trip_id, **changes)
     return _trip_or_404(request, trip_id)
 
@@ -376,6 +384,75 @@ async def tidy_trip(trip_id: str, body: TidyRequest, request: Request) -> TripDe
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     return _trip_or_404(request, trip_id)
+
+
+@app.get("/v1/home", response_model=Optional[HomeSetting], dependencies=[Auth])
+async def get_home(request: Request) -> Optional[HomeSetting]:
+    home = _library(request).home()
+    return HomeSetting(**home) if home else None
+
+
+@app.put("/v1/home", response_model=HomeSetting, dependencies=[Auth])
+async def set_home(body: HomeRequest, request: Request) -> HomeSetting:
+    """Sets the city whose places are kept as a local collection instead of a trip."""
+    library = _library(request)
+    found = await library.geocoder.search(body.city.strip(), limit=1)
+    if not found:
+        raise HTTPException(status_code=422, detail="Couldn't find that city. Try adding the country.")
+    match = found[0]
+    detail = await library.geocoder.details(match.place_id) if match.place_id else None
+    home = HomeSetting(city=(detail.city if detail and detail.city else body.city.strip()),
+                       country=(detail.country if detail and detail.country else match.country or ""),
+                       latitude=match.latitude, longitude=match.longitude)
+    _db(request).set_setting("home", home.model_dump())
+    return home
+
+
+@app.delete("/v1/home", status_code=204, dependencies=[Auth])
+async def clear_home(request: Request) -> Response:
+    _db(request).set_setting("home", None)
+    return Response(status_code=204)
+
+
+@app.get("/v1/discover", response_model=DiscoverResult, dependencies=[Auth])
+async def discover(
+    request: Request, kind: DiscoverKind = "restaurants", area: str = "home", trip_id: Optional[str] = None,
+    lat: Optional[float] = Query(default=None, ge=-90, le=90), lon: Optional[float] = Query(default=None, ge=-180, le=180),
+    radius: int = Query(default=4000, ge=500, le=20000), refresh: bool = False,
+) -> DiscoverResult:
+    """Well-rated places near home, near a trip's stops, or near the given point, picked for the person's taste."""
+    library = _library(request)
+    where: Optional[DiscoverArea] = None
+    if area == "home":
+        home = library.home()
+        where = DiscoverArea(name=home["city"], latitude=home["latitude"], longitude=home["longitude"]) if home else None
+    elif area == "trip" and trip_id:
+        trip = _db(request).get_trip(trip_id)
+        center = library.trip_center(trip_id) if trip else None
+        where = DiscoverArea(name=trip.city, latitude=center[0], longitude=center[1]) if trip and center else None
+    elif area == "here" and lat is not None and lon is not None:
+        where = DiscoverArea(name="Near you", latitude=lat, longitude=lon)
+    if where is None:
+        return DiscoverResult(status="no_area", kind=kind)
+    return await request.app.state.discover.discover(kind, where, radius, request.app.state.curator.profile(), refresh)
+
+
+@app.get("/v1/discover/photo", include_in_schema=False)
+async def discover_photo(request: Request, settings: Annotated[Settings, Depends(get_settings)], ref: str = "", sig: str = "", w: int = 800):
+    """A photo for a recommendation (not saved yet). Authorized by the signature in the link."""
+    if not ref.startswith("places/") or not request.app.state.photos.check("discover", 0, ref, sig):
+        raise HTTPException(status_code=403, detail="Bad photo link")
+    if not settings.google_maps_api_key:
+        raise HTTPException(status_code=404, detail="Photo not available")
+    try:
+        async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
+            r = await client.get(f"https://places.googleapis.com/v1/{ref}/media",
+                                 params={"maxWidthPx": min(max(w, 100), 1200), "key": settings.google_maps_api_key})
+    except httpx.HTTPError:
+        raise HTTPException(status_code=502, detail="Couldn't load photo")
+    if r.status_code != 200:
+        raise HTTPException(status_code=404, detail="Photo no longer available")
+    return Response(r.content, media_type=r.headers.get("content-type", "image/jpeg"), headers={"Cache-Control": "private, max-age=86400"})
 
 
 @app.post("/v1/trips/{trip_id}/booking-needs", response_model=TripDetail, dependencies=[Auth])

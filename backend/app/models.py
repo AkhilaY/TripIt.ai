@@ -229,6 +229,66 @@ class ReadBookingsRequest(BaseModel):
     images: list[str] = Field(default=[], max_length=6, description="Base64 JPEG images (data: URLs are fine).")
 
 
+# ---------- Home city and discovering ----------
+
+
+class HomeSetting(BaseModel):
+    city: str
+    country: str = ""
+    latitude: float
+    longitude: float
+
+
+class HomeRequest(BaseModel):
+    city: str = Field(min_length=1, max_length=120)
+
+
+DiscoverKind = Literal["restaurants", "coffee", "bars", "dessert", "things"]
+
+
+class DiscoverItem(BaseModel):
+    id: str  # "google:<place id>": the same id the add-a-place search uses
+    name: str
+    kind_label: Optional[str] = None  # "Italian restaurant"
+    address: Optional[str] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    rating: Optional[float] = None
+    rating_count: Optional[int] = None
+    price_level: Optional[int] = None  # 1 to 4
+    maps_url: Optional[str] = None
+    photo: Optional[str] = None  # a signed link served by this server
+    distance_m: Optional[int] = None
+    award: Optional[str] = None  # e.g. "Michelin star": from Claude's knowledge, to be checked
+    why: Optional[str] = None
+    saved: bool = False
+
+
+class DiscoverArea(BaseModel):
+    name: str
+    latitude: float
+    longitude: float
+
+
+class DiscoverResult(BaseModel):
+    status: Literal["ok", "disabled", "no_area", "error"]
+    area: Optional[DiscoverArea] = None
+    kind: DiscoverKind = "restaurants"
+    items: list[DiscoverItem] = []
+    curated_by: Optional[Literal["claude", "offline"]] = None
+    fetched_at: Optional[datetime] = None
+
+
+class DiscoverNote(BaseModel):
+    id: str
+    award: Optional[str] = Field(description="Only when you are confident this exact venue holds it: 'Michelin 1 star', 'Michelin 2 stars', 'Bib Gourmand', 'Michelin Guide', 'James Beard', '50 Best Bars'. Otherwise null. Never guess.")
+    why: str = Field(description="One line, under 16 words, on why it suits this traveller, naming the taste or habit it fits.")
+
+
+class DiscoverNotes(BaseModel):
+    notes: list[DiscoverNote]
+
+
 # ---------- Booking needs ----------
 
 
@@ -467,6 +527,7 @@ class Trip(BaseModel):
     name: str
     city: str
     country: str = ""
+    kind: Literal["trip", "local"] = "trip"  # local = places in your home city: no dates, itinerary or packing
     created_at: datetime
     start_date: Optional[date] = None
     day_count: int = 0
@@ -488,6 +549,7 @@ class TripDetail(Trip):
 
 class TripUpdate(BaseModel):
     name: Optional[str] = Field(default=None, min_length=1, max_length=120)
+    kind: Optional[Literal["trip", "local"]] = None
     start_date: Optional[date] = None
 
 

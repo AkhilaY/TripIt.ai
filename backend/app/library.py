@@ -56,7 +56,7 @@ class Library:
         for index, extracted in enumerate(result.places, start=1):
             city = extracted.city.strip() or (result.destination_city or "Saved places")
             country = extracted.country.strip() or (result.destination_country or "")
-            trip = self.db.find_trip_by_city(city) or self.db.create_trip(name=city, city=city, country=country)
+            trip = self.db.find_trip_by_city(city) or self.db.create_trip(name=city, city=city, country=country, kind=self._kind_for(city))
             first_trip = first_trip or trip.id
 
             existing = next(
@@ -153,7 +153,21 @@ class Library:
             if nearby:
                 return min(nearby, key=lambda x: x[0])[1]
         name = (city or "").strip() or "Saved places"
-        return self.db.create_trip(name=name, city=name, country=country or "")
+        return self.db.create_trip(name=name, city=name, country=country or "", kind=self._kind_for(name, latitude, longitude))
+
+    def home(self) -> Optional[dict]:
+        return self.db.get_setting("home")
+
+    def _kind_for(self, city: str, latitude: Optional[float] = None, longitude: Optional[float] = None) -> str:
+        """Places in your home city go to a local collection (no dates or itinerary), not a trip."""
+        home = self.home()
+        if not home:
+            return "trip"
+        if normalize(city) == normalize(home["city"]):
+            return "local"
+        if latitude is not None and longitude is not None and _meters(latitude, longitude, home["latitude"], home["longitude"]) <= 30_000:
+            return "local"
+        return "trip"
 
     def _same_name(self, trip_id: str, name: str) -> Optional[Place]:
         return next((p for p in self.db.list_places(trip_id) if normalize(p.name) == normalize(name)), None)

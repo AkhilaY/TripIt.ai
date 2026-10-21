@@ -140,6 +140,12 @@ CREATE TABLE IF NOT EXISTS trip_events (
     fetched_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS discover_cache (
+    key TEXT PRIMARY KEY,
+    data TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS packing (
     trip_id TEXT PRIMARY KEY REFERENCES trips(id) ON DELETE CASCADE,
     data TEXT NOT NULL,
@@ -184,7 +190,7 @@ MIGRATIONS = {
         ("reserve_url", "TEXT"), ("reserve_provider", "TEXT"), ("reserve_checked_at", "TEXT"),
         ("booking_kind", "TEXT"), ("booking_need", "TEXT"), ("booking_note", "TEXT"), ("booking_checked_at", "TEXT"),
     ],
-    "trips": [("share_token", "TEXT")],
+    "trips": [("share_token", "TEXT"), ("kind", "TEXT NOT NULL DEFAULT 'trip'")],
 }
 
 PLACE_COLUMNS = (
@@ -199,7 +205,7 @@ BOOKING_COLUMNS = (
     "kind", "title", "start_at", "end_at", "origin", "destination", "address", "confirmation", "party_size",
     "notes", "place_id", "source",
 )
-TRIP_COLUMNS = ("name", "city", "country", "start_date", "day_count", "day_titles", "plan_notes", "planned_by", "share_token")
+TRIP_COLUMNS = ("name", "city", "country", "start_date", "day_count", "day_titles", "plan_notes", "planned_by", "share_token", "kind")
 # Places plus the reels that mention them.
 PLACE_SELECT = ("SELECT p.*, (SELECT group_concat(m.reel_id) FROM place_mentions m WHERE m.place_id = p.id) AS mention_reels "
                 "FROM places p")
@@ -277,11 +283,11 @@ class Database:
 
     # ---------- Trips ----------
 
-    def create_trip(self, name: str, city: str, country: str) -> Trip:
+    def create_trip(self, name: str, city: str, country: str, kind: str = "trip") -> Trip:
         trip_id = new_id()
         self._exec(
-            "INSERT INTO trips (id, name, city, country, created_at) VALUES (?, ?, ?, ?, ?)",
-            (trip_id, name, city, country, now().isoformat()),
+            "INSERT INTO trips (id, name, city, country, created_at, kind) VALUES (?, ?, ?, ?, ?, ?)",
+            (trip_id, name, city, country, now().isoformat(), kind),
         )
         return self.get_trip(trip_id)
 
@@ -360,6 +366,7 @@ class Database:
             name=row["name"],
             city=row["city"],
             country=row["country"],
+            kind=row["kind"] or "trip",
             created_at=row["created_at"],
             start_date=row["start_date"],
             day_count=row["day_count"],
@@ -469,6 +476,16 @@ class Database:
 
     def set_setting(self, key: str, value: Any) -> None:
         self._exec("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (key, json.dumps(value, default=str)))
+
+    # ---------- Discover ----------
+
+    def get_discover(self, key: str) -> Optional[sqlite3.Row]:
+        rows = self._rows("SELECT * FROM discover_cache WHERE key = ?", (key,))
+        return rows[0] if rows else None
+
+    def save_discover(self, key: str, data: dict) -> None:
+        self._exec("INSERT OR REPLACE INTO discover_cache (key, data, created_at) VALUES (?, ?, ?)", (key, json.dumps(data, default=str), now().isoformat()))
+        self._exec("DELETE FROM discover_cache WHERE created_at < ?", ((now() - __import__("datetime").timedelta(days=3)).isoformat(),))
 
     # ---------- Events ----------
 

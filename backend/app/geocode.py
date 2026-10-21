@@ -192,6 +192,23 @@ class GooglePlacesGeocoder:
             ],
         )
 
+    NEARBY_URL = "https://places.googleapis.com/v1/places:searchNearby"
+    NEARBY_FIELDS = ("places.id,places.displayName,places.formattedAddress,places.location,places.rating,places.userRatingCount,"
+                     "places.priceLevel,places.primaryTypeDisplayName,places.googleMapsUri,places.photos")
+
+    async def nearby(self, lat: float, lon: float, types: list[str], radius_m: int, limit: int = 20) -> Optional[list[dict]]:
+        """Popular places of the given types around a point (raw Places API results); None when Google can't be reached."""
+        body = {"includedTypes": types, "maxResultCount": min(limit, 20), "rankPreference": "POPULARITY",
+                "locationRestriction": {"circle": {"center": {"latitude": lat, "longitude": lon}, "radius": float(radius_m)}}}
+        try:
+            response = await self.client.post(self.NEARBY_URL, json=body,
+                                              headers={"X-Goog-Api-Key": self.api_key, "X-Goog-FieldMask": self.NEARBY_FIELDS})
+            response.raise_for_status()
+            return response.json().get("places") or []
+        except (httpx.HTTPError, ValueError) as e:
+            log.warning("Google nearby search failed: %s", type(e).__name__)
+            return None
+
     async def menu_photos(self, name, neighborhood, city, country, limit: int = 8) -> list[tuple[str, bytes]]:
         """(media type, bytes) of the photos Google lists for a place, to look for a photographed menu."""
         text = ", ".join(p for p in (name, neighborhood, city, country) if p)

@@ -1,3 +1,4 @@
+import json
 import time
 from types import SimpleNamespace
 
@@ -25,6 +26,8 @@ from app.models import (
     BookingNeedItem,
     BookingNeedResult,
     EventNote,
+    DiscoverNotes,
+    DiscoverNote,
     EventNotes,
     PickedLinks,
     PackingDraftItem,
@@ -201,6 +204,8 @@ def client(monkeypatch, tmp_path):
         return httpx.Response(200, json={"daily": daily})
 
     app.state.needs = NeedsService(db, claude)
+    from app.discover import DiscoverService
+    app.state.discover = DiscoverService(db, claude, geocoder, app.state.photos)
     tm_state = {"fail": False, "events": [], "log": []}
 
     def tm_handler(request):
@@ -226,7 +231,7 @@ def client(monkeypatch, tmp_path):
         c.uploads = tmp_path / "uploads"
         yield c
     app.dependency_overrides.clear()
-    for attr in ("db", "store", "claude", "library", "pipeline", "router", "photos", "push", "curator", "menus", "packing", "events", "needs"):
+    for attr in ("db", "store", "claude", "library", "pipeline", "router", "photos", "push", "curator", "menus", "packing", "events", "needs", "discover"):
         delattr(app.state, attr)
 
 
@@ -478,7 +483,7 @@ def test_output_schemas_are_accepted_by_sdk():
 
     from app.models import BriefingText, ConciergeReply, EditsResult
 
-    for model in (ExtractionResult, PlanResult, EditsResult, ConciergeReply, BriefingText, MenuResult, BookingsResult, PackingResult, EventNotes, BookingNeedResult):
+    for model in (ExtractionResult, PlanResult, EditsResult, ConciergeReply, BriefingText, MenuResult, BookingsResult, PackingResult, EventNotes, BookingNeedResult, DiscoverNotes):
         schema = transform_schema(TypeAdapter(model).json_schema())
         assert schema["additionalProperties"] is False
 
@@ -2247,6 +2252,41 @@ def test_event_added_to_the_trip(client):
     assert app.state.db._rows("SELECT * FROM trip_events") == []
 
 
+# ---------- Local collections ----------
+
+
+def test_places_in_the_home_city_go_to_a_local_collection(client):
+    assert client.get("/v1/home", headers=H).json() is None
+    home = client.put("/v1/home", json={"city": "new york"}, headers=H)
+    assert home.status_code == 200 and home.json()["city"] == "New York" and home.json()["country"] == "USA"
+    assert client.get("/v1/home", headers=H).json()["latitude"] == pytest.approx(40.6818)
+
+    job = import_reel(client)  # three New York places
+    trip = client.get(f"/v1/trips/{job['trip_id']}", headers=H).json()
+    assert trip["kind"] == "local" and trip["place_count"] == 3
+    # A place added by name for another city is still a trip.
+    paris = client.post("/v1/places", json={"name": "Café de Flore", "city": "Paris"}, headers=H).json()["place"]
+    assert client.get(f"/v1/trips/{paris['trip_id']}", headers=H).json()["kind"] == "trip"
+    assert {t["kind"] for t in client.get("/v1/trips", headers=H).json()} == {"local", "trip"}
+
+    # A trip can be switched either way, and a name left alone.
+    swapped = client.patch(f"/v1/trips/{paris['trip_id']}", json={"kind": "local"}, headers=H).json()
+    assert swapped["kind"] == "local" and swapped["name"] == "Paris"
+    assert client.patch(f"/v1/trips/{paris['trip_id']}", json={"kind": "boat"}, headers=H).status_code == 422
+    assert client.patch(f"/v1/trips/{paris['trip_id']}", json={"kind": None, "name": "Paris trip"}, headers=H).json()["kind"] == "local"
+
+    assert client.delete("/v1/home", headers=H).status_code == 204
+    assert client.get("/v1/home", headers=H).json() is None
+    again = client.post("/v1/places", json={"name": "Somewhere", "city": "Rome"}, headers=H).json()["place"]
+    assert client.get(f"/v1/trips/{again['trip_id']}", headers=H).json()["kind"] == "trip"
+
+
+def test_home_city_must_be_found(client):
+    client.geocoder_search_none = True
+    assert client.put("/v1/home", json={"city": "nothing here"}, headers=H).status_code == 422
+    assert client.put("/v1/home", json={"city": ""}, headers=H).status_code == 422
+
+
 # ---------- Which places need booking ----------
 
 
@@ -2387,3 +2427,73 @@ def test_daily_briefing_cached_and_offline(client):
     assert offline["curated_by"] == "offline" and offline["points"][0].startswith("Start with")
     assert any("confirm the booking" in p for p in offline["points"])
     assert client.post(f"/v1/trips/{job['trip_id']}/days/5/briefing", json={}, headers=H).status_code == 404
+
+
+# ---------- Discover ----------
+
+NEARBY = {"places": [
+    {"id": "A1", "displayName": {"text": "Via Carota"}, "formattedAddress": "51 Grove St", "location": {"latitude": 40.7, "longitude": -74.0},
+     "rating": 4.6, "userRatingCount": 5200, "priceLevel": "PRICE_LEVEL_EXPENSIVE", "primaryTypeDisplayName": {"text": "Italian restaurant"},
+     "googleMapsUri": "https://maps.google.com/?cid=1", "photos": [{"name": "places/A1/photos/p1"}]},
+    {"id": "B2", "displayName": {"text": "Meh Diner"}, "location": {"latitude": 40.71, "longitude": -74.0}, "rating": 3.9, "userRatingCount": 900},
+    {"id": "C3", "displayName": {"text": "Tiny Spot"}, "location": {"latitude": 40.71, "longitude": -74.0}, "rating": 4.9, "userRatingCount": 12},
+    {"id": "D4", "displayName": {"text": "Lucali"}, "location": {"latitude": 40.6818, "longitude": -74.0003}, "rating": 4.7, "userRatingCount": 3000},
+]}
+
+
+def discover_client(client, handler=None):
+    from app.discover import DiscoverService
+    calls = []
+
+    def default(request):
+        calls.append(json.loads(request.content))
+        return httpx.Response(200, json=NEARBY)
+
+    geo = GooglePlacesGeocoder("k", client=httpx.AsyncClient(transport=httpx.MockTransport(handler or default)))
+    app.state.discover = DiscoverService(app.state.db, app.state.claude, geo, app.state.photos)
+    return calls
+
+
+def test_discover_needs_an_area_and_google(client):
+    assert client.get("/v1/discover", headers=H).json()["status"] == "no_area"
+    client.put("/v1/home", json={"city": "new york"}, headers=H)
+    assert client.get("/v1/discover", headers=H).json()["status"] == "disabled"  # test geocoder is not Google
+
+
+def test_discover_filters_ranks_explains_and_marks_saved(client):
+    client.put("/v1/home", json={"city": "new york"}, headers=H)
+    import_reel(client)  # saves Lucali
+    calls = discover_client(client)
+    client.messages.outputs[DiscoverNotes] = DiscoverNotes(notes=[
+        DiscoverNote(id="google:A1", award="1 Michelin star", why=" Handmade pasta, right at your pace. ")])
+    r = client.get("/v1/discover?kind=restaurants", headers=H).json()
+    assert r["status"] == "ok" and r["curated_by"] == "claude"
+    names = [i["name"] for i in r["items"]]
+    assert names == ["Via Carota", "Lucali"]  # 3.9-star and 12-review places are dropped
+    top = r["items"][0]
+    assert top["award"] == "1 Michelin star" and top["why"] == "Handmade pasta, right at your pace." and top["price_level"] == 3
+    assert top["photo"].startswith("/v1/discover/photo?ref=places%2FA1%2Fphotos%2Fp1&sig=")
+    assert [i["saved"] for i in r["items"]] == [False, True]
+    assert calls[0]["includedTypes"] == ["restaurant"] and calls[0]["rankPreference"] == "POPULARITY"
+    client.get("/v1/discover?kind=restaurants", headers=H)
+    assert len(calls) == 1  # cached
+    client.get("/v1/discover?kind=restaurants&refresh=true", headers=H)
+    assert len(calls) == 2
+
+
+def test_discover_photo_link_is_signed(client):
+    assert client.get("/v1/discover/photo?ref=places/A1/photos/p1&sig=bad").status_code == 403
+
+
+def test_discover_keeps_old_results_when_google_fails(client):
+    client.put("/v1/home", json={"city": "new york"}, headers=H)
+    state = {"fail": False}
+
+    def handler(request):
+        return httpx.Response(500) if state["fail"] else httpx.Response(200, json=NEARBY)
+
+    discover_client(client, handler)
+    assert client.get("/v1/discover", headers=H).json()["status"] == "ok"
+    state["fail"] = True
+    assert client.get("/v1/discover?refresh=true", headers=H).json()["status"] == "ok"
+    assert client.get("/v1/discover?kind=bars", headers=H).json()["status"] == "error"

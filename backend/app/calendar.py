@@ -10,7 +10,7 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 from urllib.parse import quote, urlencode
 
-from .db import Database
+from .db import CURRENT_USER, Database
 from .exports import SLOTS, _fold, _ics_text, maps_link
 from .models import CalendarFeed, CalendarItem, CalendarResult, Place, TripDetail
 from .photos import PhotoStore
@@ -95,10 +95,13 @@ class CalendarService:
     # ---------- Exports ----------
 
     def ics_url(self, item_id: str) -> str:
-        return f"/v1/calendar/item.ics?id={quote(item_id, safe='')}&sig={self.photos.signature('ics', 0, item_id)}"
+        """A signed link to one item; it names whose calendar it's from, since Apple Calendar opens it signed out."""
+        uid = CURRENT_USER.get() or ""
+        return (f"/v1/calendar/item.ics?id={quote(item_id, safe='')}&u={uid}"
+                f"&sig={self.photos.signature('ics', 0, f'{uid}|{item_id}')}")
 
-    def check_ics(self, item_id: str, sig: str) -> bool:
-        return self.photos.check("ics", 0, item_id, sig)
+    def check_ics(self, item_id: str, sig: str, uid: str = "") -> bool:
+        return self.photos.check("ics", 0, f"{uid}|{item_id}", sig)
 
     @staticmethod
     def _slot_time(item: CalendarItem) -> Optional[str]:
@@ -177,6 +180,8 @@ class CalendarService:
     def stop_feed(self) -> None:
         self.db.set_setting(FEED_SETTING, None)
 
-    def feed_token_ok(self, token: str) -> bool:
-        current = self.db.get_setting(FEED_SETTING)
-        return bool(current) and secrets.compare_digest(current, token)
+    def feed_owner(self, token: str) -> Optional[str]:
+        """Whose subscription link this is: their user id, "" from before accounts, or None if it's not a live link."""
+        if not token:
+            return None
+        return self.db.user_for_setting(FEED_SETTING, token)

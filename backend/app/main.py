@@ -20,10 +20,12 @@ import httpx
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field
 
 from .concierge import Curator, profile_text
 from .config import Settings, get_settings
-from .db import Database
+from .auth import Accounts, AuthError, User
+from .db import CURRENT_USER, Database
 from .discover import DiscoverService
 from .calendar import CalendarService
 from .events import EventsService, Ticketmaster
@@ -121,6 +123,7 @@ def build_services(app: FastAPI, settings: Settings) -> None:
     photos = PhotoStore(Path(settings.photos_dir or Path(settings.database_path).parent / "photos"), settings.app_api_key)
     db.photo_url = photos.url
     app.state.db = db
+    app.state.accounts = Accounts(db, settings.app_api_key)
     app.state.photos = photos
     app.state.store = JobStore(db)
     app.state.claude = ClaudeService(settings)
@@ -173,9 +176,13 @@ async def lifespan(app: FastAPI):
     if not hasattr(app.state, "pipeline"):  # tests inject their own services
         build_services(app, get_settings())
     app.state.tasks = set()
-    # Pick up imports that were interrupted by a restart.
+    # Pick up imports that were interrupted by a restart, each as the person who started it.
     for job in app.state.db.unfinished_jobs():
-        start_job(app, job.id, job.url, app.state.db.job_shared_text(job.id))
+        reset = CURRENT_USER.set(job.user_id)
+        try:
+            start_job(app, job.id, job.url, app.state.db.job_shared_text(job.id))
+        finally:
+            CURRENT_USER.reset(reset)
     yield
 
 
@@ -188,15 +195,73 @@ def start_job(app: FastAPI, job_id: str, url: str, shared_text: Optional[str]) -
     task.add_done_callback(app.state.tasks.discard)
 
 
-def require_api_key(
+SESSION_COOKIE = "tripit_session"
+IMPORT_PATHS = {"/v1/jobs", "/v1/jobs/screenshots"}
+
+
+def _accounts(request: Request) -> Accounts:
+    return request.app.state.accounts
+
+
+async def authenticate(
+    request: Request,
     settings: Annotated[Settings, Depends(get_settings)],
     x_api_key: Annotated[Optional[str], Header()] = None,
-) -> None:
-    if settings.app_api_key and not secrets.compare_digest(x_api_key or "", settings.app_api_key):
-        raise HTTPException(status_code=401, detail="Invalid API key")
+    authorization: Annotated[Optional[str], Header()] = None,
+    x_tripit: Annotated[Optional[str], Header()] = None,
+) -> Optional[User]:
+    """Works out who is asking and limits the request to their data (see db.CURRENT_USER).
+
+    - A session: the web app's cookie, or "Authorization: Bearer <token>" from the iOS app.
+    - X-API-Key: the server key (the owner, or everyone's shared data before accounts existed), or someone's
+      personal Shortcut key, which may only send links and screenshots to import.
+    Async on purpose: it must run in the request's own task so the user it sets carries into the endpoint."""
+    accounts = _accounts(request)
+    user: Optional[User] = None
+    if authorization and authorization.lower().startswith("bearer "):
+        user = accounts.session_user(authorization[7:].strip())
+        if user is None:
+            raise HTTPException(status_code=401, detail="Your session has ended. Sign in again.")
+    elif request.cookies.get(SESSION_COOKIE):
+        user = accounts.session_user(request.cookies[SESSION_COOKIE])
+        if user is not None and request.method not in ("GET", "HEAD", "OPTIONS") and x_tripit != "1":
+            raise HTTPException(status_code=403, detail="This request didn't come from the app")
+        if user is None and not x_api_key:
+            raise HTTPException(status_code=401, detail="Your session has ended. Sign in again.")
+    if user is None and x_api_key:
+        if settings.app_api_key and secrets.compare_digest(x_api_key, settings.app_api_key):
+            user = accounts.owner()  # None until the first account exists: the old single-user setup
+        else:
+            found = accounts.key_user(x_api_key)
+            if found is None:
+                raise HTTPException(status_code=401, detail="Invalid API key")
+            user, scope = found
+            if scope == "import" and not (request.method == "POST" and request.url.path in IMPORT_PATHS):
+                raise HTTPException(status_code=403, detail="This key can only send links to TripIt")
+    elif user is None:
+        if settings.app_api_key:
+            raise HTTPException(status_code=401, detail="Sign in to TripIt")
+        user = accounts.owner()  # local development without a key
+    CURRENT_USER.set(user.id if user else None)
+    request.state.user = user
+    return user
 
 
-Auth = Depends(require_api_key)
+Auth = Depends(authenticate)
+
+
+def _me(request: Request) -> User:
+    user = getattr(request.state, "user", None)
+    if user is None:
+        raise HTTPException(status_code=403, detail="Create your account first")
+    return user
+
+
+def _admin(request: Request) -> User:
+    user = _me(request)
+    if not user.is_admin:
+        raise HTTPException(status_code=403, detail="Only the owner can do that")
+    return user
 
 
 def _db(request: Request) -> Database:
@@ -219,6 +284,170 @@ def _place_or_404(request: Request, place_id: str) -> Place:
     if place is None:
         raise HTTPException(status_code=404, detail="Place not found")
     return place
+
+
+# ---------- Accounts ----------
+
+
+class SignUpRequest(BaseModel):
+    email: str = Field(max_length=200)
+    password: str = Field(max_length=200)
+    invite: str = Field(max_length=200)
+    name: str = Field(default="", max_length=80)
+
+
+class SignInRequest(BaseModel):
+    email: str = Field(max_length=200)
+    password: str = Field(max_length=200)
+
+
+class PasswordChange(BaseModel):
+    current: str = Field(max_length=200)
+    new: str = Field(max_length=200)
+
+
+class PasswordCheck(BaseModel):
+    password: str = Field(max_length=200)
+
+
+class InviteRequest(BaseModel):
+    note: str = Field(default="", max_length=80)
+
+
+class MeOut(BaseModel):
+    id: str
+    email: str
+    name: str
+    is_admin: bool
+    has_import_key: bool = False
+
+
+class SessionOut(BaseModel):
+    user: MeOut
+    token: str  # for the iOS app's "Authorization: Bearer"; the web app uses the cookie
+
+
+def _me_out(request: Request, user: User) -> MeOut:
+    return MeOut(id=user.id, email=user.email, name=user.name, is_admin=user.is_admin,
+                 has_import_key=_accounts(request).has_import_key(user))
+
+
+def _start_session(request: Request, response: Response, user: User) -> SessionOut:
+    token = _accounts(request).new_session(user, request.headers.get("user-agent", ""))
+    https = request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https"
+    response.set_cookie(SESSION_COOKIE, token, max_age=90 * 86400, httponly=True, secure=https, samesite="lax", path="/")
+    return SessionOut(user=_me_out(request, user), token=token)
+
+
+@app.get("/v1/auth/status")
+async def auth_status(request: Request) -> dict:
+    """Whether accounts exist yet (if not, the first one is made with the server key) and whether you're signed in."""
+    accounts = _accounts(request)
+    signed_in = accounts.session_user(request.cookies.get(SESSION_COOKIE, "")) is not None
+    return {"accounts": accounts.owner() is not None, "signed_in": signed_in}
+
+
+@app.post("/v1/auth/signup", response_model=SessionOut, status_code=201)
+async def sign_up(body: SignUpRequest, request: Request, response: Response) -> SessionOut:
+    try:
+        user = _accounts(request).sign_up(body.email, body.password, body.invite, body.name)
+    except AuthError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    return _start_session(request, response, user)
+
+
+@app.post("/v1/auth/login", response_model=SessionOut)
+async def sign_in(body: SignInRequest, request: Request, response: Response) -> SessionOut:
+    try:
+        user = _accounts(request).sign_in(body.email, body.password)
+    except AuthError as e:
+        raise HTTPException(status_code=401, detail=str(e))
+    return _start_session(request, response, user)
+
+
+@app.post("/v1/auth/logout", status_code=204)
+async def sign_out(request: Request, response: Response, authorization: Annotated[Optional[str], Header()] = None) -> Response:
+    token = request.cookies.get(SESSION_COOKIE) or (authorization[7:].strip() if authorization and authorization.lower().startswith("bearer ") else "")
+    if token:
+        _accounts(request).end_session(token)
+    out = Response(status_code=204)
+    out.delete_cookie(SESSION_COOKIE, path="/")
+    return out
+
+
+@app.get("/v1/me", response_model=Optional[MeOut], dependencies=[Auth])
+async def me(request: Request) -> Optional[MeOut]:
+    """You, or null in the single-user setup from before accounts."""
+    user = getattr(request.state, "user", None)
+    return _me_out(request, user) if user else None
+
+
+@app.post("/v1/me/password", status_code=204, dependencies=[Auth])
+async def change_password(body: PasswordChange, request: Request) -> Response:
+    try:
+        _accounts(request).change_password(_me(request), body.current, body.new)
+    except AuthError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    return Response(status_code=204)
+
+
+@app.post("/v1/me/import-key", dependencies=[Auth])
+async def new_import_key(request: Request) -> dict:
+    """A personal key for the iPhone share Shortcut. It can only send links and screenshots; a new one replaces the old."""
+    return {"key": _accounts(request).new_import_key(_me(request))}
+
+
+@app.delete("/v1/me", status_code=204, dependencies=[Auth])
+async def delete_account(body: PasswordCheck, request: Request) -> Response:
+    """Deletes your account and everything in it: places, folders, trips, bookings and photos."""
+    accounts, user = _accounts(request), _me(request)
+    try:
+        accounts.sign_in(user.email, body.password)
+    except AuthError:
+        raise HTTPException(status_code=422, detail="Your password isn't right")
+    library = _library(request)
+    if library.photos:
+        for place in _db(request).list_places():
+            library.photos.delete(_db(request).photo_refs(place.id))
+    accounts.delete_user(user)
+    out = Response(status_code=204)
+    out.delete_cookie(SESSION_COOKIE, path="/")
+    return out
+
+
+@app.get("/v1/admin/users", dependencies=[Auth])
+async def admin_users(request: Request) -> list[dict]:
+    _admin(request)
+    return [{"id": u.id, "email": u.email, "name": u.name, "is_admin": u.is_admin, "created_at": u.created_at}
+            for u in _accounts(request).list_users()]
+
+
+@app.post("/v1/admin/users/{user_id}/reset-password", dependencies=[Auth])
+async def admin_reset_password(user_id: str, request: Request) -> dict:
+    """A temporary password to give the person; it signs them out everywhere."""
+    _admin(request)
+    if _accounts(request).get_user(user_id) is None:
+        raise HTTPException(status_code=404, detail="No such account")
+    return {"password": _accounts(request).reset_password(user_id)}
+
+
+@app.get("/v1/admin/invites", dependencies=[Auth])
+async def admin_invites(request: Request) -> list[dict]:
+    _admin(request)
+    return _accounts(request).list_invites()
+
+
+@app.post("/v1/admin/invites", status_code=201, dependencies=[Auth])
+async def admin_new_invite(body: InviteRequest, request: Request) -> dict:
+    """A one-time invite code. It's shown once; only a hash is kept."""
+    return {"code": _accounts(request).create_invite(_admin(request), body.note)}
+
+
+@app.delete("/v1/admin/invites/{invite_id}", status_code=204, dependencies=[Auth])
+async def admin_delete_invite(invite_id: str, request: Request) -> Response:
+    _admin(request)
+    _accounts(request).delete_invite(invite_id)
+    return Response(status_code=204)
 
 
 @app.get("/health")
@@ -716,11 +945,12 @@ async def stop_calendar_feed(request: Request) -> Response:
 
 
 @app.get("/v1/calendar/item.ics", include_in_schema=False)
-async def calendar_item_ics(request: Request, id: str = "", sig: str = "") -> Response:
+async def calendar_item_ics(request: Request, id: str = "", sig: str = "", u: str = "") -> Response:
     """One item as an .ics file, for Apple Calendar's "Add" prompt. Authorized by the signature in the link."""
     cal = request.app.state.calendar
-    if not id or not cal.check_ics(id, sig):
+    if not id or not cal.check_ics(id, sig, u):
         raise HTTPException(status_code=403, detail="Bad calendar link")
+    CURRENT_USER.set(u or None)
     item = next((i for i in cal.items()[0] if i.id == id), None)
     if item is None:
         raise HTTPException(status_code=404, detail="That's no longer on your calendar")
@@ -732,8 +962,10 @@ async def calendar_item_ics(request: Request, id: str = "", sig: str = "") -> Re
 async def calendar_feed(token: str, request: Request) -> Response:
     """The subscribed calendar. The token in the address is the only key, so it can be turned off or replaced."""
     cal = request.app.state.calendar
-    if not cal.feed_token_ok(token):
+    owner = cal.feed_owner(token)
+    if owner is None:
         raise HTTPException(status_code=404, detail="Not found")
+    CURRENT_USER.set(owner or None)
     return Response(cal.ics(cal.items()[0]), media_type="text/calendar; charset=utf-8", headers={"Cache-Control": "no-store"})
 
 

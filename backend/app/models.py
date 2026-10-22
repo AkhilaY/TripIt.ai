@@ -116,6 +116,7 @@ class Job(BaseModel):
     # Set once the places are saved to the library.
     trip_id: Optional[str] = None
     reel_id: Optional[str] = None  # the saved post, whose places are those with it in reel_ids
+    user_id: Optional[str] = Field(default=None, exclude=True)  # whose import it is (not sent to the app)
     added_places: int = 0
 
 

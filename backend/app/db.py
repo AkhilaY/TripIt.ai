@@ -9,6 +9,7 @@ import re as _re
 import sqlite3
 import threading
 import uuid
+from contextvars import ContextVar
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterable, Optional
@@ -101,6 +102,41 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
     keys TEXT NOT NULL,
     origin TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS users (
+    id TEXT PRIMARY KEY,
+    email TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL DEFAULT '',
+    password_hash TEXT NOT NULL,
+    is_admin INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS sessions (
+    token_hash TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    device TEXT,
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS invites (
+    code_hash TEXT PRIMARY KEY,
+    hint TEXT NOT NULL,
+    note TEXT NOT NULL DEFAULT '',
+    created_by TEXT,
+    created_at TEXT NOT NULL,
+    used_by TEXT,
+    used_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS api_tokens (
+    token_hash TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    scope TEXT NOT NULL DEFAULT 'import',
+    created_at TEXT NOT NULL,
+    last_used_at TEXT
 );
 
 CREATE TABLE IF NOT EXISTS settings (
@@ -223,8 +259,13 @@ MIGRATIONS = {
         ("booking_kind", "TEXT"), ("booking_need", "TEXT"), ("booking_note", "TEXT"), ("booking_checked_at", "TEXT"),
         ("event_date", "TEXT"), ("event_end_date", "TEXT"), ("venue", "TEXT"),
         ("saved", "INTEGER NOT NULL DEFAULT 1"),  # 0 for a place an AI plan suggested that you haven't kept
+        ("user_id", "TEXT"),
     ],
-    "trips": [("share_token", "TEXT"), ("kind", "TEXT NOT NULL DEFAULT 'trip'")],
+    "trips": [("share_token", "TEXT"), ("kind", "TEXT NOT NULL DEFAULT 'trip'"), ("user_id", "TEXT")],
+    "folders": [("user_id", "TEXT")],
+    "reels": [("user_id", "TEXT")],
+    "jobs": [("user_id", "TEXT")],
+    "push_subscriptions": [("user_id", "TEXT")],
 }
 
 PLACE_COLUMNS = (
@@ -244,6 +285,25 @@ BOOKING_COLUMNS = (
 )
 TRIP_COLUMNS = ("name", "city", "country", "start_date", "day_count", "day_titles", "plan_notes", "planned_by", "share_token", "kind")
 # Places plus the reels that mention them.
+# Whose data a request may see. Set by the auth check for each request (and copied into the background tasks it
+# starts); every read and write of trips, places, folders, reels, jobs and push subscriptions is limited to it.
+# None means no account is in use: the single-user setup from before accounts, tests, and start-up housekeeping.
+CURRENT_USER: ContextVar[Optional[str]] = ContextVar("current_user", default=None)
+OWNED_TABLES = ("trips", "places", "folders", "reels", "jobs", "push_subscriptions")
+# Settings that belong to a person rather than to the server.
+USER_SETTINGS = ("taste_profile", "home", "calendar_feed_token", "packing_unused")
+
+
+def _uid() -> Optional[str]:
+    return CURRENT_USER.get()
+
+
+def _mine(alias: str = "") -> tuple[str, tuple]:
+    """" AND <alias.>user_id = ?" (and its parameter) when a user is signed in, else nothing."""
+    uid = _uid()
+    return (f" AND {alias + '.' if alias else ''}user_id = ?", (uid,)) if uid else ("", ())
+
+
 PLACE_SELECT = ("SELECT p.*, (SELECT group_concat(m.reel_id) FROM place_mentions m WHERE m.place_id = p.id) AS mention_reels, "
                 "(SELECT group_concat(t.trip_id) FROM trip_places t WHERE t.place_id = p.id) AS trip_list, "
                 "(SELECT group_concat(f.folder_id) FROM folder_places f WHERE f.place_id = p.id) AS folder_list "
@@ -386,9 +446,10 @@ class Database:
         if not fields:
             return
         assignments = ", ".join(f"{k} = ?" for k in fields)
+        mine, mine_args = _mine() if table in OWNED_TABLES else ("", ())
         self._exec(
-            f"UPDATE {table} SET {assignments} WHERE id = ?",
-            [_encode(k, v) for k, v in fields.items()] + [row_id],
+            f"UPDATE {table} SET {assignments} WHERE id = ?{mine}",
+            [_encode(k, v) for k, v in fields.items()] + [row_id, *mine_args],
         )
 
     # ---------- Trips ----------
@@ -396,13 +457,14 @@ class Database:
     def create_trip(self, name: str, city: str, country: str, kind: str = "trip") -> Trip:
         trip_id = new_id()
         self._exec(
-            "INSERT INTO trips (id, name, city, country, created_at, kind) VALUES (?, ?, ?, ?, ?, ?)",
-            (trip_id, name, city, country, now().isoformat(), kind),
+            "INSERT INTO trips (id, name, city, country, created_at, kind, user_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (trip_id, name, city, country, now().isoformat(), kind, _uid()),
         )
         return self.get_trip(trip_id)
 
     def list_trips(self) -> list[Trip]:
-        rows = self._rows("SELECT * FROM trips ORDER BY created_at DESC")
+        mine, args = _mine()
+        rows = self._rows(f"SELECT * FROM trips WHERE 1{mine} ORDER BY created_at DESC", args)
         stats = self._rows(
             "SELECT tp.trip_id, p.category, COUNT(*) AS n, SUM(p.latitude IS NOT NULL) AS mapped "
             "FROM trip_places tp JOIN places p ON p.id = tp.place_id GROUP BY tp.trip_id, p.category"
@@ -414,7 +476,8 @@ class Database:
         return [self._trip(r, by_trip.get(r["id"], []), covers.get(r["id"])) for r in rows]
 
     def get_trip(self, trip_id: str) -> Optional[Trip]:
-        rows = self._rows("SELECT * FROM trips WHERE id = ?", (trip_id,))
+        mine, args = _mine()
+        rows = self._rows(f"SELECT * FROM trips WHERE id = ?{mine}", (trip_id, *args))
         if not rows:
             return None
         stats = self._rows(
@@ -433,7 +496,8 @@ class Database:
 
     def find_trip_by_city(self, city: str) -> Optional[Trip]:
         key = normalize(city)
-        for row in self._rows("SELECT id, city FROM trips"):
+        mine, args = _mine()
+        for row in self._rows(f"SELECT id, city FROM trips WHERE 1{mine}", args):
             if normalize(row["city"]) == key:
                 return self.get_trip(row["id"])
         return None
@@ -443,7 +507,8 @@ class Database:
 
     def delete_trip(self, trip_id: str) -> None:
         """Deletes the trip; its places stay saved. Suggestions you never kept go with it."""
-        self._exec("DELETE FROM trips WHERE id = ?", (trip_id,))
+        mine, args = _mine()
+        self._exec(f"DELETE FROM trips WHERE id = ?{mine}", (trip_id, *args))
         self.prune_unsaved()
 
     def prune_unsaved(self) -> list[str]:
@@ -453,8 +518,15 @@ class Database:
         return [r["id"] for r in rows]
 
     def trip_by_share_token(self, token: str) -> Optional[TripDetail]:
-        rows = self._rows("SELECT id FROM trips WHERE share_token = ?", (token,)) if token else []
-        return self.get_trip_detail(rows[0]["id"]) if rows else None
+        """A shared trip, for anyone with its link (whoever owns it)."""
+        rows = self._rows("SELECT id, user_id FROM trips WHERE share_token = ?", (token,)) if token else []
+        if not rows:
+            return None
+        reset = CURRENT_USER.set(rows[0]["user_id"])
+        try:
+            return self.get_trip_detail(rows[0]["id"])
+        finally:
+            CURRENT_USER.reset(reset)
 
     def _covers(self, trip_id: Optional[str] = None) -> dict[str, dict]:
         """One cover photo per trip: the first saved place with a photo, preferring real
@@ -503,9 +575,9 @@ class Database:
 
     def add_place(self, **fields: Any) -> Place:
         place_id = new_id()
-        fields = {k: v for k, v in fields.items() if k in PLACE_COLUMNS}
-        columns = ["id", "created_at", *fields]
-        values = [place_id, now().isoformat(), *(_encode(k, v) for k, v in fields.items())]
+        fields = {k: v for k, v in fields.items() if k in PLACE_COLUMNS and k != "user_id"}
+        columns = ["id", "created_at", "user_id", *fields]
+        values = [place_id, now().isoformat(), _uid(), *(_encode(k, v) for k, v in fields.items())]
         self._exec(
             f"INSERT INTO places ({', '.join(columns)}) VALUES ({', '.join('?' for _ in columns)})",
             values,
@@ -519,24 +591,27 @@ class Database:
 
     def get_place(self, place_id: str, trip_id: Optional[str] = None) -> Optional[Place]:
         """The place itself, or as a stop on a trip (None if it isn't on that trip)."""
+        mine, args = _mine("p")
         if trip_id:
-            rows = self._rows(f"{TRIP_PLACE_SELECT} WHERE p.id = ? AND tp.trip_id = ?", (place_id, trip_id))
+            rows = self._rows(f"{TRIP_PLACE_SELECT} WHERE p.id = ? AND tp.trip_id = ?{mine}", (place_id, trip_id, *args))
         else:
-            rows = self._rows(f"{PLACE_SELECT} WHERE p.id = ?", (place_id,))
+            rows = self._rows(f"{PLACE_SELECT} WHERE p.id = ?{mine}", (place_id, *args))
         return self._place(rows[0]) if rows else None
 
     def list_places(self, trip_id: Optional[str] = None, saved_only: bool = False) -> list[Place]:
         """A trip's stops, or every place (saved_only: leave out AI suggestions you haven't kept)."""
+        mine, args = _mine("p")
         if trip_id:
-            rows = self._rows(f"{TRIP_PLACE_SELECT} WHERE tp.trip_id = ? ORDER BY tp.added_at, p.created_at, p.rowid", (trip_id,))
+            rows = self._rows(f"{TRIP_PLACE_SELECT} WHERE tp.trip_id = ?{mine} ORDER BY tp.added_at, p.created_at, p.rowid", (trip_id, *args))
         else:
-            rows = self._rows(f"{PLACE_SELECT}{' WHERE p.saved = 1' if saved_only else ''} ORDER BY p.created_at, p.rowid")
+            rows = self._rows(f"{PLACE_SELECT} WHERE 1{' AND p.saved = 1' if saved_only else ''}{mine} ORDER BY p.created_at, p.rowid", args)
         return [self._place(r) for r in rows]
 
     def find_saved(self, name: str, city: Optional[str] = None) -> Optional[Place]:
         """A saved place with this name (in this city, when given): saving it again shouldn't duplicate it."""
         key = normalize(name)
-        for row in self._rows("SELECT id, name, city FROM places WHERE saved = 1"):
+        mine, args = _mine()
+        for row in self._rows(f"SELECT id, name, city FROM places WHERE saved = 1{mine}", args):
             if normalize(row["name"]) == key and (not city or not row["city"] or normalize(row["city"]) == normalize(city)):
                 return self.get_place(row["id"])
         return None
@@ -564,8 +639,9 @@ class Database:
         self._exec("DELETE FROM trip_places WHERE trip_id = ? AND place_id = ?", (trip_id, place_id))
 
     def list_folders(self) -> list[Folder]:
+        mine, args = _mine("f")
         rows = self._rows("SELECT f.*, (SELECT COUNT(*) FROM folder_places fp WHERE fp.folder_id = f.id) AS place_count "
-                          "FROM folders f ORDER BY f.created_at DESC")
+                          f"FROM folders f WHERE 1{mine} ORDER BY f.created_at DESC", args)
         covers: dict[str, list[dict]] = {}
         for r in self._rows("SELECT fp.folder_id, p.id, p.photos FROM folder_places fp JOIN places p ON p.id = fp.place_id "
                             "WHERE p.photos IS NOT NULL AND p.photos != '[]' ORDER BY fp.added_at DESC"):
@@ -581,14 +657,16 @@ class Database:
 
     def create_folder(self, name: str) -> Folder:
         folder_id = new_id()
-        self._exec("INSERT INTO folders (id, name, created_at) VALUES (?, ?, ?)", (folder_id, name, now().isoformat()))
+        self._exec("INSERT INTO folders (id, name, created_at, user_id) VALUES (?, ?, ?, ?)", (folder_id, name, now().isoformat(), _uid()))
         return self.get_folder(folder_id)
 
     def rename_folder(self, folder_id: str, name: str) -> None:
-        self._exec("UPDATE folders SET name = ? WHERE id = ?", (name, folder_id))
+        mine, args = _mine()
+        self._exec(f"UPDATE folders SET name = ? WHERE id = ?{mine}", (name, folder_id, *args))
 
     def delete_folder(self, folder_id: str) -> None:
-        self._exec("DELETE FROM folders WHERE id = ?", (folder_id,))
+        mine, args = _mine()
+        self._exec(f"DELETE FROM folders WHERE id = ?{mine}", (folder_id, *args))
 
     def add_to_folder(self, folder_id: str, place_id: str) -> None:
         self._exec("INSERT OR IGNORE INTO folder_places (folder_id, place_id, added_at) VALUES (?, ?, ?)", (folder_id, place_id, now().isoformat()))
@@ -597,7 +675,8 @@ class Database:
         self._exec("DELETE FROM folder_places WHERE folder_id = ? AND place_id = ?", (folder_id, place_id))
 
     def delete_place(self, place_id: str) -> None:
-        self._exec("DELETE FROM places WHERE id = ?", (place_id,))
+        mine, args = _mine()
+        self._exec(f"DELETE FROM places WHERE id = ?{mine}", (place_id, *args))
 
     def photo_refs(self, place_id: str) -> list[dict]:
         rows = self._rows("SELECT photos FROM places WHERE id = ?", (place_id,))
@@ -637,18 +716,18 @@ class Database:
     def add_reel(self, metadata: ReelMetadata, title: str, summary: str) -> Reel:
         reel_id = new_id()
         self._exec(
-            "INSERT INTO reels (id, url, platform, title, summary, caption, creator, thumbnail_url, imported_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO reels (id, url, platform, title, summary, caption, creator, thumbnail_url, imported_at, user_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (reel_id, metadata.url, metadata.platform, title, summary, metadata.caption, metadata.uploader,
-             metadata.thumbnail_url, now().isoformat()),
+             metadata.thumbnail_url, now().isoformat(), _uid()),
         )
         return self.get_reel(reel_id)
 
     def get_reel(self, reel_id: str) -> Optional[Reel]:
         rows = self._rows(
             "SELECT r.*, (SELECT COUNT(*) FROM places p WHERE p.reel_id = r.id) AS place_count "
-            "FROM reels r WHERE r.id = ?",
-            (reel_id,),
+            "FROM reels r WHERE r.id = ?" + _mine("r")[0],
+            (reel_id, *_mine("r")[1]),
         )
         return Reel(**dict(rows[0])) if rows else None
 
@@ -658,12 +737,13 @@ class Database:
         return [Reel(**dict(r)) for r in rows]
 
     def list_reels(self, trip_id: Optional[str] = None) -> list[Reel]:
+        mine, args = _mine("r")
         sql = ("SELECT r.*, (SELECT COUNT(*) FROM places p WHERE p.reel_id = r.id) AS place_count "
-               "FROM reels r")
-        params: tuple = ()
+               f"FROM reels r WHERE 1{mine}")
+        params: tuple = args
         if trip_id:
-            sql += " WHERE r.trip_id = ? OR r.id IN (SELECT m.reel_id FROM place_mentions m JOIN trip_places tp ON tp.place_id = m.place_id WHERE tp.trip_id = ?)"
-            params = (trip_id, trip_id)
+            sql += " AND (r.trip_id = ? OR r.id IN (SELECT m.reel_id FROM place_mentions m JOIN trip_places tp ON tp.place_id = m.place_id WHERE tp.trip_id = ?))"
+            params = (*args, trip_id, trip_id)
         rows = self._rows(sql + " ORDER BY r.imported_at DESC", params)
         return [Reel(**dict(r)) for r in rows]
 
@@ -672,12 +752,25 @@ class Database:
 
     # ---------- Settings, edits, briefings ----------
 
+    @staticmethod
+    def _setting_key(key: str) -> str:
+        """Personal settings (taste, home city…) are stored per person as "<key>@<user id>"."""
+        uid = _uid()
+        return f"{key}@{uid}" if uid and key in USER_SETTINGS else key
+
     def get_setting(self, key: str) -> Optional[Any]:
-        rows = self._rows("SELECT value FROM settings WHERE key = ?", (key,))
+        rows = self._rows("SELECT value FROM settings WHERE key = ?", (self._setting_key(key),))
         return json.loads(rows[0]["value"]) if rows else None
 
     def set_setting(self, key: str, value: Any) -> None:
-        self._exec("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (key, json.dumps(value, default=str)))
+        self._exec("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (self._setting_key(key), json.dumps(value, default=str)))
+
+    def user_for_setting(self, key: str, value: Any) -> Optional[str]:
+        """Whose personal setting has this value (e.g. which person a calendar feed link belongs to); "" for the
+        setting from before accounts."""
+        for r in self._rows("SELECT key FROM settings WHERE (key = ? OR key LIKE ?) AND value = ?", (key, f"{key}@%", json.dumps(value))):
+            return r["key"].split("@", 1)[1] if "@" in r["key"] else ""
+        return None
 
     # ---------- Discover ----------
 
@@ -716,8 +809,10 @@ class Database:
         return [Booking(**dict(r)) for r in rows]
 
     def list_all_bookings(self) -> list[BookingListItem]:
+        mine, args = _mine("t")
         rows = self._rows("SELECT b.*, t.name AS trip_name, t.kind AS trip_kind FROM bookings b JOIN trips t ON t.id = b.trip_id "
-                          "ORDER BY COALESCE(b.start_at, '9999'), b.created_at, b.rowid")
+                          f"WHERE 1{mine} "
+                          "ORDER BY COALESCE(b.start_at, '9999'), b.created_at, b.rowid", args)
         return [BookingListItem(**{**dict(r), "trip_kind": r["trip_kind"] or "trip"}) for r in rows]
 
     def get_booking(self, booking_id: str) -> Optional[Booking]:
@@ -775,14 +870,14 @@ class Database:
 
     def save_push_subscription(self, endpoint: str, keys: dict, origin: str) -> None:
         self._exec(
-            "INSERT OR REPLACE INTO push_subscriptions (endpoint, keys, origin, created_at) VALUES (?, ?, ?, ?)",
-            (endpoint, json.dumps(keys), origin, now().isoformat()),
+            "INSERT OR REPLACE INTO push_subscriptions (endpoint, keys, origin, created_at, user_id) VALUES (?, ?, ?, ?, ?)",
+            (endpoint, json.dumps(keys), origin, now().isoformat(), _uid()),
         )
 
     def push_subscriptions(self) -> list[dict]:
         return [
             {"endpoint": r["endpoint"], "keys": json.loads(r["keys"]), "origin": r["origin"]}
-            for r in self._rows("SELECT * FROM push_subscriptions")
+            for r in self._rows("SELECT * FROM push_subscriptions WHERE 1" + _mine()[0], _mine()[1])
         ]
 
     def delete_push_subscription(self, endpoint: str) -> None:
@@ -794,13 +889,14 @@ class Database:
         job_id = uuid.uuid4().hex
         ts = now().isoformat()
         self._exec(
-            "INSERT INTO jobs (id, url, shared_text, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
-            (job_id, url, shared_text, JobStatus.queued.value, ts, ts),
+            "INSERT INTO jobs (id, url, shared_text, status, created_at, updated_at, user_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (job_id, url, shared_text, JobStatus.queued.value, ts, ts, _uid()),
         )
         return self.get_job(job_id)
 
     def get_job(self, job_id: str) -> Optional[Job]:
-        rows = self._rows("SELECT * FROM jobs WHERE id = ?", (job_id,))
+        mine, args = _mine()
+        rows = self._rows(f"SELECT * FROM jobs WHERE id = ?{mine}", (job_id, *args))
         return self._job(rows[0]) if rows else None
 
     def job_shared_text(self, job_id: str) -> Optional[str]:
@@ -808,14 +904,15 @@ class Database:
         return rows[0]["shared_text"] if rows else None
 
     def list_jobs(self, limit: int = 50) -> list[Job]:
-        rows = self._rows("SELECT * FROM jobs ORDER BY created_at DESC LIMIT ?", (limit,))
+        mine, args = _mine()
+        rows = self._rows(f"SELECT * FROM jobs WHERE 1{mine} ORDER BY created_at DESC LIMIT ?", (*args, limit))
         return [self._job(r) for r in rows]
 
     def reusable_job(self, url: str) -> Optional[Job]:
         """A job for this URL that's still running, or finished with its places still saved."""
         rows = self._rows(
-            "SELECT * FROM jobs WHERE url = ? AND status != ? ORDER BY created_at DESC LIMIT 1",
-            (url, JobStatus.failed.value),
+            "SELECT * FROM jobs WHERE url = ? AND status != ?" + _mine()[0] + " ORDER BY created_at DESC LIMIT 1",
+            (url, JobStatus.failed.value, *_mine()[1]),
         )
         if not rows:
             return None
@@ -860,6 +957,7 @@ class Database:
             warnings=json.loads(row["warnings"]),
             trip_id=row["trip_id"],
             reel_id=row["reel_id"],
+            user_id=row["user_id"],
             added_places=row["added_places"],
         )
 

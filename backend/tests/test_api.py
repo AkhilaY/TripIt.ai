@@ -174,6 +174,8 @@ def client(monkeypatch, tmp_path):
         return httpx.Response(push_status["code"])
 
     app.state.db = db
+    from app.auth import Accounts
+    app.state.accounts = Accounts(db, "secret")
     app.state.store = store
     app.state.claude = claude
     app.state.library = library
@@ -246,13 +248,13 @@ def client(monkeypatch, tmp_path):
         c.uploads = tmp_path / "uploads"
         yield c
     app.dependency_overrides.clear()
-    for attr in ("db", "store", "claude", "library", "pipeline", "router", "photos", "push", "curator", "menus", "packing", "events", "needs", "discover", "lounges", "calendar"):
+    for attr in ("db", "store", "claude", "library", "pipeline", "router", "photos", "push", "curator", "menus", "packing", "events", "needs", "discover", "lounges", "calendar", "accounts"):
         delattr(app.state, attr)
 
 
-def wait_for(c, job_id):
+def wait_for(c, job_id, headers=None):
     for _ in range(200):
-        job = c.get(f"/v1/jobs/{job_id}", headers=H).json()
+        job = c.get(f"/v1/jobs/{job_id}", headers=headers or H).json()
         if job["status"] in ("done", "failed"):
             return job
         time.sleep(0.02)
@@ -2851,3 +2853,129 @@ def test_source_names():
     assert source_name("https://www.timeout.com/london") == "Time Out"
     assert source_name("https://guide.michelin.com/us/en") == "Michelin Guide"
     assert source_name("https://www.someblog.co.uk/post") == "someblog.co.uk"
+
+
+# ---------- Accounts ----------
+
+
+def signup(client, email, invite, password="correct horse"):
+    r = client.post("/v1/auth/signup", json={"email": email, "password": password, "invite": invite})
+    client.cookies.clear()
+    assert r.status_code == 201, r.text
+    return {"Authorization": f"Bearer {r.json()['token']}"}
+
+
+def test_first_account_claims_existing_data_then_invites_only(client):
+    assert client.get("/v1/auth/status").json() == {"accounts": False, "signed_in": False}
+    import_reel(client, trip=False)  # saved before accounts existed
+    client.put("/v1/profile", json={"pace": "slow"}, headers=H)
+    bad = client.post("/v1/auth/signup", json={"email": "me@x.com", "password": "correct horse", "invite": "nope"})
+    assert bad.status_code == 422 and "server key" in bad.json()["detail"]
+    owner = signup(client, "Me@X.com", "secret")
+    me = client.get("/v1/me", headers=owner).json()
+    assert me["email"] == "me@x.com" and me["is_admin"] is True
+    assert len(client.get("/v1/places", headers=owner).json()) == 3  # took over what was there
+    assert client.get("/v1/profile", headers=owner).json()["pace"] == "slow"
+    assert len(client.get("/v1/places", headers=H).json()) == 3  # the server key still works, as the owner
+    # Everyone after needs an invite, once.
+    assert client.post("/v1/auth/signup", json={"email": "b@x.com", "password": "correct horse", "invite": "secret"}).status_code == 422
+    code = client.post("/v1/admin/invites", json={"note": "Sam"}, headers=owner).json()["code"]
+    signup(client, "b@x.com", code.lower().replace("-", " "))  # forgiving about case and spacing
+    assert client.post("/v1/auth/signup", json={"email": "c@x.com", "password": "correct horse", "invite": code}).status_code == 422
+    invites = client.get("/v1/admin/invites", headers=owner).json()
+    assert invites[0]["used_by"] == "b@x.com" and invites[0]["note"] == "Sam" and code not in str(invites)
+
+
+def test_people_never_see_each_others_data(client):
+    owner = signup(client, "a@x.com", "secret")
+    job = import_reel(client)  # as the owner (server key)
+    trip_id = job["trip_id"]
+    a_places = client.get("/v1/places", headers=owner).json()
+    lucali = next(p for p in a_places if p["name"] == "Lucali")["id"]
+    folder = client.post("/v1/folders", json={"name": "Mine", "place_ids": [lucali]}, headers=owner).json()
+    client.post(f"/v1/trips/{trip_id}/bookings", json={"kind": "flight", "title": "BA 178", "start_at": "2026-12-01T08:00"}, headers=owner)
+    client.put("/v1/home", json={"city": "new york"}, headers=owner)
+    client.put("/v1/profile", json={"pace": "slow"}, headers=owner)
+    b = signup(client, "b@x.com", client.post("/v1/admin/invites", json={}, headers=owner).json()["code"])
+
+    for path in ("/v1/places", "/v1/trips", "/v1/folders", "/v1/bookings", "/v1/jobs", "/v1/edits"):
+        assert client.get(path, headers=b).json() == [], path
+    assert client.get("/v1/calendar", headers=b).json()["items"] == []
+    assert client.get("/v1/home", headers=b).json() is None
+    assert client.get("/v1/profile", headers=b).json().get("pace") is None
+    # Someone else's ids act as if they don't exist.
+    assert client.get(f"/v1/trips/{trip_id}", headers=b).status_code == 404
+    assert client.get(f"/v1/places/{lucali}", headers=b).status_code == 404
+    assert client.patch(f"/v1/places/{lucali}", json={"name": "Mine now"}, headers=b).status_code == 404
+    assert client.delete(f"/v1/places/{lucali}", headers=b).status_code == 404
+    assert client.delete(f"/v1/trips/{trip_id}", headers=b).status_code == 404
+    assert client.patch(f"/v1/folders/{folder['id']}", json={"name": "x"}, headers=b).status_code == 404
+    assert client.get(f"/v1/jobs/{job['id']}", headers=b).status_code == 404
+    mine = client.post("/v1/folders", json={"name": "B's", "place_ids": [lucali]}, headers=b).json()
+    assert mine["place_count"] == 0  # can't file someone else's place
+    assert client.post("/v1/trips", json={"city": "NYC", "place_ids": [lucali]}, headers=b).status_code == 422
+    # And the owner's things are untouched.
+    assert next(p for p in client.get("/v1/places", headers=owner).json() if p["id"] == lucali)["name"] == "Lucali"
+    assert len(client.get("/v1/trips", headers=owner).json()) == 1
+    # B's own saves stay B's.
+    client.post("/v1/places", json={"name": "Café de Flore", "city": "Paris"}, headers=b)
+    assert [p["name"] for p in client.get("/v1/places", headers=b).json()] == ["Café de Flore"]
+    assert "Café de Flore" not in {p["name"] for p in client.get("/v1/places", headers=owner).json()}
+    # Importing the same reel as someone else makes your own copy.
+    r = client.post("/v1/jobs", json={"url": "https://vm.tiktok.com/ZMabc/"}, headers=b)
+    wait_for(client, r.json()["id"], headers=b)
+    assert {p["name"] for p in client.get("/v1/places", headers=b).json()} >= {"Lucali", "Joe's Pizza"}
+    assert len([p for p in client.get("/v1/places", headers=owner).json() if p["name"] == "Lucali"]) == 1
+
+
+def test_sessions_cookies_and_keys(client):
+    signup(client, "a@x.com", "secret")
+    # Sign in with the web app's cookie: changes need the app's header.
+    bad = client.post("/v1/auth/login", json={"email": "a@x.com", "password": "wrong password"})
+    assert bad.status_code == 401
+    r = client.post("/v1/auth/login", json={"email": "A@x.com", "password": "correct horse"})
+    assert r.status_code == 200 and "tripit_session" in r.cookies
+    assert client.get("/v1/places").status_code == 200
+    assert client.post("/v1/folders", json={"name": "x"}).status_code == 403
+    assert client.post("/v1/folders", json={"name": "x"}, headers={"X-TripIt": "1"}).status_code == 201
+    assert client.get("/v1/auth/status").json()["signed_in"] is True
+    client.post("/v1/auth/logout")
+    client.cookies.clear()
+    assert client.get("/v1/places").status_code == 401
+    assert client.get("/v1/places", headers={"Authorization": "Bearer nope"}).status_code == 401
+    # A personal Shortcut key can only send links.
+    token = client.post("/v1/auth/login", json={"email": "a@x.com", "password": "correct horse"}).json()["token"]
+    client.cookies.clear()
+    me = {"Authorization": f"Bearer {token}"}
+    key = client.post("/v1/me/import-key", headers=me).json()["key"]
+    assert client.get("/v1/me", headers=me).json()["has_import_key"] is True
+    r = client.post("/v1/jobs", json={"url": "https://vm.tiktok.com/ZMabc/"}, headers={"X-API-Key": key})
+    assert r.status_code == 202
+    assert client.get("/v1/places", headers={"X-API-Key": key}).status_code == 403
+    newer = client.post("/v1/me/import-key", headers=me).json()["key"]
+    assert client.post("/v1/jobs", json={"url": "https://vm.tiktok.com/x/"}, headers={"X-API-Key": key}).status_code == 401
+    assert client.post("/v1/jobs", json={"url": "https://vm.tiktok.com/x/"}, headers={"X-API-Key": newer}).status_code == 202
+
+
+def test_passwords_and_deleting_an_account(client):
+    owner = signup(client, "a@x.com", "secret")
+    code = client.post("/v1/admin/invites", json={}, headers=owner).json()["code"]
+    b = signup(client, "b@x.com", code)
+    assert client.post("/v1/auth/signup", json={"email": "c@x.com", "password": "short", "invite": "x"}).status_code == 422
+    assert client.get("/v1/admin/users", headers=b).status_code == 403
+    assert client.post("/v1/admin/invites", json={}, headers=b).status_code == 403
+    assert client.post("/v1/me/password", json={"current": "wrong", "new": "another one"}, headers=b).status_code == 422
+    assert client.post("/v1/me/password", json={"current": "correct horse", "new": "another one"}, headers=b).status_code == 204
+    assert client.post("/v1/auth/login", json={"email": "b@x.com", "password": "another one"}).status_code == 200
+    client.cookies.clear()
+    # Forgotten password: the owner hands out a temporary one.
+    b_id = next(u["id"] for u in client.get("/v1/admin/users", headers=owner).json() if u["email"] == "b@x.com")
+    temp = client.post(f"/v1/admin/users/{b_id}/reset-password", headers=owner).json()["password"]
+    assert client.get("/v1/places", headers=b).status_code == 401  # signed out everywhere
+    b = {"Authorization": "Bearer " + client.post("/v1/auth/login", json={"email": "b@x.com", "password": temp}).json()["token"]}
+    client.cookies.clear()
+    client.post("/v1/places", json={"name": "Café de Flore", "city": "Paris"}, headers=b)
+    assert client.request("DELETE", "/v1/me", json={"password": "nope"}, headers=b).status_code == 422
+    assert client.request("DELETE", "/v1/me", json={"password": temp}, headers=b).status_code == 204
+    assert client.post("/v1/auth/login", json={"email": "b@x.com", "password": temp}).status_code == 401
+    assert app.state.db._rows("SELECT COUNT(*) AS n FROM places WHERE name = 'Café de Flore'")[0]["n"] == 0

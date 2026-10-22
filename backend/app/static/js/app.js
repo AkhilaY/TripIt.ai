@@ -1899,7 +1899,7 @@ const VIEWS = {
   async place(r) {
     // Opened from a trip (?trip=…) it shows that trip's day and time; from Saved or a folder, just the place.
     const ctxId = r.params.get('trip');
-    const inTrip = ctxId ? await cachedTrip(ctxId).catch(() => null) : null;
+    const inTrip = ctxId ? await Promise.resolve().then(() => cachedTrip(ctxId)).catch(() => null) : null;
     let p = inTrip ? tripPlace(inTrip, r.id) : null;
     let reels;
     if (p) {

@@ -63,7 +63,7 @@ function placeRow(p, trip, num, dayIdx) {
 
 function render(trip) {
   configureMaps({ googleMapsKey: trip.google_maps_key });
-  document.title = `${trip.name} · TripIt`;
+  document.title = `${trip.name} · The Travel Edit`;
   const cats = [...new Set(trip.places.map((p) => p.category))];
   const meta = [trip.country, plural(trip.places.length, 'place'), trip.day_count ? `${trip.day_count}-day plan` : ''].filter(Boolean).join(' · ');
   const cover = trip.cover_photo ? `<img src="${esc(photoUrl(trip.cover_photo, 1200))}" alt="" decoding="async" onerror="this.remove()">` : '';
@@ -99,7 +99,7 @@ function render(trip) {
   const credits = trip.reels.filter((r) => safeUrl(r.url));
   view.innerHTML = `
     <div class="shero" style="--g1: var(--c-${cats[0] || 'other'}); --g2: var(--c-${cats[1] || 'indigo'})">${cover}
-      <div class="shero-body"><span class="pill">${ICON.plane}Shared with TripIt</span><h1>${esc(trip.name)}</h1><span class="meta">${esc(meta)}</span></div></div>
+      <div class="shero-body"><span class="pill">${ICON.plane}Shared with The Travel Edit</span><h1>${esc(trip.name)}</h1><span class="meta">${esc(meta)}</span></div></div>
     ${trip.plan_notes ? `<p class="para" style="padding-top:18px">${esc(trip.plan_notes)}</p>` : '<div style="height:18px"></div>'}
     <div class="quick">
       <a class="qbtn" href="#map" data-scroll="map">${tile('green', 'map')}Map</a>
@@ -111,7 +111,7 @@ function render(trip) {
     ${credits.length ? `<div class="section"><h2 class="section-title">From these reels</h2><div class="group">${credits.map((r) =>
       `<a class="row" href="${esc(r.url)}" target="_blank" rel="noopener"><span class="main"><span class="t" style="font-size:16px">${esc(r.title)}</span>
         <span class="s">${esc([cap(r.platform), r.creator ? `@${r.creator}` : ''].filter(Boolean).join(' · '))}</span></span>${ICON.chev}</a>`).join('')}</div></div>` : ''}
-    <div class="section"><div class="section-f" style="text-align:center">Made with TripIt: share a travel reel, get the places on a map and a day-by-day plan.</div></div>`;
+    <div class="section"><div class="section-f" style="text-align:center">Made with The Travel Edit: share a travel reel, get the places on a map and a day-by-day plan.</div></div>`;
   if (located.length) {
     renderMap(document.getElementById('shared-map'), located, {
       popup: (p) => `<strong>${esc(p.name)}</strong><br><span style="color:var(--secondary);font-size:13px">${esc(CATS[p.category])}</span>`,

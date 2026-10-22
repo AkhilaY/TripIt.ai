@@ -5,7 +5,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>TripIt</string>
+	<string>Travel Edit</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -33,7 +33,7 @@
 		<string>comgooglemaps</string>
 	</array>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>TripIt uses your location to sort places by distance, find what's near you and show travel times.</string>
+	<string>Travel Edit uses your location to sort places by distance, find what's near you and show travel times.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Take a photo of a menu, a booking confirmation or a screenshot to add to TripIt.</string>
 	<key>NSPhotoLibraryUsageDescription</key>

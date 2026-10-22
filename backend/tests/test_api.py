@@ -463,7 +463,7 @@ def test_rename_and_delete_trip(client):
 
 def test_web_app_is_served(client):
     r = client.get("/")
-    assert r.status_code == 200 and "<title>TripIt</title>" in r.text
+    assert r.status_code == 200 and "<title>The Travel Edit</title>" in r.text
     assert client.get("/share?url=https://vm.tiktok.com/x").status_code == 200
     assert client.get("/manifest.webmanifest").status_code == 200
 
@@ -1285,7 +1285,7 @@ def test_share_link_shows_trip_without_notes(client):
     assert data["name"] == "New York" and len(data["places"]) == 3
     assert "user_notes" not in data["places"][0] and "share_token" not in data
     page = client.get(link["path"])
-    assert page.status_code == 200 and 'property="og:title" content="New York · TripIt"' in page.text
+    assert page.status_code == 200 and 'property="og:title" content="New York · The Travel Edit"' in page.text
     assert "3 saved places" in page.text
 
     assert client.delete(f"/v1/trips/{job['trip_id']}/share", headers=H).status_code == 204

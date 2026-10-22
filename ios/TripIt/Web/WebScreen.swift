@@ -45,7 +45,7 @@ struct WebScreen: View {
                 }
             }
             if failed {
-                EmptyState(symbol: "wifi.slash", color: Theme.gray, title: "Can't reach TripIt",
+                EmptyState(symbol: "wifi.slash", color: Theme.gray, title: "Can't reach The Travel Edit",
                            text: "Check your connection and try again.") {
                     Button("Try again") { failed = false; reloadToken += 1 }
                         .buttonStyle(PrimaryButtonStyle()).frame(maxWidth: 200)

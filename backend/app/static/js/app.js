@@ -534,7 +534,7 @@ async function getPosition() {
     enableHighAccuracy: false, timeout: 15000, maximumAge: 5 * 60 * 1000,
   })).catch((e) => {
     throw new ApiError(e.code === 1
-      ? 'Location access is off. Allow it for TripIt in Settings → Privacy & Security → Location Services → Safari Websites.'
+      ? 'Location access is off. Allow it for Travel Edit in Settings → Privacy & Security → Location Services → Safari Websites.'
       : 'Couldn’t get your location. Try again outside or with Wi-Fi on.', 0);
   });
   S.pos = { at: Date.now(), latitude: pos.coords.latitude, longitude: pos.coords.longitude };
@@ -1329,7 +1329,7 @@ async function calSyncSheet() {
         <button class="row" data-act="copy" data-value="${esc(st.feed.url)}">${tile('gray', 'link')}<span class="main"><span class="t">Copy link</span><span class="s">For Outlook or any calendar app</span></span></button>
       </div><div class="section-f">New events, bookings and plans keep flowing in. Apple Calendar refreshes on its own schedule; Google can take a few hours. This link is private: anyone who has it can see your calendar.</div></div>
       <div class="section"><div class="group"><button class="row" data-act="calfeedoff"><span class="main"><span class="t" style="color:var(--warn)">Turn off this link</span></span></button></div></div>`
-      : `<div class="section"><div class="group tiles"><div class="row">${tile('event', 'calendar')}<span class="main"><span class="t">See TripIt in your calendar</span>
+      : `<div class="section"><div class="group tiles"><div class="row">${tile('event', 'calendar')}<span class="main"><span class="t">See The Travel Edit in your calendar</span>
         <span class="s">Events, bookings and planned days show up in Google or Apple Calendar and stay up to date.</span></span></div></div>
         <div class="section"><button class="btn wide" data-act="calfeedon">Turn on calendar sync</button></div>
         <div class="section-f">To add just one event, tap the calendar button next to it instead.</div></div>`,
@@ -1542,7 +1542,7 @@ async function savedView(r) {
   const banner = reel ? `<div class="reelbanner">${ICON.link}<span>${plural(shown.length, 'place')} from one post</span><a class="linkbtn" href="#/">Show everything</a></div>` : '';
   const body = !places.length
     ? emptyState('accent', 'bookmark', 'Nothing saved yet',
-      'Share a TikTok or Instagram post to TripIt, paste a link, or search for a place. Everything you save lands here, ready to sort into folders and trips.',
+      'Share a TikTok or Instagram post to Travel Edit, paste a link, or search for a place. Everything you save lands here, ready to sort into folders and trips.',
       `<button class="btn" data-act="add">${ICON.plus}Add a place</button><a class="linkbtn" href="#/profile">Set up the share button</a>`)
     : `<div class="section-h hrow libhead"><span>All saved</span></div>${libControls('saved', shown)}<div id="libbody" data-scope="saved">${libList('saved', shown)}</div>`;
   return `${strip}${banner}${body}${selBar()}`;
@@ -2188,7 +2188,7 @@ const VIEWS = {
       <h1 class="largetitle" data-anchor>Imports</h1>
       ${S.jobs.length ? `<div class="section"><div class="group tiles">${S.jobs.map(jobRow).join('')}</div>
         <div class="section-f">Tap a finished import to see its places.</div></div>`
-        : emptyState('blue', 'tray', 'Nothing imported yet', 'Reels you share to TripIt show up here while they’re processed.')}`;
+        : emptyState('blue', 'tray', 'Nothing imported yet', 'Reels you share to Travel Edit show up here while they’re processed.')}`;
   },
 
   async profile() {
@@ -2203,9 +2203,9 @@ const VIEWS = {
     const copyLine = (value, label) => `<div class="copyline"><code>${esc(value)}</code><button class="copybtn" data-act="copy" data-value="${esc(value)}" aria-label="Copy ${label}">Copy</button></div>`;
     const push = await pushState();
     const pushNote = {
-      install: 'On iPhone, notifications work once TripIt is on your Home Screen (see below). Open it from there, then turn this on.',
-      denied: 'Notifications are blocked for TripIt. Turn them on in Settings → Notifications → TripIt.',
-      unsupported: 'This browser can’t show notifications from TripIt.',
+      install: 'On iPhone, notifications work once Travel Edit is on your Home Screen (see below). Open it from there, then turn this on.',
+      denied: 'Notifications are blocked for Travel Edit. Turn them on in Settings → Notifications → Travel Edit.',
+      unsupported: 'This browser can’t show notifications from The Travel Edit.',
       off: 'Get a notification when a reel you shared has been turned into places, or if it couldn’t be read.',
       on: 'You’ll get a notification when each shared reel’s places are saved.',
     }[push];
@@ -2243,33 +2243,33 @@ const VIEWS = {
       </div><div class="section-f">To save a whole trip before you go, open it and choose ••• → Save for offline.</div></div>
 
       ${NATIVE ? `<div class="section"><div class="section-h">Share from TikTok &amp; Instagram</div><div class="group tiles">
-        <div class="row">${tile('indigo', 'share')}<span class="main"><span class="t">Share → TripIt</span>
+        <div class="row">${tile('indigo', 'share')}<span class="main"><span class="t">Share → Travel Edit</span>
           <span class="s">In TikTok tap Share → More (•••); in Instagram tap the paper plane → Share to…. The places appear in Saved about a minute later.</span></span></div>
       </div></div>` : `<div class="section"><div class="section-h">Share from TikTok &amp; Instagram</div><div class="group">
         <div class="row">${tile('indigo', 'share', 'md')}<span class="main"><span class="t b">iPhone share button</span><span class="s">A one-time shortcut in the Shortcuts app</span></span></div>
         <ol class="steps">
-          <li>Open the <b>Shortcuts</b> app, tap <b>+</b> and name the shortcut <b>TripIt</b>.</li>
+          <li>Open the <b>Shortcuts</b> app, tap <b>+</b> and name the shortcut <b>Travel Edit</b>.</li>
           <li>Tap the <b>ⓘ</b> button (or the name at the top) and turn on <b>Show in Share Sheet</b>. Tap <b>Done</b>.</li>
           <li>At the top it now says “Receive <i>Any</i> input from Share Sheet”. Tap <i>Any</i> and keep only <b>URLs</b> and <b>Text</b>.</li>
           <li>Add the action <b>Get Contents of URL</b>. Set the URL to the address below.</li>
           <li>Tap the <b>›</b> arrow on that action: set <b>Method</b> to <b>POST</b>; under <b>Headers</b> add <span class="kbd">X-API-Key</span> with your key below; set <b>Request Body</b> to <b>JSON</b> and add a <b>Text</b> field named <span class="kbd">url</span> whose value is the <b>Shortcut Input</b> variable.</li>
-          <li>Optional: add <b>Show Notification</b> with the text “Saved to TripIt”.</li>
-          <li>In TikTok tap <b>Share → More (•••)</b>, or in Instagram tap the <b>paper plane → Share to…</b>, then choose <b>TripIt</b>. The first time, you may need to scroll the app row and add TripIt to your favorites.</li>
+          <li>Optional: add <b>Show Notification</b> with the text “Saved to Travel Edit”.</li>
+          <li>In TikTok tap <b>Share → More (•••)</b>, or in Instagram tap the <b>paper plane → Share to…</b>, then choose <b>Travel Edit</b>. The first time, you may need to scroll the app row and add Travel Edit to your favorites.</li>
         </ol>
         <div class="sublabel">Shortcut URL</div>${copyLine(`${origin}/v1/jobs`, 'shortcut URL')}
         <div class="sublabel">X-API-Key</div>${me
-          ? `<div class="copyline"><span class="s">${me.has_import_key ? 'You made a key already. Lost it? Make a new one; the old one stops working.' : 'A personal key that can only send links to your TripIt.'}</span>
+          ? `<div class="copyline"><span class="s">${me.has_import_key ? 'You made a key already. Lost it? Make a new one; the old one stops working.' : 'A personal key that can only send links to your library.'}</span>
               <button class="copybtn" data-act="importkey">${me.has_import_key ? 'New key' : 'Make key'}</button></div>`
           : key ? copyLine(key, 'API key') : '<div class="copyline"><span class="s">This server doesn’t require a key.</span></div>'}
       </div>
-      <div class="section-f">Simpler but opens TripIt each time: make the shortcut a single <b>Open URLs</b> action with <span class="kbd">${esc(origin)}/share?url=</span> followed by the <b>Shortcut Input</b> variable. It opens in Safari, so sign in there once too.</div></div>
+      <div class="section-f">Simpler but opens Travel Edit each time: make the shortcut a single <b>Open URLs</b> action with <span class="kbd">${esc(origin)}/share?url=</span> followed by the <b>Shortcut Input</b> variable. It opens in Safari, so sign in there once too.</div></div>
 
       <div class="section"><div class="section-h">Home Screen</div><div class="group">
-        <div class="row">${tile('blue', 'home', 'md')}<span class="main"><span class="t b">Add TripIt to your Home Screen</span><span class="s">Opens full screen, like an app</span></span></div>
+        <div class="row">${tile('blue', 'home', 'md')}<span class="main"><span class="t b">Add Travel Edit to your Home Screen</span><span class="s">Opens full screen, like an app</span></span></div>
         <ol class="steps">
           <li>Open this page in <b>Safari</b>.</li>
           <li>Tap the <b>Share</b> button, then <b>Add to Home Screen</b>.</li>
-          <li>On Android, use Chrome’s <b>Install app</b> and TripIt appears in the share sheet automatically.</li>
+          <li>On Android, use Chrome’s <b>Install app</b> and Travel Edit appears in the share sheet automatically.</li>
         </ol></div></div>`}
 
       <div class="section"><div class="section-h">Server</div><div class="group tiles">
@@ -2298,11 +2298,11 @@ const VIEWS = {
         + field('password', 'Password', 'password', 'new-password', 'minlength="8" placeholder="At least 8 characters"')
         + field('invite', first ? 'Server key' : 'Invite code', first ? 'password' : 'text', 'off', `autocapitalize="characters" ${first ? '' : 'placeholder="ABCD-2345"'}`);
     const lead = first
-      ? 'Create the first account. Use the server key (APP_API_KEY) as the code: everything already saved in TripIt becomes yours, and you can invite others after.'
-      : mode === 'join' ? 'TripIt is invite-only for now. Enter the code you were given.' : 'Your places, folders and trips, on any device.';
+      ? 'Create the first account. Use the server key (APP_API_KEY) as the code: everything already saved in The Travel Edit becomes yours, and you can invite others after.'
+      : mode === 'join' ? 'The Travel Edit is invite-only for now. Enter the code you were given.' : 'Your places, folders and trips, on any device.';
     return `<div class="authpage">
       <div class="authmark" aria-hidden="true">${ICON.bookmark}</div>
-      <h1 class="authtitle">${first ? 'Set up TripIt' : mode === 'join' ? 'Join TripIt' : 'Welcome back'}</h1>
+      <h1 class="authtitle">${first ? 'Set up The Travel Edit' : mode === 'join' ? 'Join The Travel Edit' : 'Welcome back'}</h1>
       <p class="authlead">${lead}</p>${seg}
       <form class="section" data-form="${mode === 'in' ? 'signin' : 'signup'}" novalidate><div class="group">${fields}</div>
         <div class="section-f autherr" id="auth-error" role="alert"></div>
@@ -3004,7 +3004,7 @@ function addBookingSheet(trip, { choose = false } = {}) {
       ${opt('bkshot', 'green', 'photo', 'Screenshot or photo', 'Of a confirmation, e-ticket or itinerary')}
       ${opt('bktext', 'orange', 'note', 'Paste the email text', 'Claude reads flight, hotel and reservation details')}
       ${opt('bkmanual', 'gray', 'plus', 'Enter it yourself', 'Flight, stay, car or table')}
-      </div><div class="section-f">Claude shows what it read so you can check it before saving. A confirmation number alone can’t be looked up, so TripIt reads the confirmation itself.</div></div>`,
+      </div><div class="section-f">Claude shows what it read so you can check it before saving. A confirmation number alone can’t be looked up, so The Travel Edit reads the confirmation itself.</div></div>`,
   });
 }
 
@@ -3139,7 +3139,7 @@ function reservationSection(p, trip) {
       <span class="s">Opens ${provider} in your browser</span></span><span class="brandchip">${provider}</span>${ICON.chev}</a>
     ${chatgpt}
     <button class="row" data-act="bookedplace" data-id="${p.id}">${tile('green', 'done')}<span class="main"><span class="t">I already booked</span><span class="s">Add the time and confirmation</span></span>${ICON.chev}</button></div>
-    <div class="section-f">TripIt can’t see availability. It takes you to the restaurant’s own booking page, then asks whether you booked so it can save the time.</div></div>`;
+    <div class="section-f">The Travel Edit can’t see availability. It takes you to the restaurant’s own booking page, then asks whether you booked so it can save the time.</div></div>`;
 }
 
 const RESERVE_KEY = 'tripit.reserve';
@@ -3313,8 +3313,8 @@ function eventsView(trip) {
     return '<div class="empty"><span class="spinner big"></span><h3>Looking for events</h3><p>Checking what’s on near where you’re staying.</p></div>';
   }
   if (ev.status === 'disabled') return emptyState('gray', 'ticket', 'Events aren’t switched on', 'Add a free Ticketmaster key to the server to see concerts, theatre and sport during your trips. The README says how.');
-  if (ev.status === 'no_dates') return emptyState('pink', 'ticket', 'Add dates to see what’s on', 'Set a start date for this trip (••• then Plan, or Re-plan) and TripIt will look for events on those days.');
-  if (ev.status === 'no_location') return emptyState('gray', 'pinslash', 'No places on the map yet', 'Save a few places so TripIt knows where you’ll be, then it can look for events nearby.');
+  if (ev.status === 'no_dates') return emptyState('pink', 'ticket', 'Add dates to see what’s on', 'Set a start date for this trip (••• then Plan, or Re-plan) and The Travel Edit will look for events on those days.');
+  if (ev.status === 'no_location') return emptyState('gray', 'pinslash', 'No places on the map yet', 'Save a few places so The Travel Edit knows where you’ll be, then it can look for events nearby.');
   if (ev.status === 'error') return emptyState('gray', 'warn', 'Couldn’t load events', 'Ticketmaster didn’t answer. Try again in a moment.', `<button class="btn tint" data-act="eventsrefresh" data-id="${trip.id}">Try again</button>`);
   const filter = S.eventFilter[trip.id] || 'all';
   const has = (id) => id === 'all' || ev.events.some((e) => (id === 'match' ? e.match : e.category === id));
@@ -3330,7 +3330,7 @@ function eventsView(trip) {
   return `${ev.events.length ? chips : ''}
     ${groups.map((g) => `<div class="datehead">${esc(fmtDay(parseWhen(g.key).day))}${g.items[0].day ? ` · Day ${g.items[0].day}` : ''}</div>${g.items.map((e) => eventCard(e, trip)).join('')}`).join('')
       || emptyState('gray', 'ticket', ev.events.length ? 'Nothing in this filter' : 'Nothing found for these dates', ev.events.length ? 'Try another filter.' : 'Ticketmaster has no events near where you’ll be on these days. Coverage is best in North America and parts of Europe.')}
-    <div class="section"><div class="section-f">Events and ticket links from Ticketmaster, which sells the tickets. TripIt doesn’t sell or hold tickets, and prices and availability can change. Picked for you using your taste profile.</div>
+    <div class="section"><div class="section-f">Events and ticket links from Ticketmaster, which sells the tickets. The Travel Edit doesn’t sell or hold tickets, and prices and availability can change. Picked for you using your taste profile.</div>
       <button class="linkbtn" data-act="eventsrefresh" data-id="${trip.id}">Refresh</button></div>`;
 }
 
@@ -3482,7 +3482,7 @@ function tidySheet(trip) {
 function shareText(trip) {
   const link = (p) => mapsLinks(p, trip).google;
   const line = (p) => `• ${p.name} (${CATS[p.category]}) ${link(p)}`;
-  const lines = [`${trip.name} — saved with TripIt`, ''];
+  const lines = [`${trip.name} — saved with The Travel Edit`, ''];
   if (trip.day_count) {
     for (let d = 1; d <= trip.day_count; d++) {
       const list = stops(trip, d);
@@ -3535,7 +3535,7 @@ function shareMenu(t) {
 /** Must run straight from a tap: Safari only opens the share sheet for a user gesture. */
 function shareUrl(t, url) {
   if (navigator.share) {
-    navigator.share({ title: t.name, text: `${t.name}: my trip on TripIt`, url }).catch((e) => {
+    navigator.share({ title: t.name, text: `${t.name}: my trip on The Travel Edit`, url }).catch((e) => {
       if (e.name !== 'AbortError') copy(url);
     });
   } else {
@@ -3586,7 +3586,7 @@ async function exportTrip(t, format) {
 /** Fetches a trip, its travel times and photos so the service worker keeps them for offline use. */
 async function saveOffline(tripId, quiet = false) {
   if (!('serviceWorker' in navigator) || !navigator.serviceWorker.controller) {
-    if (!quiet) toast('Offline saving needs TripIt opened from the Home Screen or a recent browser', true);
+    if (!quiet) toast('Offline saving needs Travel Edit opened from the Home Screen or a recent browser', true);
     return;
   }
   const trip = await loadTrip(tripId);
@@ -4279,7 +4279,7 @@ async function onAction(act, el) {
       openSheet({
         type: 'form', title: 'Restaurant website', confirm: 'Find the menu', st,
         body: () => `<div class="section"><div class="group"><div class="row"><input class="field" type="url" inputmode="url" data-act="packfield" data-f="text" placeholder="https://…" value="${esc(st.text)}" aria-label="Website address" autocomplete="off"></div></div>
-          <div class="section-f">Paste the address of the restaurant’s own website. TripIt will look there for the menu.</div></div>`,
+          <div class="section-f">Paste the address of the restaurant’s own website. The Travel Edit will look there for the menu.</div></div>`,
         async ok() {
           const url = st.text.trim();
           if (!url) { toast('Paste the website address', true); return; }
@@ -4325,7 +4325,7 @@ async function onAction(act, el) {
       try {
         const state = el.checked ? await enablePush(S.config.push_public_key) : (await disablePush(), 'off');
         if (state === 'on') toast('Notifications are on');
-        else if (state === 'denied') toast('Notifications are blocked. Allow them in Settings → Notifications → TripIt.', true);
+        else if (state === 'denied') toast('Notifications are blocked. Allow them in Settings → Notifications → Travel Edit.', true);
       } catch (e) {
         toast(e.message || 'Couldn’t turn on notifications', true);
       }
@@ -4442,7 +4442,7 @@ async function onAction(act, el) {
       openSheet({ type: 'form', title: 'Your Shortcut key', confirm: 'Done', st: {},
         body: () => `<div class="section"><div class="group"><div class="copyline"><code>${esc(key)}</code>
           <button class="copybtn" data-act="copy" data-value="${esc(key)}" aria-label="Copy key">Copy</button></div></div>
-          <div class="section-f">Paste it as the X-API-Key header in your TripIt Shortcut. It's shown only now, and it can only send links and screenshots to your TripIt.</div></div>`,
+          <div class="section-f">Paste it as the X-API-Key header in your Travel Edit Shortcut. It's shown only now, and it can only send links and screenshots to your library.</div></div>`,
         ok() { closeSheet(); render({ quiet: true }); } });
       return;
     }
@@ -4624,7 +4624,7 @@ document.addEventListener('submit', async (ev) => {
       S.me = res.user;
       S.config = await api('/v1/config');
       configureMaps({ googleMapsKey: S.config.google_maps_key });
-      toast(form.dataset.form === 'signin' ? 'Signed in' : 'Welcome to TripIt');
+      toast(form.dataset.form === 'signin' ? 'Signed in' : 'Welcome to The Travel Edit');
       await start();
     } catch (e) {
       btn.disabled = false;

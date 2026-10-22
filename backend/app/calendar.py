@@ -137,7 +137,7 @@ class CalendarService:
             params["details"] = item.subtitle
         return "https://calendar.google.com/calendar/render?" + urlencode(params)
 
-    def ics(self, items: list[CalendarItem], name: str = "TripIt") -> str:
+    def ics(self, items: list[CalendarItem], name: str = "The Travel Edit") -> str:
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//TripIt//Calendar//EN", "CALSCALE:GREGORIAN", "METHOD:PUBLISH",
                  f"X-WR-CALNAME:{_ics_text(name)}", "REFRESH-INTERVAL;VALUE=DURATION:PT4H", "X-PUBLISHED-TTL:PT4H"]

@@ -23,7 +23,7 @@ struct SignInView: View {
                         .foregroundStyle(Theme.accentInk)
                         .frame(width: 64, height: 64)
                         .background(Theme.accent, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-                    Text("TripIt").font(Theme.serif(40))
+                    Text("The Travel Edit").font(Theme.serif(36))
                     Text(joining ? "Create your account with the invite code you were sent."
                                  : "Every place you save from TikTok and Instagram, ready for your next trip.")
                         .font(.subheadline).foregroundStyle(Theme.secondary).multilineTextAlignment(.center)

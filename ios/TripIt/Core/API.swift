@@ -66,7 +66,7 @@ final class API: @unchecked Sendable {
             #if DEBUG
             print("Couldn't decode \(T.self): \(error)")
             #endif
-            throw APIError(status: 0, message: "TripIt sent something this version of the app can't read. Try updating the app.")
+            throw APIError(status: 0, message: "The Travel Edit sent something this version of the app can't read. Try updating the app.")
         }
     }
 
@@ -89,7 +89,7 @@ final class API: @unchecked Sendable {
         } catch let error as URLError where error.code == .cancelled {
             throw CancellationError()
         } catch {
-            throw APIError(status: 0, message: "You're offline, or TripIt can't be reached right now.")
+            throw APIError(status: 0, message: "You're offline, or The Travel Edit can't be reached right now.")
         }
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard (200..<300).contains(status) else {

@@ -64,7 +64,7 @@ struct ProfileView: View {
             } header: {
                 Text("Notifications")
             } footer: {
-                if notifications == .denied { Text("Notifications are off for TripIt. Turn them on in Settings → Notifications → TripIt.") }
+                if notifications == .denied { Text("Notifications are off for Travel Edit. Turn them on in Settings → Notifications → Travel Edit.") }
             }
             Section("Account") {
                 Button { changingPassword = true } label: { row("lock.fill", Theme.gray, "Change password", nil) }
@@ -80,7 +80,7 @@ struct ProfileView: View {
             Section {
                 Button("Delete account", role: .destructive) { deleting = true }
             } footer: {
-                Text("TripIt \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "") · \(AppConfig.baseURL.host ?? "")")
+                Text("The Travel Edit \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "") · \(AppConfig.baseURL.host ?? "")")
             }
         }
         .tripBackground()
@@ -98,7 +98,7 @@ struct ProfileView: View {
         } message: {
             Text("Discover shows places around here, and places you save here go in a collection near home.")
         }
-        .confirmationDialog("Sign out of TripIt on this phone?", isPresented: $confirmSignOut, titleVisibility: .visible) {
+        .confirmationDialog("Sign out of The Travel Edit on this phone?", isPresented: $confirmSignOut, titleVisibility: .visible) {
             Button("Sign out", role: .destructive) { Task { dismiss(); await session.signOut() } }
         }
         .sheet(isPresented: $changingPassword) { PasswordSheet().environment(store) }
@@ -220,7 +220,7 @@ struct ImportsView: View {
         List {
             if store.jobs.isEmpty {
                 EmptyState(symbol: "tray", title: "Nothing shared yet",
-                           text: "Share a TikTok, Instagram or YouTube post to TripIt from the share sheet, and the places in it are saved for you.")
+                           text: "Share a TikTok, Instagram or YouTube post to Travel Edit from the share sheet, and the places in it are saved for you.")
                     .listRowBackground(Color.clear)
             }
             ForEach(store.jobs) { job in

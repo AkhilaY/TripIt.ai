@@ -158,7 +158,7 @@ class Push:
             return False
         if self._apns_client is None:
             self._apns_client = httpx.AsyncClient(http2=True, timeout=15)
-        alert = {"title": message.get("title", "TripIt"), "body": message.get("body", "")}
+        alert = {"title": message.get("title", "The Travel Edit"), "body": message.get("body", "")}
         aps: dict = {"alert": alert, "sound": "default"}
         if message.get("tag"):
             aps["thread-id"] = str(message["tag"])

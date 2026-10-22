@@ -85,7 +85,7 @@ struct LibraryView: View {
         }
         if store.places.isEmpty {
             EmptyState(symbol: "bookmark.fill", color: Theme.accent, title: "Nothing saved yet",
-                       text: "Share a TikTok or Instagram post to TripIt, paste a link, or search for a place. Everything you save lands here, ready to sort into folders and trips.") {
+                       text: "Share a TikTok or Instagram post to Travel Edit, paste a link, or search for a place. Everything you save lands here, ready to sort into folders and trips.") {
                 Button { router.addRequest = Router.AddRequest() } label: { Label("Add a place", systemImage: "plus") }
                     .buttonStyle(PrimaryButtonStyle()).frame(maxWidth: 220)
             }

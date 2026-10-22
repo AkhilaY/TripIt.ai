@@ -99,7 +99,7 @@ struct NewTripSheet: View {
                     DatePicker("Starts", selection: $start, displayedComponents: .date)
                 }
             } footer: {
-                Text("With a start date, TripIt checks each stop is open on its day.")
+                Text("With a start date, The Travel Edit checks each stop is open on its day.")
             }
             Section {
                 Button("Next") { next() }

@@ -2,7 +2,7 @@ import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
 
-/// "Share → TripIt" from TikTok, Instagram, YouTube, Maps or Safari: sends the link to your TripIt account,
+/// "Share → Travel Edit" from TikTok, Instagram, YouTube, Maps or Safari: sends the link to your TripIt account,
 /// which finds the places in the background (you get them in Saved a minute later).
 final class ShareViewController: UIViewController {
     private let model = ShareModel()
@@ -45,7 +45,7 @@ final class ShareModel: ObservableObject {
             return
         }
         guard let token = SessionStore.token else {
-            phase = .error("Open TripIt and sign in first, then share again.")
+            phase = .error("Open Travel Edit and sign in first, then share again.")
             return
         }
         do {
@@ -55,9 +55,9 @@ final class ShareModel: ObservableObject {
             onFinish()
         } catch ShareError.signedOut {
             SessionStore.clear()
-            phase = .error("You've been signed out. Open TripIt, sign in, then share again.")
+            phase = .error("You've been signed out. Open Travel Edit, sign in, then share again.")
         } catch {
-            phase = .error("Couldn't reach TripIt. Check your connection and try again.")
+            phase = .error("Couldn't reach The Travel Edit. Check your connection and try again.")
         }
     }
 
@@ -111,12 +111,12 @@ struct ShareView: View {
             switch model.phase {
             case .working:
                 ProgressView()
-                Text("Saving to TripIt…").font(.headline)
+                Text("Saving to Travel Edit…").font(.headline)
             case .saved:
                 Image(systemName: "bookmark.circle.fill")
                     .font(.system(size: 52))
                     .foregroundStyle(Color(red: 0.17, green: 0.13, blue: 0.10))
-                Text("Saved to TripIt").font(.title3.weight(.semibold))
+                Text("Saved to Travel Edit").font(.title3.weight(.semibold))
                 Text("Finding the places now. They'll be in Saved in about a minute.")
                     .font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
             case .error(let message):

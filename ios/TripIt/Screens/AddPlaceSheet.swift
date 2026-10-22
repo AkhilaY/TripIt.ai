@@ -57,7 +57,7 @@ struct AddPlaceSheet: View {
                     }
                 } footer: {
                     if kind == .empty {
-                        Text("Share posts straight from TikTok or Instagram with Share → TripIt.")
+                        Text("Share posts straight from TikTok or Instagram with Share → Travel Edit.")
                     }
                 }
 
@@ -70,7 +70,7 @@ struct AddPlaceSheet: View {
                     Section {
                         Button { Task { await importReel() } } label: {
                             action("sparkles", Theme.gold, "Save the places in this post",
-                                   "TripIt watches it and finds every place mentioned. About a minute.")
+                                   "The Travel Edit watches it and finds every place mentioned. About a minute.")
                         }
                     }
                 case .map:
@@ -114,7 +114,7 @@ struct AddPlaceSheet: View {
                     Section {
                         PhotosPicker(selection: $shots, maxSelectionCount: 10, matching: .images) {
                             action("photo.on.rectangle.angled", Theme.indigo, "Screenshots",
-                                   "Of a post, a map or an article. TripIt finds the places in them.")
+                                   "Of a post, a map or an article. The Travel Edit finds the places in them.")
                         }
                         PasteButton(payloadType: String.self) { strings in
                             if let first = strings.first { text = first }

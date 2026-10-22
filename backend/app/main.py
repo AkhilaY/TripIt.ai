@@ -238,10 +238,10 @@ async def authenticate(
                 raise HTTPException(status_code=401, detail="Invalid API key")
             user, scope = found
             if scope == "import" and not (request.method == "POST" and request.url.path in IMPORT_PATHS):
-                raise HTTPException(status_code=403, detail="This key can only send links to TripIt")
+                raise HTTPException(status_code=403, detail="This key can only send links to The Travel Edit")
     elif user is None:
         if settings.app_api_key:
-            raise HTTPException(status_code=401, detail="Sign in to TripIt")
+            raise HTTPException(status_code=401, detail="Sign in to The Travel Edit")
         user = accounts.owner()  # local development without a key
     CURRENT_USER.set(user.id if user else None)
     request.state.user = user
@@ -1119,7 +1119,7 @@ async def shared_page(token: str, request: Request) -> HTMLResponse:
     origin = _origin(request)
     days = f" · {trip.day_count}-day plan" if trip.day_count else ""
     values = {
-        "title": f"{trip.name} · TripIt",
+        "title": f"{trip.name} · The Travel Edit",
         "description": f"{len(trip.places)} saved place{'s' if len(trip.places) != 1 else ''}{days}. Open for the map and itinerary.",
         "image": f"{origin}{trip.cover_photo.url}&w=1200" if trip.cover_photo else f"{origin}/icons/icon-512.png",
         "url": f"{origin}/s/{token}",
@@ -1131,7 +1131,7 @@ async def shared_page(token: str, request: Request) -> HTMLResponse:
 
 
 NOT_SHARED_PAGE = """<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>TripIt</title><style>body{font:17px -apple-system,system-ui,sans-serif;display:grid;place-items:center;min-height:90vh;margin:0;
+<title>The Travel Edit</title><style>body{font:17px -apple-system,system-ui,sans-serif;display:grid;place-items:center;min-height:90vh;margin:0;
 text-align:center;color:#3c3c43;background:#f2f2f7}h1{font-size:22px;color:#000}</style>
 <div><h1>This trip link isn't available</h1><p>It may have been turned off by the person who shared it.</p></div>"""
 
@@ -1330,7 +1330,7 @@ async def apns_unregister(token: str, request: Request) -> Response:
 
 @app.post("/v1/push/test", dependencies=[Auth])
 async def push_test(request: Request) -> dict:
-    sent = await _push(request).send_all({"title": "Notifications are on", "body": "TripIt will tell you when a reel's places are saved.",
+    sent = await _push(request).send_all({"title": "Notifications are on", "body": "The Travel Edit will tell you when a reel's places are saved.",
                                           "url": "/#/settings", "tag": "test"})
     return {"sent": sent}
 

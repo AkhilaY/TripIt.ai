@@ -83,6 +83,10 @@ jobs:
           TICKETMASTER_API_KEY: ${{ secrets.TICKETMASTER_API_KEY }}
           NOMINATIM_EMAIL: ${{ secrets.NOMINATIM_EMAIL }}
           YTDLP_COOKIES: ${{ secrets.YTDLP_COOKIES }}
+          APNS_KEY: ${{ secrets.APNS_KEY }}
+          APNS_KEY_ID: ${{ secrets.APNS_KEY_ID }}
+          APNS_TEAM_ID: ${{ secrets.APNS_TEAM_ID }}
+          APNS_TOPIC: ${{ secrets.APNS_TOPIC }}
         run: |
           {
             printf 'ANTHROPIC_API_KEY=%s\n' "$ANTHROPIC_API_KEY"
@@ -93,6 +97,11 @@ jobs:
             [ -z "$NOMINATIM_EMAIL" ] || printf 'NOMINATIM_EMAIL=%s\n' "$NOMINATIM_EMAIL"
             # cookies.txt is multi-line; store it on one line with \n escapes (the server undoes this).
             [ -z "$YTDLP_COOKIES" ] || printf 'YTDLP_COOKIES=%s\n' "$(printf '%s' "$YTDLP_COOKIES" | awk '{printf "%s\\n", $0}')"
+            # Notifications for the native iOS app; the .p8 key is multi-line too.
+            [ -z "$APNS_KEY" ] || printf 'APNS_KEY=%s\n' "$(printf '%s' "$APNS_KEY" | awk '{printf "%s\\n", $0}')"
+            [ -z "$APNS_KEY_ID" ] || printf 'APNS_KEY_ID=%s\n' "$APNS_KEY_ID"
+            [ -z "$APNS_TEAM_ID" ] || printf 'APNS_TEAM_ID=%s\n' "$APNS_TEAM_ID"
+            [ -z "$APNS_TOPIC" ] || printf 'APNS_TOPIC=%s\n' "$APNS_TOPIC"
           } | flyctl secrets import --stage --app "$APP"
 
       - name: Deploy

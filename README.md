@@ -23,7 +23,7 @@ TikTok / Instagram ──Share──▶ "TripIt" Shortcut ──POST /v1/jobs─
 |---|---|
 | `backend/app/` | FastAPI server: imports reels, stores trips, plans itineraries |
 | `backend/app/static/` | The web app (plain HTML/CSS/JS, no build step) |
-| `ios/` | Optional native iOS app (the web app plus a Share Extension) for TestFlight and the App Store (builds in CI) |
+| `ios/` | Native SwiftUI iOS app with a Share Extension, for TestFlight and the App Store (builds in CI) |
 | `docs/iphone-shortcut.md` | Step-by-step iPhone share-sheet setup |
 
 ---
@@ -164,6 +164,7 @@ Instagram blocks most anonymous downloads. Export cookies for instagram.com from
 | `TICKETMASTER_API_KEY` / `EVENTS_RADIUS_KM` | – / `40` | Free key from developer.ticketmaster.com for What's on (default quota about 5,000 calls a day). Add it as a GitHub secret of the same name. Check Ticketmaster's terms before launching publicly |
 | `MENU_GOOGLE_PHOTOS` | `true` | When a website has no menu, read menu photos from Google Maps. Google's terms may not allow extracting text from its photos: check them, and set this to `false` if in doubt |
 | `WHISPER_MODEL` | `base` | `small` is more accurate but slower on CPU |
+| `APNS_KEY` / `APNS_KEY_ID` / `APNS_TEAM_ID` / `APNS_TOPIC` | – | Notifications for the native iOS app (see [Native iOS app](#native-ios-app-optional)). Add them as GitHub secrets of the same names |
 | `YTDLP_COOKIES_FILE` / `YTDLP_COOKIES` | – | Needed for most Instagram reels: a path to cookies.txt, or its contents |
 
 ### Google Maps inside the app (optional)
@@ -232,11 +233,37 @@ All `/v1` routes need the `X-API-Key` header when `APP_API_KEY` is set.
 
 ## Native iOS app (optional)
 
-`ios/` is a small native app around the same web app: it shows TripIt full screen, keeps you signed in and adds a real **Share → TripIt** button to the share sheet, so you don't need the Shortcut. Nothing is duplicated. Every change to the web app shows up in the iOS app straight away, without an App Store update.
+`ios/` is a native SwiftUI app for the same server and account. It has a **Share → TripIt** button in the share sheet, so you don't need the Shortcut.
 
-- **App:** a web view of your server. It allows only your domain, so the offline mode (service worker) works. Pull down to refresh. Links to other sites open in an in-app Safari sheet, and calendar files and phone numbers go to the Calendar and Phone apps.
-- **Share Extension:** shares a TikTok, Instagram, YouTube, Maps or Safari link to `POST /v1/jobs` with your session (`Authorization: Bearer`). The places appear in **Saved** about a minute later. When you sign in, the app copies your session to the Keychain it shares with the extension (through the App Group). Signing out removes that copy. If you share while signed out, the extension asks you to open TripIt and sign in.
-- GitHub Actions compiles it for the simulator on every push, so you don't need a Mac to check that it builds.
+**Native screens:**
+- Sign in, or join with an invite.
+- **Library:**
+  - **Saved**: folders, type chips, cities, search, sort, and multi-select to file places in folders or trips.
+  - **Trips**: trip cards, today's trip, and the new-trip flow (AI or by hand).
+- **Place pages**:
+  - photos, map, hours, open now, reserve, maps and directions;
+  - folders and trips, the trip day and time, the event date, notes, and the posts it came from.
+- **Trips**:
+  - places by kind and the trip's edits;
+  - the day-by-day plan: drag to reorder, press and hold to move to another day, and walking, transit or driving times between stops;
+  - a map for each day, plus re-plan, tidy, quiet-day suggestions, sharing, and name and dates.
+- **The Map tab**: Apple Maps with filters.
+- **Add**: paste a reel or a maps link, search for a place, or pick screenshots.
+- **Profile**: home city, imports, notifications, password, sign out, and delete account.
+
+**Web screens for now:** Discover, Bookings, Concierge, the calendar, edits, packing lists, events, menus and taste.
+- They're the web app's own screens inside native ones. The `?embed=1` mode hides the web tab bar.
+- Links to screens the app has natively (a place, a trip, a folder, your profile) open the native screen.
+- Changes made there refresh the native lists.
+- They can be ported to native one at a time.
+
+**Notifications:** the app registers with Apple's push service. When an import finishes, the server sends "3 new places saved in Lisbon". On the server, set the four `APNS_*` settings, all from your developer account:
+- `APNS_KEY`: the contents of a key with **Apple Push Notifications service** ticked, from developer.apple.com → **Keys**. A one-line secret with `\n` for the line breaks is fine.
+- `APNS_KEY_ID`: that key's ID.
+- `APNS_TEAM_ID`: your Team ID.
+- `APNS_TOPIC`: the app's bundle ID.
+
+GitHub Actions compiles the app for the simulator on every push.
 
 ### Getting it on your phone (TestFlight)
 
@@ -263,4 +290,4 @@ Before each upload, raise `CURRENT_PROJECT_VERSION` in `ios/project.yml`. Raise 
 - **Account deletion.** Apple requires a way to delete your account inside the app. It's at the bottom of **Profile** (**Delete account**).
 - **Privacy.** You need a privacy policy URL and the **App Privacy** answers. TripIt stores your email, the links you share and the places you save, and it sends reels to Claude and Google for processing. There's no tracking or ads.
 - **Screenshots and listing.** You need 6.9" iPhone screenshots, a subtitle, a description and keywords. Pick the final name first: "TripIt" is already an App Store app.
-- **Native features.** Apple sometimes rejects apps that are "just a website" (guideline 4.2). The Share Extension is a real native feature. Native push notifications and a home-screen widget would make the case stronger if review pushes back.
+- **Native features.** Apple rejects apps that are "just a website" (guideline 4.2). TripIt's main screens, share button, maps and notifications are native, and the remaining web screens sit inside native navigation.

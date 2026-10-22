@@ -3,6 +3,9 @@
 Implements message encryption (RFC 8291, aes128gcm) and VAPID sender identification (RFC 8292)
 directly on `cryptography`. The VAPID key pair is created on first start and kept next to the database,
 so subscriptions survive redeploys. iPhones get notifications once TripIt is on the Home Screen.
+
+The native iOS app registers its device token instead (stored as an "apns:<environment>:<token>" subscription)
+and gets notifications through Apple's push service, signed with the team's .p8 key (token-based auth).
 """
 
 import asyncio
@@ -12,6 +15,7 @@ import logging
 import os
 import struct
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse
@@ -31,6 +35,29 @@ log = logging.getLogger(__name__)
 # made to POST to arbitrary URLs.
 PUSH_HOSTS = ("web.push.apple.com", "fcm.googleapis.com", "updates.push.services.mozilla.com", "notify.windows.com",
               "push.services.mozilla.com", "android.googleapis.com")
+
+
+APNS_HOSTS = {"production": "https://api.push.apple.com", "sandbox": "https://api.sandbox.push.apple.com"}
+
+
+@dataclass
+class ApnsConfig:
+    key_pem: str  # the .p8 file's contents
+    key_id: str
+    team_id: str
+    topic: str  # the app's bundle ID
+
+    @classmethod
+    def from_settings(cls, settings) -> Optional["ApnsConfig"]:
+        values = (settings.apns_key, settings.apns_key_id, settings.apns_team_id, settings.apns_topic)
+        if not all(v.strip() for v in values):
+            return None
+        pem = settings.apns_key.strip().replace("\\n", "\n")  # a key pasted into one line of a secret
+        return cls(pem, settings.apns_key_id.strip(), settings.apns_team_id.strip(), settings.apns_topic.strip())
+
+
+def apns_endpoint(token: str, environment: str) -> str:
+    return f"apns:{environment}:{token}"
 
 
 def b64url(data: bytes) -> str:
@@ -61,10 +88,15 @@ def encrypt(payload: bytes, ua_public: bytes, auth_secret: bytes,
 
 
 class Push:
-    def __init__(self, db: Database, key_path: Path, contact: str = "", client: Optional[httpx.AsyncClient] = None):
+    def __init__(self, db: Database, key_path: Path, contact: str = "", client: Optional[httpx.AsyncClient] = None,
+                 apns: Optional[ApnsConfig] = None, apns_client: Optional[httpx.AsyncClient] = None):
         self.db = db
         self.contact = contact
         self.client = client or httpx.AsyncClient(timeout=15)
+        self.apns = apns
+        self.apns_key = serialization.load_pem_private_key(apns.key_pem.encode(), password=None) if apns else None
+        self._apns_client = apns_client
+        self._apns_token: tuple[float, str] = (0.0, "")
         self.key = self._load_key(key_path)
         raw = self.key.public_key().public_bytes(serialization.Encoding.X962, serialization.PublicFormat.UncompressedPoint)
         self.public_key = b64url(raw)  # the web app's applicationServerKey
@@ -96,6 +128,58 @@ class Push:
             raise ValueError("Invalid subscription keys")
         self.db.save_push_subscription(endpoint, {"p256dh": p256dh, "auth": auth}, origin)
 
+    def subscribe_apns(self, token: str, environment: str) -> None:
+        token = token.strip().lower()
+        if environment not in APNS_HOSTS or not (32 <= len(token) <= 200) or any(c not in "0123456789abcdef" for c in token):
+            raise ValueError("Invalid device token")
+        for env in APNS_HOSTS:  # one row per device, whichever build registered it last
+            self.db.delete_push_subscription(apns_endpoint(token, env))
+        self.db.save_push_subscription(apns_endpoint(token, environment), {}, "ios")
+
+    def unsubscribe_apns(self, token: str) -> None:
+        for env in APNS_HOSTS:
+            self.db.delete_push_subscription(apns_endpoint(token.strip().lower(), env))
+
+    def _apns_jwt(self) -> str:
+        """Apple wants a fresh provider token at most hourly and no more than every 20 minutes: reuse for 40."""
+        made, token = self._apns_token
+        if token and time.time() - made < 40 * 60:
+            return token
+        header = b64url(json.dumps({"alg": "ES256", "kid": self.apns.key_id}, separators=(",", ":")).encode())
+        claims = b64url(json.dumps({"iss": self.apns.team_id, "iat": int(time.time())}, separators=(",", ":")).encode())
+        r, s = decode_dss_signature(self.apns_key.sign(f"{header}.{claims}".encode(), ec.ECDSA(hashes.SHA256())))
+        token = f"{header}.{claims}.{b64url(r.to_bytes(32, 'big') + s.to_bytes(32, 'big'))}"
+        self._apns_token = (time.time(), token)
+        return token
+
+    async def send_apns(self, endpoint: str, message: dict) -> bool:
+        _, environment, token = endpoint.split(":", 2)
+        if not self.apns or environment not in APNS_HOSTS:
+            return False
+        if self._apns_client is None:
+            self._apns_client = httpx.AsyncClient(http2=True, timeout=15)
+        alert = {"title": message.get("title", "TripIt"), "body": message.get("body", "")}
+        aps: dict = {"alert": alert, "sound": "default"}
+        if message.get("tag"):
+            aps["thread-id"] = str(message["tag"])
+        try:
+            response = await self._apns_client.post(f"{APNS_HOSTS[environment]}/3/device/{token}", json={"aps": aps, "url": message.get("url", "/")}, headers={
+                "authorization": f"bearer {self._apns_jwt()}",
+                "apns-topic": self.apns.topic,
+                "apns-push-type": "alert",
+                "apns-priority": "10",
+            })
+        except httpx.HTTPError as e:
+            log.warning("APNs push failed: %s", e)
+            return False
+        if response.status_code == 410 or (response.status_code == 400 and "BadDeviceToken" in response.text):
+            self.db.delete_push_subscription(endpoint)
+            return False
+        if response.status_code >= 400:
+            log.warning("APNs answered %s: %s", response.status_code, response.text[:200])
+            return False
+        return True
+
     def _vapid_header(self, endpoint: str, contact: str) -> str:
         parsed = urlparse(endpoint)
         header = b64url(json.dumps({"typ": "JWT", "alg": "ES256"}, separators=(",", ":")).encode())
@@ -108,6 +192,8 @@ class Push:
     async def send(self, subscription: dict, message: dict) -> bool:
         """Sends one notification; forgets the subscription if the push service says it's gone."""
         endpoint = subscription["endpoint"]
+        if endpoint.startswith("apns:"):
+            return await self.send_apns(endpoint, message)
         if not self.valid_endpoint(endpoint):
             return False
         keys = subscription["keys"]

@@ -1,4 +1,4 @@
-import { api, ApiError, authHeaders, getKey, isOffline, setKey } from './api.js';
+import { api, ApiError, authHeaders, getKey, isOffline, setKey, toNative } from './api.js';
 import { enableDrag } from './drag.js';
 import { ICON, hydrateIcons } from './icons.js';
 import { dayHours, mondayIndex, nextChange, openStatus, slotConflict } from './hours.js';
@@ -247,11 +247,26 @@ const editing = () => {
 let navigating = 0; // token of a navigation render still loading its data
 let quietPending = false; // a background refresh arrived mid-navigation; repaint once it's done
 
+/** Screens the iOS app shows natively: opening one from an embedded web screen hands it to the app. */
+const nativeRoute = (r) => ['trips', 'folder', 'trip', 'map', 'profile', 'signin', 'imports', 'add'].includes(r.name)
+  || (r.name === 'place' && r.mode !== 'menu');
+let embedDepth = -1; // how many screens deep this embedded web view is, so Back at the first one returns to the app
+
 async function render({ quiet = false } = {}) {
   // Background refreshes never cancel a navigation that's still loading, or a field someone is typing in.
   if (quiet && navigating) { quietPending = true; return; }
   if (quiet && editing()) return;
   const r = route();
+  if (EMBED && !quiet && (r.name === 'signin' || (lastRoute && nativeRoute(r)))) {
+    toNative({ open: location.hash || '#/' });
+    if (lastRoute) history.back();
+    return;
+  }
+  if (EMBED && !quiet) {
+    const st = history.state;
+    if (st && st.d != null) embedDepth = st.d;
+    else { embedDepth += 1; history.replaceState({ d: embedDepth }, ''); }
+  }
   if (TAB_FOR[r.name]) S.lastTab = TAB_FOR[r.name];
   if (r.name in TAB_INDEX) S.lastRoot = location.hash || '#/';
   const token = ++renderToken;
@@ -455,6 +470,9 @@ const byPriority = (a, b) => (b.must_do - a.must_do) || ((b.mention_count || 0) 
 
 /** Running inside the TripIt iOS app (it adds this to the user agent): it has its own share button. */
 const NATIVE = /TripItiOS\//.test(navigator.userAgent);
+/** One screen of the web app shown inside the native iOS app, which has its own tab bar and screens. */
+const EMBED = NATIVE && new URLSearchParams(location.search).has('embed');
+if (EMBED) document.documentElement.classList.add('embed');
 
 /** The chips on the home screen: friendlier groups of the app's categories. */
 const GROUPS = [
@@ -3727,6 +3745,10 @@ let notesTimer;
 async function onAction(act, el) {
   switch (act) {
     case 'back': {
+      if (EMBED) {
+        if (embedDepth > 0) history.back(); else toNative({ back: true });
+        return;
+      }
       if (S.navigations > 0) history.back();
       else go(el.dataset.fallback);
       return;

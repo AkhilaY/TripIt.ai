@@ -71,6 +71,13 @@ class Settings(BaseSettings):
     nominatim_email: str = ""
     # Contact sent to push services with notifications (mailto: or https:). Defaults to the app's address.
     push_contact: str = ""
+    # Notifications for the native iOS app (Apple Push Notification service). From developer.apple.com →
+    # Keys, make a key with "Apple Push Notifications service" ticked: paste the .p8 file's contents, its key ID,
+    # your Team ID and the app's bundle ID. Without them, only the web app gets notifications.
+    apns_key: str = ""
+    apns_key_id: str = ""
+    apns_team_id: str = ""
+    apns_topic: str = ""
 
 
 @lru_cache

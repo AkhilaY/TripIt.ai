@@ -25,6 +25,11 @@ export class ApiError extends Error {
   constructor(message, status) { super(message); this.status = status; }
 }
 
+/** Tells the iOS app something (it shows some screens of this web app inside native ones). */
+export function toNative(message) {
+  try { window.webkit.messageHandlers.tripit.postMessage(message); } catch { /* not in the app */ }
+}
+
 let offline = false;
 function network(isOffline) {
   if (isOffline === offline) return;
@@ -49,7 +54,7 @@ export async function api(path, { method = 'GET', body } = {}) {
   const saved = res.headers.get('X-TripIt-Offline') === '1';
   network(saved);
   if (saved && res.status === 503) throw new ApiError("You're offline, and this hasn't been saved on your phone yet.", 0);
-  if (res.status === 204) return null;
+  if (res.status === 204) { if (method !== 'GET') toNative({ changed: path }); return null; }
   let data = null;
   try { data = await res.json(); } catch { /* empty or non-JSON body */ }
   if (!res.ok) {
@@ -57,5 +62,6 @@ export async function api(path, { method = 'GET', body } = {}) {
     if (Array.isArray(detail)) detail = detail[0] && detail[0].msg;
     throw new ApiError(detail || `Server error (${res.status})`, res.status);
   }
+  if (method !== 'GET') toNative({ changed: path }); // the app refreshes its own copy of your library
   return data;
 }

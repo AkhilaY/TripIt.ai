@@ -244,6 +244,7 @@ def client(monkeypatch, tmp_path):
         c.messages = messages
         c.geocoder = geocoder
         c.push_log = push_log
+        c.tmp = tmp_path
         c.push_status = push_status
         c.uploads = tmp_path / "uploads"
         yield c
@@ -1221,6 +1222,49 @@ def test_push_subscription_and_import_notification(client):
     client.push_status["code"] = 410  # the browser unsubscribed: forget it
     assert client.post("/v1/push/test", headers=H).json()["sent"] == 0
     assert app.state.db.push_subscriptions() == []
+
+
+def test_native_app_notifications_go_through_apns(client):
+    import json as _json
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.hazmat.primitives.asymmetric.utils import encode_dss_signature
+    from app.push import ApnsConfig, Push, unb64url
+
+    key = ec.generate_private_key(ec.SECP256R1())
+    pem = key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()).decode()
+    sent, status = [], {"code": 200, "text": ""}
+
+    def apns_handler(request):
+        sent.append(request)
+        return httpx.Response(status["code"], text=status["text"])
+
+    app.state.push = Push(app.state.db, client.tmp / "vapid2.pem",
+                          apns=ApnsConfig(pem, "KEY123", "TEAM456", "com.example.tripit"),
+                          apns_client=httpx.AsyncClient(transport=httpx.MockTransport(apns_handler)))
+    token = "ab" * 32
+    assert client.post("/v1/push/apns", json={"token": "not-hex!"}, headers=H).status_code == 422
+    assert client.post("/v1/push/apns", json={"token": token, "environment": "sandbox"}, headers=H).status_code == 204
+    # Registering again (e.g. a TestFlight build after an Xcode one) keeps one row for the device.
+    assert client.post("/v1/push/apns", json={"token": token.upper()}, headers=H).status_code == 204
+    assert [s["endpoint"] for s in app.state.db.push_subscriptions()] == [f"apns:production:{token}"]
+
+    assert client.post("/v1/push/test", headers=H).json()["sent"] == 1
+    request = sent[-1]
+    assert str(request.url) == f"https://api.push.apple.com/3/device/{token}"
+    assert request.headers["apns-topic"] == "com.example.tripit" and request.headers["apns-push-type"] == "alert"
+    body = _json.loads(request.content)
+    assert body["aps"]["alert"]["title"] == "Notifications are on" and body["url"] == "/#/settings"
+    header, claims, sig = request.headers["authorization"].split(" ")[1].split(".")
+    assert _json.loads(unb64url(header))["kid"] == "KEY123" and _json.loads(unb64url(claims))["iss"] == "TEAM456"
+    raw = unb64url(sig)
+    key.public_key().verify(encode_dss_signature(int.from_bytes(raw[:32], "big"), int.from_bytes(raw[32:], "big")),
+                            f"{header}.{claims}".encode(), ec.ECDSA(hashes.SHA256()))
+
+    status.update(code=400, text='{"reason":"BadDeviceToken"}')  # the app was deleted: forget the device
+    assert client.post("/v1/push/test", headers=H).json()["sent"] == 0
+    assert app.state.db.push_subscriptions() == []
+    assert client.delete(f"/v1/push/apns/{token}", headers=H).status_code == 204
 
 
 # ---------- Sharing & exports ----------

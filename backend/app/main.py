@@ -13,7 +13,7 @@ from contextlib import asynccontextmanager
 from datetime import date, datetime, timezone
 from functools import lru_cache
 from pathlib import Path
-from typing import Annotated, Optional
+from typing import Annotated, Literal, Optional
 from urllib.parse import quote
 
 import httpx
@@ -108,7 +108,7 @@ from .packing import PackingService
 from .photos import PhotoStore
 from .reserve import find_reserve_link
 from .pipeline import Pipeline
-from .push import Push
+from .push import ApnsConfig, Push
 from .routing import Router
 from .weather import Weather
 
@@ -130,7 +130,8 @@ def build_services(app: FastAPI, settings: Settings) -> None:
     app.state.library = Library(db, make_geocoder(settings), photos=photos)
     app.state.pipeline = Pipeline(settings, app.state.store, app.state.claude, app.state.library)
     app.state.router = Router(db, settings)
-    app.state.push = Push(db, Path(settings.database_path).parent / "vapid_private.pem", settings.push_contact)
+    app.state.push = Push(db, Path(settings.database_path).parent / "vapid_private.pem", settings.push_contact,
+                          apns=ApnsConfig.from_settings(settings))
     app.state.curator = Curator(db, app.state.claude)
     app.state.discover = DiscoverService(db, app.state.claude, app.state.library.geocoder, photos)
     app.state.lounges = LoungeService(db, app.state.claude)
@@ -1303,6 +1304,27 @@ async def push_subscribe(body: PushSubscriptionRequest, request: Request) -> Res
 @app.delete("/v1/push/subscriptions", status_code=204, dependencies=[Auth])
 async def push_unsubscribe(body: PushSubscriptionRequest, request: Request) -> Response:
     _db(request).delete_push_subscription(body.endpoint)
+    return Response(status_code=204)
+
+
+class ApnsRegistration(BaseModel):
+    token: str = Field(max_length=200)  # the device token, as hex
+    environment: Literal["production", "sandbox"] = "production"  # sandbox for builds run from Xcode
+
+
+@app.post("/v1/push/apns", status_code=204, dependencies=[Auth])
+async def apns_register(body: ApnsRegistration, request: Request) -> Response:
+    """The iOS app's device token, so it gets notifications through Apple's push service."""
+    try:
+        _push(request).subscribe_apns(body.token, body.environment)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    return Response(status_code=204)
+
+
+@app.delete("/v1/push/apns/{token}", status_code=204, dependencies=[Auth])
+async def apns_unregister(token: str, request: Request) -> Response:
+    _push(request).unsubscribe_apns(token)
     return Response(status_code=204)
 
 

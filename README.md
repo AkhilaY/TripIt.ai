@@ -82,6 +82,18 @@ Other hosts work too, as long as they run the Docker image with a **persistent d
 
 On Android, install the app from Chrome's menu (**Install app**). TripIt then appears in the share sheet automatically, with no shortcut needed.
 
+## Accounts
+
+TripIt is invite-only. Each person signs in with an email and password and only ever sees their own places, folders, trips, bookings and settings.
+
+- **First account (you):** after deploying, open the app and choose a password, using your server key (`APP_API_KEY`) as the code. Everything saved before accounts existed becomes yours, and you become the owner.
+- **Inviting testers:** Profile → **Invite people** makes a one-time code (shown once). They choose **Create account** and enter it.
+- **Forgotten passwords:** there's no email yet, so Profile → **People** → *Reset password* gives you a temporary password to pass on. They can change it in their Profile.
+- **Share Shortcut:** each person makes their own key in Profile → *Share from TikTok & Instagram* → **Make key**. It can only send links and screenshots. Your existing Shortcut with the server key keeps working, as you.
+- **Deleting an account** (Profile, at the bottom) removes it and everything in it. Apple requires this for the App Store.
+
+The server key still works as before until the first account is made, so updating doesn't lock anyone out. The web app signs in with a secure cookie; the iOS app uses `Authorization: Bearer <token>` from `/v1/auth/login`.
+
 ## Using the app
 
 - **Your travel taste:** a five-question profile (pace, budget, food, interests, mornings) tailors everything below. Start it from the Library or **Profile → Your travel taste**.
@@ -210,6 +222,7 @@ All `/v1` routes need the `X-API-Key` header when `APP_API_KEY` is set.
 | `GET /v1/places/{id}`, `GET /v1/folders`, `POST /v1/folders`, `PATCH/DELETE /v1/folders/{id}`, `POST /v1/folders/{id}/places`, `DELETE /v1/folders/{id}/places/{place_id}` | One saved place with its posts; folders and what's in them (a place can be in many) |
 | `POST /v1/trips`, `POST /v1/trips/{id}/places`, `DELETE /v1/trips/{id}/places/{place_id}`, `POST /v1/trips/{id}/places/{place_id}/keep`, `POST /v1/trips/{id}/suggest` | Make a trip from saved places (AI or by hand, optionally with suggestions), add or remove stops, keep a suggestion, fill quiet days |
 | `GET/POST /v1/trips/{id}/edits` (`?wait=true` to block), `POST /v1/trips/{id}/edits/{edit_id}/entries/{entry_id}/save`, `POST /v1/trips/{id}/edits/{edit_id}/bookmark` | Edits (refreshed in the background, poll while `refreshing`), save one of an edit's places, save a whole edit as a folder |
+| `GET /v1/auth/status`, `POST /v1/auth/signup`, `/login`, `/logout`, `GET/DELETE /v1/me`, `POST /v1/me/password`, `POST /v1/me/import-key`, `/v1/admin/invites`, `/v1/admin/users` | Accounts: sign up with an invite code, sign in (cookie, or `token` for Bearer), your account, Shortcut key, invites and password resets (owner) |
 | `GET /v1/bookings` | Every booking across trips, with its trip's name |
 | `GET /v1/calendar`, `POST/DELETE /v1/calendar/feed`, `GET /cal/{token}.ics` | Everything dated (events, bookings, planned stops, trips) with Google and .ics links; the private subscription feed |
 | `GET /v1/edits`, `GET/POST /v1/trips/{id}/edits` | Curated edits (POST curates or refreshes them) |

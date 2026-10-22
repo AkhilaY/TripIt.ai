@@ -1,4 +1,4 @@
-import { api, ApiError, getKey, isOffline, setKey } from './api.js';
+import { api, ApiError, authHeaders, getKey, isOffline, setKey } from './api.js';
 import { enableDrag } from './drag.js';
 import { ICON, hydrateIcons } from './icons.js';
 import { dayHours, mondayIndex, nextChange, openStatus, slotConflict } from './hours.js';
@@ -75,6 +75,7 @@ function mapsLinks(p, trip) {
 // ---------- State & cached data ----------
 
 const S = {
+  me: undefined,        // your account (null before accounts exist)
   folders: null,        // your folders, from /v1/folders
   libf: {},             // filters per saved-places list ('saved' or a folder id)
   cal: null,            // everything dated, from /v1/calendar
@@ -198,6 +199,7 @@ function route() {
   if (!parts.length) return { name: 'trips', params };
   if (parts[0] === 'trip' && parts[1] && parts[2] === 'bookings') return { name: 'bookings', params: new URLSearchParams(`trip=${parts[1]}`) };
   if (parts[0] === 'settings') return { name: 'profile', params };
+  if (parts[0] === 'setup') return { name: 'signin', params };
   if (parts[0] === 'saved') return { name: 'trips', params, tab: 'saved' };
   if (parts[0] === 'folder' && parts[1]) return { name: 'folder', id: parts[1], params };
   if (parts[0] === 'trip' && parts[1]) return { name: 'trip', id: parts[1], mode: parts[2] || 'places', params };
@@ -206,7 +208,7 @@ function route() {
   if (parts[0] === 'packing' && parts[1]) return { name: 'packing', id: parts[1], params };
   if (parts[0] === 'events' && parts[1]) return { name: 'events', id: parts[1], params };
   if (parts[0] === 'edit' && parts[1] && parts[2]) return { name: 'edit', id: parts[1], editId: parts[2], params };
-  if (['map', 'imports', 'profile', 'setup', 'add', 'concierge', 'taste', 'discover', 'bookings', 'calendar'].includes(parts[0])) return { name: parts[0], params };
+  if (['map', 'imports', 'profile', 'signin', 'add', 'concierge', 'taste', 'discover', 'bookings', 'calendar'].includes(parts[0])) return { name: parts[0], params };
   return { name: 'trips', params };
 }
 
@@ -227,7 +229,7 @@ let lastHtml = '';
 
 /** How to animate from one screen to the next: iOS-style push/pop within a tab, a crossfade between tabs. */
 function transitionKind(from, to) {
-  if (!from || to.name === 'add' || from.name === 'setup' || to.name === 'setup') return 'none';
+  if (!from || to.name === 'add' || from.name === 'signin' || to.name === 'signin') return 'none';
   if (tabOf(from.name) !== tabOf(to.name)) return 'fade';
   if (from.name === to.name && from.id === to.id) return from.mode !== to.mode ? 'seg' : 'none';
   const a = DEPTH[from.name] || 0;
@@ -277,7 +279,7 @@ async function paint(r, token, key, quiet) {
     html = typeof out === 'string' ? out : out.html;
     if (out.after) after = out.after;
   } catch (e) {
-    if (e instanceof ApiError && e.status === 401) { location.hash = '#/setup'; return; }
+    if (e instanceof ApiError && e.status === 401) { location.hash = '#/signin'; return; }
     if (quiet) return;
     html = `${navbar('', {})}<div class="error" role="alert">${esc(e.message || 'Something went wrong')}</div>
       <div class="section"><button class="btn tint" data-act="reload">Try again</button></div>`;
@@ -299,10 +301,10 @@ async function paint(r, token, key, quiet) {
       if (on) t.setAttribute('aria-current', 'page'); else t.removeAttribute('aria-current');
     });
     if (tab in TAB_INDEX) tabbar.style.setProperty('--i', TAB_INDEX[tab]);
-    tabbar.hidden = r.name === 'setup' || r.name === 'taste';
+    tabbar.hidden = r.name === 'signin' || r.name === 'taste';
     const app = $('.app');
     app.classList.toggle('fullbleed', r.name === 'map' || (r.name === 'trip' && r.mode === 'map'));
-    app.classList.toggle('notabs', r.name === 'setup' || r.name === 'taste');
+    app.classList.toggle('notabs', r.name === 'signin' || r.name === 'taste');
     app.classList.toggle('chat', r.name === 'concierge');
 
     destroyMaps();
@@ -2172,6 +2174,8 @@ const VIEWS = {
     if (!S.config) { S.config = await api('/v1/config'); configureMaps({ googleMapsKey: S.config.google_maps_key }); }
     if (!S.profile) await loadProfile().catch(() => {});
     if (S.homeCity === undefined) S.homeCity = await api('/v1/home').catch(() => null);
+    if (S.me === undefined) S.me = await api('/v1/me').catch(() => null);
+    const me = S.me;
     const origin = location.origin;
     const key = getKey();
     const geocoder = { google: 'Google Places', openstreetmap: 'OpenStreetMap', none: 'Off' }[S.config.geocoder] || S.config.geocoder;
@@ -2185,11 +2189,21 @@ const VIEWS = {
       on: 'You’ll get a notification when each shared reel’s places are saved.',
     }[push];
     return `${navbar('Profile', backToTab())}<h1 class="largetitle" data-anchor>Profile</h1>
-      <div class="subtitle"><span>Your taste, home city and app settings</span></div>
+      <div class="subtitle"><span>${me ? esc(me.email) : 'Your taste, home city and app settings'}</span></div>
+
+      ${me ? `<div class="section"><div class="section-h">Account</div><div class="group tiles">
+        <button class="row" data-act="changepw">${tile('gray', 'lock')}<span class="main"><span class="t">Change password</span></span>${ICON.chev}</button>
+        ${me.is_admin ? `<button class="row" data-act="invites">${tile('gold', 'plus')}<span class="main"><span class="t">Invite people</span>
+          <span class="s">Make a one-time code for each tester</span></span>${ICON.chev}</button>
+        <button class="row" data-act="people">${tile('blue', 'person')}<span class="main"><span class="t">People</span>
+          <span class="s">Everyone with an account; reset a forgotten password</span></span>${ICON.chev}</button>` : ''}
+        <button class="row" data-act="signout">${tile('red', 'signout')}<span class="main"><span class="t" style="color:var(--danger)">Sign out</span></span></button>
+      </div></div>` : `<div class="section"><div class="group tiles"><a class="row" href="#/signin">${tile('gold', 'person')}<span class="main"><span class="t">Create your account</span>
+        <span class="s">Keeps your places private and lets you invite testers</span></span>${ICON.chev}</a></div></div>`}
 
       <div class="section"><div class="section-h">You</div><div class="group tiles">
         <button class="row" data-act="homecity">${tile('green', 'pin')}<span class="main"><span class="t">Home city</span>
-          <span class="s">${esc(S.homeCity ? [S.homeCity.city, S.homeCity.country].filter(Boolean).join(', ') : 'Places here are saved as local favourites, not trips')}</span></span>${ICON.chev}</button>
+          <span class="s">${esc(S.homeCity ? [S.homeCity.city, S.homeCity.country].filter(Boolean).join(', ') : 'Discover looks here first')}</span></span>${ICON.chev}</button>
         <a class="row" href="#/imports">${tile('blue', 'tray')}<span class="main"><span class="t">Imports</span>
           <span class="s">${S.jobs.some((j) => ACTIVE.has(j.status)) ? 'Working on a reel…' : 'Reels you’ve shared and their status'}</span></span>${ICON.chev}</a>
         <a class="row" href="#/taste">${tile('gold', 'sparkle')}<span class="main"><span class="t">Your travel taste</span>
@@ -2219,7 +2233,10 @@ const VIEWS = {
           <li>In TikTok tap <b>Share → More (•••)</b>, or in Instagram tap the <b>paper plane → Share to…</b>, then choose <b>TripIt</b>. The first time, you may need to scroll the app row and add TripIt to your favorites.</li>
         </ol>
         <div class="sublabel">Shortcut URL</div>${copyLine(`${origin}/v1/jobs`, 'shortcut URL')}
-        <div class="sublabel">X-API-Key</div>${key ? copyLine(key, 'API key') : '<div class="copyline"><span class="s">This server doesn’t require a key.</span></div>'}
+        <div class="sublabel">X-API-Key</div>${me
+          ? `<div class="copyline"><span class="s">${me.has_import_key ? 'You made a key already. Lost it? Make a new one; the old one stops working.' : 'A personal key that can only send links to your TripIt.'}</span>
+              <button class="copybtn" data-act="importkey">${me.has_import_key ? 'New key' : 'Make key'}</button></div>`
+          : key ? copyLine(key, 'API key') : '<div class="copyline"><span class="s">This server doesn’t require a key.</span></div>'}
       </div>
       <div class="section-f">Simpler but opens TripIt each time: make the shortcut a single <b>Open URLs</b> action with <span class="kbd">${esc(origin)}/share?url=</span> followed by the <b>Shortcut Input</b> variable. It opens in Safari, so sign in there once too.</div></div>
 
@@ -2236,16 +2253,38 @@ const VIEWS = {
         <div class="row">${tile('green', 'pin')}<span class="main"><span class="t">Finding places</span></span><span class="val">${esc(geocoder)}</span></div>
         <div class="row">${tile('orange', 'route')}<span class="main"><span class="t">Travel times</span></span><span class="val">${S.config.routing === 'google' ? 'Google Routes' : 'Estimated'}</span></div>
         <div class="row">${tile('blue', 'map')}<span class="main"><span class="t">Maps in the app</span></span><span class="val">${mapProvider() === 'google' ? 'Google Maps' : 'OpenStreetMap'}</span></div>
-        ${key ? `<button class="row" data-act="signout">${tile('red', 'signout')}<span class="main"><span class="t" style="color:var(--danger)">Sign out on this device</span></span></button>` : ''}
-      </div></div>`;
+        ${!me && key ? `<button class="row" data-act="signout">${tile('red', 'signout')}<span class="main"><span class="t" style="color:var(--danger)">Sign out on this device</span></span></button>` : ''}
+      </div></div>
+      ${me ? `<div class="section"><div class="group"><button class="row" data-act="deleteaccount"><span class="main"><span class="t" style="color:var(--danger)">Delete account</span>
+        <span class="s">Removes your account and everything you saved</span></span></button></div></div>` : ''}`;
   },
 
-  async setup() {
-    return `${emptyState('accent', 'map', 'Welcome to TripIt', 'Enter the API key you set as <span class="kbd">APP_API_KEY</span> on your server. You only do this once per device.')}
-      <div class="section"><div class="group"><form class="row" data-form="setkey"><span class="inline-form">
-        <input class="field" id="key-input" name="key" type="password" placeholder="API key" autocomplete="current-password" aria-label="API key" required>
-        <button class="btn small" type="submit">Continue</button></span></form></div>
-        <div class="section-f" id="setup-error" role="alert"></div></div>`;
+  async signin(r) {
+    const status = await api('/v1/auth/status').catch(() => ({ accounts: true }));
+    const first = !status.accounts;
+    const mode = first ? 'first' : (r.params.get('mode') === 'join' ? 'join' : 'in');
+    const seg = first ? '' : segControl('auth', [['in', 'Sign in'], ['join', 'Create account']].map(([m, label]) => ({
+      on: m === mode, html: `<a href="#/signin${m === 'join' ? '?mode=join' : ''}" data-replace class="${m === mode ? 'on' : ''}">${label}</a>`,
+    })));
+    const field = (id, label, type, auto, extra = '') => `<label class="row authrow" for="${id}"><span class="lbl">${label}</span>
+      <input class="field" id="${id}" name="${id}" type="${type}" autocomplete="${auto}" ${extra} required></label>`;
+    const fields = mode === 'in'
+      ? field('email', 'Email', 'email', 'username', 'inputmode="email" autocapitalize="off"') + field('password', 'Password', 'password', 'current-password')
+      : field('email', 'Email', 'email', 'username', 'inputmode="email" autocapitalize="off"')
+        + field('password', 'Password', 'password', 'new-password', 'minlength="8" placeholder="At least 8 characters"')
+        + field('invite', first ? 'Server key' : 'Invite code', first ? 'password' : 'text', 'off', `autocapitalize="characters" ${first ? '' : 'placeholder="ABCD-2345"'}`);
+    const lead = first
+      ? 'Create the first account. Use the server key (APP_API_KEY) as the code: everything already saved in TripIt becomes yours, and you can invite others after.'
+      : mode === 'join' ? 'TripIt is invite-only for now. Enter the code you were given.' : 'Your places, folders and trips, on any device.';
+    return `<div class="authpage">
+      <div class="authmark" aria-hidden="true">${ICON.bookmark}</div>
+      <h1 class="authtitle">${first ? 'Set up TripIt' : mode === 'join' ? 'Join TripIt' : 'Welcome back'}</h1>
+      <p class="authlead">${lead}</p>${seg}
+      <form class="section" data-form="${mode === 'in' ? 'signin' : 'signup'}" novalidate><div class="group">${fields}</div>
+        <div class="section-f autherr" id="auth-error" role="alert"></div>
+        <button class="btn wide" type="submit">${mode === 'in' ? 'Sign in' : 'Create account'}</button>
+        ${mode === 'in' ? '<p class="section-f authhelp">Forgot your password? Ask whoever invited you to reset it.</p>' : ''}
+      </form></div>`;
   },
 
   async add(r) {
@@ -3538,7 +3577,7 @@ async function saveOffline(tripId, quiet = false) {
   if (!quiet) toast(`Saving ${trip.name} for offline…`);
   let failed = 0;
   for (let i = 0; i < urls.length; i += 6) {
-    await Promise.all(urls.slice(i, i + 6).map((u) => fetch(u, u.startsWith('/v1/trips/') ? { headers: { 'X-API-Key': getKey() } } : {})
+    await Promise.all(urls.slice(i, i + 6).map((u) => fetch(u, u.startsWith('/v1/trips/') ? { headers: authHeaders() } : {})
       .then((r) => { if (!r.ok && r.type !== 'opaque') failed++; }).catch(() => { failed++; })));
   }
   try { localStorage.setItem(`tripit.saved.${tripId}`, String(Date.now())); } catch { /* fine */ }
@@ -3984,7 +4023,7 @@ async function onAction(act, el) {
       openSheet({
         type: 'form', title: 'Home city', confirm: 'Save', st,
         body: () => `<div class="section"><div class="group"><div class="row"><input class="field" id="home-city" value="${esc(st.city)}" placeholder="e.g. Brooklyn, NY" maxlength="120" autocomplete="off" aria-label="Home city"></div></div>
-          <div class="section-f">Places you save in or near this city go to a local collection instead of a trip, and Discover looks here first.</div></div>
+          <div class="section-f">Discover looks for recommendations here first.</div></div>
           ${S.homeCity ? '<div class="section"><div class="group"><button class="row" data-act="homeclear2"><span class="main"><span class="t" style="color:var(--warn)">Remove home city</span></span></button></div></div>' : ''}`,
         async ok() {
           const city = $('#home-city').value.trim();
@@ -4356,7 +4395,87 @@ async function onAction(act, el) {
       return;
     }
     case 'copy': await copy(el.dataset.value, el.previousElementSibling); return;
-    case 'signout': setKey(''); S.config = null; clearOfflineData(); go('#/setup'); return;
+    case 'changepw':
+      openSheet({ type: 'form', title: 'Change password', confirm: 'Save', st: {},
+        body: () => `<div class="section"><div class="group">
+          <label class="row authrow" for="pw-cur"><span class="lbl">Current</span><input class="field" id="pw-cur" type="password" autocomplete="current-password"></label>
+          <label class="row authrow" for="pw-new"><span class="lbl">New</span><input class="field" id="pw-new" type="password" autocomplete="new-password" placeholder="At least 8 characters"></label>
+        </div></div>`,
+        async ok() {
+          try {
+            await api('/v1/me/password', { method: 'POST', body: { current: $('#pw-cur').value, new: $('#pw-new').value } });
+            closeSheet(); toast('Password changed');
+          } catch (e) { toast(e.message, true); }
+        } });
+      return;
+    case 'importkey': {
+      const { key } = await api('/v1/me/import-key', { method: 'POST' });
+      S.me = { ...S.me, has_import_key: true };
+      openSheet({ type: 'form', title: 'Your Shortcut key', confirm: 'Done', st: {},
+        body: () => `<div class="section"><div class="group"><div class="copyline"><code>${esc(key)}</code>
+          <button class="copybtn" data-act="copy" data-value="${esc(key)}" aria-label="Copy key">Copy</button></div></div>
+          <div class="section-f">Paste it as the X-API-Key header in your TripIt Shortcut. It's shown only now, and it can only send links and screenshots to your TripIt.</div></div>`,
+        ok() { closeSheet(); render({ quiet: true }); } });
+      return;
+    }
+    case 'invites': {
+      const st = { list: await api('/v1/admin/invites'), code: null };
+      openSheet({ type: 'form', title: 'Invite people', confirm: 'Done', st,
+        body: () => `<div class="section">${st.code ? `<div class="group"><div class="copyline"><code class="bigcode">${esc(st.code)}</code>
+            <button class="copybtn" data-act="copy" data-value="${esc(st.code)}" aria-label="Copy code">Copy</button></div></div>
+            <div class="section-f">Send this to one person. It works once, and it's only shown now.</div>` : ''}
+          <div class="group tiles"><div class="row"><input class="field" id="invite-note" placeholder="Who it's for (optional)" maxlength="80"></div></div>
+          <button class="btn wide" data-act="newinvite" style="margin-top:12px">${ICON.plus}Make an invite code</button></div>
+          ${st.list.length ? `<div class="section"><div class="section-h">Codes</div><div class="group tiles">${st.list.map((i) => `<div class="row"><span class="main">
+            <span class="t">…${esc(i.hint)}${i.note ? ` · ${esc(i.note)}` : ''}</span><span class="s">${i.used_by ? `Used by ${esc(i.used_by)}` : 'Not used yet'}</span></span>
+            ${i.used_by ? '' : `<button class="linkbtn" data-act="delinvite" data-id="${i.id}">Cancel</button>`}</div>`).join('')}</div></div>` : ''}`,
+        ok() { closeSheet(); } });
+      return;
+    }
+    case 'newinvite': {
+      const { st } = S.sheet;
+      const { code } = await api('/v1/admin/invites', { method: 'POST', body: { note: ($('#invite-note') || {}).value || '' } });
+      st.code = code; st.list = await api('/v1/admin/invites');
+      renderOverlay();
+      return;
+    }
+    case 'delinvite':
+      await api(`/v1/admin/invites/${el.dataset.id}`, { method: 'DELETE' });
+      S.sheet.st.list = await api('/v1/admin/invites'); renderOverlay();
+      return;
+    case 'people': {
+      const st = { users: await api('/v1/admin/users'), temp: null };
+      openSheet({ type: 'form', title: 'People', confirm: 'Done', st,
+        body: () => `<div class="section">${st.temp ? `<div class="group"><div class="copyline"><code class="bigcode">${esc(st.temp.password)}</code>
+            <button class="copybtn" data-act="copy" data-value="${esc(st.temp.password)}" aria-label="Copy password">Copy</button></div></div>
+            <div class="section-f">A temporary password for ${esc(st.temp.email)}. They can change it in their Profile after signing in.</div>` : ''}
+          <div class="group tiles">${st.users.map((u) => `<div class="row"><span class="main"><span class="t">${esc(u.email)}</span>
+            <span class="s">${u.is_admin ? 'Owner' : `Joined ${esc(new Date(u.created_at).toLocaleDateString())}`}</span></span>
+            ${u.is_admin ? '' : `<button class="linkbtn" data-act="resetpw" data-id="${u.id}" data-email="${esc(u.email)}">Reset password</button>`}</div>`).join('')}</div></div>`,
+        ok() { closeSheet(); } });
+      return;
+    }
+    case 'resetpw': {
+      const { password } = await api(`/v1/admin/users/${el.dataset.id}/reset-password`, { method: 'POST' });
+      S.sheet.st.temp = { email: el.dataset.email, password }; renderOverlay();
+      return;
+    }
+    case 'deleteaccount':
+      openSheet({ type: 'form', title: 'Delete account', confirm: 'Delete', st: {},
+        body: () => `<div class="section"><div class="section-f">This removes your account and everything in it: saved places, folders, trips, bookings and photos. It can't be undone.</div>
+          <div class="group"><label class="row authrow" for="del-pw"><span class="lbl">Password</span><input class="field" id="del-pw" type="password" autocomplete="current-password"></label></div></div>`,
+        async ok() {
+          try {
+            await api('/v1/me', { method: 'DELETE', body: { password: $('#del-pw').value } });
+            setKey(''); clearOfflineData(); location.hash = '#/signin'; location.reload();
+          } catch (e) { toast(e.message, true); }
+        } });
+      return;
+    case 'signout':
+      await api('/v1/auth/logout', { method: 'POST' }).catch(() => {});
+      setKey(''); S.config = null; S.me = undefined; clearOfflineData();
+      location.hash = '#/signin'; location.reload();
+      return;
     default:
   }
 }
@@ -4462,16 +4581,26 @@ document.addEventListener('submit', async (ev) => {
   }
   if (form.dataset.form === 'locate') {
     await locate(form.dataset.id, new FormData(form).get('q'));
-  } else if (form.dataset.form === 'setkey') {
-    const key = String(new FormData(form).get('key') || '').trim();
-    setKey(key);
+  } else if (form.dataset.form === 'signin' || form.dataset.form === 'signup') {
+    const data = Object.fromEntries(new FormData(form));
+    const err = $('#auth-error');
+    const btn = form.querySelector('button[type=submit]');
+    err.textContent = '';
+    if (!String(data.email || '').includes('@')) { err.textContent = 'Enter your email address.'; return; }
+    if (!data.password) { err.textContent = 'Enter your password.'; return; }
+    btn.disabled = true;
     try {
+      const path = form.dataset.form === 'signin' ? '/v1/auth/login' : '/v1/auth/signup';
+      const res = await api(path, { method: 'POST', body: { email: data.email, password: data.password, invite: data.invite || '' } });
+      setKey(''); // the session cookie replaces any key saved from before accounts
+      S.me = res.user;
       S.config = await api('/v1/config');
       configureMaps({ googleMapsKey: S.config.google_maps_key });
+      toast(form.dataset.form === 'signin' ? 'Signed in' : 'Welcome to TripIt');
       await start();
     } catch (e) {
-      setKey('');
-      $('#setup-error').textContent = e.status === 401 ? 'That key didn’t work. Check APP_API_KEY on the server.' : e.message;
+      btn.disabled = false;
+      err.textContent = e.message;
     }
   }
 });
@@ -4512,7 +4641,7 @@ document.addEventListener('touchend', (ev) => {
 }, { passive: true });
 
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible' && route().name !== 'setup') { schedulePoll(true); setTimeout(checkReservePending, 800); }
+  if (document.visibilityState === 'visible' && route().name !== 'signin') { schedulePoll(true); setTimeout(checkReservePending, 800); }
 });
 
 // ---------- Boot ----------
@@ -4528,7 +4657,7 @@ async function start() {
   try { await loadJobs(); } catch { /* shown by the views */ }
   schedulePoll();
   flushOutbox();
-  if (route().name === 'setup') location.hash = '#/';
+  if (route().name === 'signin') location.hash = '#/';
   else render();
   setTimeout(() => { if (S.trips) autoSaveToday(); }, 3000);
 }
@@ -4544,8 +4673,8 @@ registerServiceWorker();
 // On first launch, what loaded before the service worker took over isn't saved yet: fetch it again through it.
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.addEventListener('controllerchange', () => {
-    if (!getKey() && S.config === null) return;
-    ['/v1/config', '/v1/trips', '/v1/jobs?limit=40', '/v1/places'].forEach((u) => fetch(u, { headers: { 'X-API-Key': getKey() } }).catch(() => {}));
+    if (S.config === null) return;
+    ['/v1/config', '/v1/trips', '/v1/jobs?limit=40', '/v1/places'].forEach((u) => fetch(u, { headers: authHeaders() }).catch(() => {}));
     autoSaveToday();
   }, { once: true });
 }
@@ -4562,7 +4691,7 @@ hydrateIcons(document.getElementById('netpill'));
     S.config = await api('/v1/config');
     configureMaps({ googleMapsKey: S.config.google_maps_key });
   } catch (e) {
-    if (e.status === 401) { location.hash = '#/setup'; render(); return; }
+    if (e.status === 401) { location.hash = '#/signin'; render(); return; }
   }
   await start();
 })();

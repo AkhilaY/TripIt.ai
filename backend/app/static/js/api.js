@@ -14,6 +14,13 @@ export function setKey(key) {
 
 let memoryKey = null;
 
+/** Headers for calls to the server: the sign-in cookie goes along by itself; the header tells the server the
+ * request came from the app (it refuses changes without it). A key saved from before accounts still works. */
+export function authHeaders() {
+  const key = memoryKey ?? getKey();
+  return { 'X-TripIt': '1', ...(key ? { 'X-API-Key': key } : {}) };
+}
+
 export class ApiError extends Error {
   constructor(message, status) { super(message); this.status = status; }
 }
@@ -31,7 +38,7 @@ export async function api(path, { method = 'GET', body } = {}) {
   try {
     res = await fetch(path, {
       method,
-      headers: { 'Content-Type': 'application/json', 'X-API-Key': memoryKey ?? getKey() },
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
   } catch {

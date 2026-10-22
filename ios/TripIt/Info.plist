@@ -35,9 +35,9 @@
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Travel Edit uses your location to sort places by distance, find what's near you and show travel times.</string>
 	<key>NSCameraUsageDescription</key>
-	<string>Take a photo of a menu, a booking confirmation or a screenshot to add to TripIt.</string>
+	<string>Take a photo of a menu, a booking confirmation or a screenshot to add to Travel Edit.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>Choose screenshots or photos of menus and bookings to add to TripIt.</string>
+	<string>Choose screenshots or photos of menus and bookings to add to Travel Edit.</string>
 	<key>WKAppBoundDomains</key>
 	<array>
 		<string>$(TRIPIT_HOST)</string>

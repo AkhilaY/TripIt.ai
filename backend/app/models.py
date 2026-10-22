@@ -837,32 +837,67 @@ class TasteProfile(BaseModel):
 
 
 class EditEntry(BaseModel):
-    place_id: str
+    place_id: Optional[str] = Field(default=None, description="The id of one of the traveler's saved places, or null for a place from the articles.")
+    name: Optional[str] = Field(default=None, description="For a place from the articles: its name as the article gives it. Null for a saved place.")
+    category: Optional[PlaceCategory] = Field(default=None, description="For a place from the articles: its kind. Null for a saved place.")
+    neighborhood: Optional[str] = Field(default=None, description="For a place from the articles: its neighbourhood, if known. Null otherwise.")
+    source: Optional[int] = Field(default=None, description="For a place from the articles: the number of the article that recommends it. Null for a saved place.")
     note: str = Field(description="One line, under 20 words, on why it belongs in this edit, in a polished editorial voice.")
 
 
 class CuratedEdit(BaseModel):
     title: str = Field(description="Magazine-style title, e.g. 'The Date Night Edit' or 'One Perfect Afternoon in Soho'.")
     dek: str = Field(description="A one-sentence standfirst under the title, like a magazine subheading.")
-    entries: list[EditEntry] = Field(description="3 to 8 saved places, in the order to read or visit them.")
+    entries: list[EditEntry] = Field(description="4 to 8 places, in the order to read or visit them.")
 
 
 class EditsResult(BaseModel):
     edits: list[CuratedEdit] = Field(description="3 to 6 edits.")
 
 
-class TripEdit(CuratedEdit):
+class EditSource(BaseModel):
+    name: str  # "Eater", "Time Out", "@eatsbyjune on TikTok", "Your saved places"
+    title: Optional[str] = None  # the article or post
+    url: Optional[str] = None
+
+
+class EditItem(BaseModel):
+    """One place in an edit: one of your saved places, or one a publication recommends that you can save."""
     id: str
+    place_id: Optional[str] = None  # set when it's in your saved places
+    saved: bool = False
+    name: str
+    category: PlaceCategory = PlaceCategory.other
+    neighborhood: Optional[str] = None
+    city: Optional[str] = None
+    note: str = ""
+    source: Optional[EditSource] = None
+    photo: Optional[PlacePhoto] = None
+    rating: Optional[float] = None
+    rating_count: Optional[int] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    maps_url: Optional[str] = None
+
+
+class TripEdit(BaseModel):
+    id: str
+    title: str
+    dek: str
+    entries: list[EditItem] = []
     cover_photo: Optional[PlacePhoto] = None
+    folder_id: Optional[str] = None  # set once the whole edit is saved to the Library
+    new_count: int = 0  # places in it that aren't in your saved places yet
 
 
 class TripEdits(BaseModel):
     trip_id: str
     trip_name: str = ""
     edits: list[TripEdit] = []
-    curated_by: Optional[str] = None  # "claude" or "offline"; None until first curated
+    curated_by: Optional[str] = None  # "claude", "claude+web" or "offline"; None until first curated
     created_at: Optional[datetime] = None
-    stale: bool = False  # places were added or removed since
+    stale: bool = False  # a day old, or your places changed since
+    refreshing: bool = False  # a new set is being made in the background
 
 
 class ConciergeMessage(BaseModel):

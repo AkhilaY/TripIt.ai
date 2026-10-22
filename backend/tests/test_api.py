@@ -1,5 +1,5 @@
 import json
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 import time
 from types import SimpleNamespace
 
@@ -79,8 +79,14 @@ class FakeMessages:
 
     def __init__(self):
         self.outputs = {ExtractionResult: EXTRACTION}
+        self.research = None
         self.stop_reason = "end_turn"
         self.calls = []
+
+    async def create(self, **kwargs):
+        """Web research calls: returns self.research (content blocks), or nothing found."""
+        self.calls.append(kwargs)
+        return SimpleNamespace(content=self.research or [], stop_reason="end_turn")
 
     async def parse(self, **kwargs):
         self.calls.append(kwargs)
@@ -176,7 +182,7 @@ def client(monkeypatch, tmp_path):
     app.state.router = Router(db, settings)
     app.state.photos = photo_store
     app.state.push = Push(db, tmp_path / "vapid.pem", client=httpx.AsyncClient(transport=httpx.MockTransport(push_handler)))
-    app.state.curator = Curator(db, claude)
+    app.state.curator = Curator(db, claude, geocoder=geocoder, photo_url=lambda ref: f"/v1/discover/photo?ref={ref}")
 
     web, web_log = {}, []  # url -> (status, content type, body, headers) served to the menu finder
 
@@ -2375,7 +2381,7 @@ def test_curated_edits_with_claude_and_offline(client):
         CuratedEdit(title="Too Short", dek="One place.", entries=[EditEntry(place_id=ids[0], note="Only")]),
     ])
     assert client.get(f"/v1/trips/{job['trip_id']}/edits", headers=H).json()["curated_by"] is None
-    edits = client.post(f"/v1/trips/{job['trip_id']}/edits", headers=H).json()
+    edits = client.post(f"/v1/trips/{job['trip_id']}/edits?wait=true", headers=H).json()
     assert edits["curated_by"] == "claude" and len(edits["edits"]) == 1
     assert [e["place_id"] for e in edits["edits"][0]["entries"]] == ids  # unknown ids dropped
     prompt = client.messages.calls[-1]["messages"][0]["content"][0]["text"]
@@ -2387,7 +2393,7 @@ def test_curated_edits_with_claude_and_offline(client):
     assert client.get(f"/v1/trips/{job['trip_id']}/edits", headers=H).json()["stale"] is True
     client.messages.stop_reason = "refusal"
     client.patch(f"/v1/places/{ids[0]}", json={"must_do": True}, headers=H)
-    edits = client.post(f"/v1/trips/{job['trip_id']}/edits", headers=H).json()
+    edits = client.post(f"/v1/trips/{job['trip_id']}/edits?wait=true", headers=H).json()
     assert edits["curated_by"] == "offline" and edits["stale"] is False
     titles = [e["title"] for e in edits["edits"]]
     assert "The Must-Do Edit" in titles and "The Table" in titles
@@ -2396,7 +2402,7 @@ def test_curated_edits_with_claude_and_offline(client):
     client.delete(f"/v1/places/{ids[2]}", headers=H)
     x = client.post("/v1/places", json={"name": "X", "city": "Oslo"}, headers=H).json()["place"]["id"]
     small = client.post("/v1/trips", json={"city": "Oslo", "place_ids": [x]}, headers=H).json()["id"]
-    assert client.post(f"/v1/trips/{small}/edits", headers=H).status_code == 422
+    assert client.post(f"/v1/trips/{small}/edits?wait=true", headers=H).status_code == 422
 
 
 def test_concierge_reply_is_checked_before_reaching_the_app(client):
@@ -2747,3 +2753,101 @@ def test_place_detail_has_its_reels(client):
     d = client.get(f"/v1/places/{lucali}", headers=H).json()
     assert d["place"]["name"] == "Lucali" and d["reels"][0]["id"] == job["reel_id"]
     assert client.get("/v1/places/nope", headers=H).status_code == 404
+
+
+# ---------- Edits with publications' picks ----------
+
+
+def research_blocks():
+    result = lambda url, title: SimpleNamespace(type="web_search_result", url=url, title=title)
+    return [
+        SimpleNamespace(type="server_tool_use"),
+        SimpleNamespace(type="web_search_tool_result", content=[
+            result("https://ny.eater.com/maps/best-bagels-nyc", "The Best Bagels in NYC"),
+            result("https://www.timeout.com/newyork/restaurants/best-pizza", "Best pizza in New York"),
+        ]),
+        SimpleNamespace(type="text", text="Eater recommends Russ & Daughters for lox. Time Out loves Lucali."),
+    ]
+
+
+def test_edits_mix_saved_places_with_publications_picks(client):
+    from app.models import CuratedEdit, EditEntry, EditsResult
+    job = import_reel(client)
+    trip_id = job["trip_id"]
+    ids = {p["name"]: p["id"] for p in client.get(f"/v1/trips/{trip_id}", headers=H).json()["places"]}
+    client.messages.research = research_blocks()
+    client.messages.outputs[EditsResult] = EditsResult(edits=[CuratedEdit(title="The Morning Edit", dek="Bagels, then pizza.", entries=[
+        EditEntry(place_id=ids["Joe's Pizza"], note="The classic slice."),
+        EditEntry(name="Russ & Daughters", category="food", neighborhood="Lower East Side", source=1, note="Lox worth the line."),
+        EditEntry(name="Lucali", category="food", source=2, note="Already yours."),  # a saved place, named by an article
+        EditEntry(name="Made Up Deli", category="food", source=9, note="x"),  # cites an article that wasn't found
+        EditEntry(name="Nothing Real", category="food", source=1, note="x"),  # can't be found on the map
+    ])])
+    edits = client.post(f"/v1/trips/{trip_id}/edits?wait=true", headers=H).json()
+    research = next(c for c in client.messages.calls if "tools" in c)
+    assert research["tools"][0]["type"] == "web_search_20260209" and "reddit.com" in research["tools"][0]["blocked_domains"]
+    sent = client.messages.calls[-1]["messages"][0]["content"][0]["text"]
+    assert '"site": "Eater"' in sent and "Russ & Daughters for lox" in sent
+    assert edits["curated_by"] == "claude+web"
+    e = edits["edits"][0]
+    names = [x["name"] for x in e["entries"]]
+    assert names == ["Joe's Pizza", "Russ & Daughters", "Lucali"]
+    russ = e["entries"][1]
+    assert russ["saved"] is False and russ["place_id"] is None and russ["source"] == {
+        "name": "Eater", "title": "The Best Bagels in NYC", "url": "https://ny.eater.com/maps/best-bagels-nyc"}
+    assert russ["latitude"] == pytest.approx(40.7223)
+    assert e["entries"][0]["saved"] and e["entries"][0]["source"]["name"] == "@slicehunter on TikTok"
+    assert e["new_count"] == 1
+    assert "Russ & Daughters" not in {p["name"] for p in client.get("/v1/places", headers=H).json()}
+
+    # Save one pick: it becomes a saved place, credited to the publication.
+    place = client.post(f"/v1/trips/{trip_id}/edits/{e['id']}/entries/{russ['id']}/save", headers=H).json()
+    assert place["name"] == "Russ & Daughters" and "Recommended by Eater" in place["summary"]
+    again = client.get(f"/v1/trips/{trip_id}/edits", headers=H).json()["edits"][0]
+    assert again["entries"][1]["saved"] is True and again["new_count"] == 0
+    assert client.post(f"/v1/trips/{trip_id}/edits/{e['id']}/entries/nope/save", headers=H).status_code == 404
+
+
+def test_saving_an_edit_keeps_it_as_a_folder(client):
+    from app.models import CuratedEdit, EditEntry, EditsResult
+    job = import_reel(client)
+    trip_id = job["trip_id"]
+    ids = {p["name"]: p["id"] for p in client.get(f"/v1/trips/{trip_id}", headers=H).json()["places"]}
+    client.messages.research = research_blocks()
+    client.messages.outputs[EditsResult] = EditsResult(edits=[CuratedEdit(title="Bagels & Slices", dek="d", entries=[
+        EditEntry(place_id=ids["Joe's Pizza"], note="a"), EditEntry(name="Russ & Daughters", category="food", source=1, note="b")])])
+    e = client.post(f"/v1/trips/{trip_id}/edits?wait=true", headers=H).json()["edits"][0]
+    folder = client.post(f"/v1/trips/{trip_id}/edits/{e['id']}/bookmark", headers=H).json()
+    assert folder["name"] == "Bagels & Slices · New York" and folder["place_count"] == 2
+    assert client.post(f"/v1/trips/{trip_id}/edits/{e['id']}/bookmark", headers=H).json()["id"] == folder["id"]  # only once
+    assert client.get(f"/v1/trips/{trip_id}/edits", headers=H).json()["edits"][0]["folder_id"] == folder["id"]
+    # Refreshing replaces the edits, but the folder stays.
+    client.post(f"/v1/trips/{trip_id}/edits?wait=true", headers=H)
+    assert any(f["id"] == folder["id"] for f in client.get("/v1/folders", headers=H).json())
+
+
+def test_edits_refresh_daily_in_the_background(client):
+    job = import_reel(client)
+    trip_id = job["trip_id"]
+    client.post(f"/v1/trips/{trip_id}/edits?wait=true", headers=H)
+    assert client.get(f"/v1/trips/{trip_id}/edits", headers=H).json()["stale"] is False
+    row = app.state.db.get_edits(trip_id)
+    old = (datetime.now(timezone.utc) - timedelta(hours=25)).isoformat()
+    app.state.db.save_edits(trip_id, json.loads(row["data"]), row["curated_by"], row["signature"], created_at=old)
+    assert client.get(f"/v1/trips/{trip_id}/edits", headers=H).json()["stale"] is True  # a day old
+    started = client.post(f"/v1/trips/{trip_id}/edits", headers=H).json()
+    assert started["refreshing"] is True
+    for _ in range(100):
+        now_ = client.get(f"/v1/trips/{trip_id}/edits", headers=H).json()
+        if not now_["refreshing"]:
+            break
+        time.sleep(0.02)
+    assert now_["refreshing"] is False and now_["stale"] is False
+
+
+def test_source_names():
+    from app.concierge import source_name
+    assert source_name("https://ny.eater.com/maps/x") == "Eater"
+    assert source_name("https://www.timeout.com/london") == "Time Out"
+    assert source_name("https://guide.michelin.com/us/en") == "Michelin Guide"
+    assert source_name("https://www.someblog.co.uk/post") == "someblog.co.uk"

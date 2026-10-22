@@ -755,10 +755,10 @@ class Database:
         rows = self._rows("SELECT * FROM trip_edits WHERE trip_id = ?", (trip_id,))
         return rows[0] if rows else None
 
-    def save_edits(self, trip_id: str, data: list[dict], curated_by: str, signature: str) -> None:
+    def save_edits(self, trip_id: str, data: list[dict], curated_by: str, signature: str, created_at: Optional[str] = None) -> None:
         self._exec(
             "INSERT OR REPLACE INTO trip_edits (trip_id, data, curated_by, signature, created_at) VALUES (?, ?, ?, ?, ?)",
-            (trip_id, json.dumps(data), curated_by, signature, now().isoformat()),
+            (trip_id, json.dumps(data, default=str), curated_by, signature, created_at or now().isoformat()),
         )
 
     def get_briefing(self, trip_id: str, day: int, on_date: str) -> Optional[sqlite3.Row]:

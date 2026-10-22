@@ -838,7 +838,7 @@ function editCard(te, e) {
   const cover = e.cover_photo ? `<img src="${esc(photoUrl(e.cover_photo, 640))}" alt="" loading="lazy" decoding="async" onerror="this.remove()">` : '';
   return `<a class="editcard" href="#/edit/${te.trip_id}/${e.id}">${cover}<span class="editcard-body">
     <span class="eyebrow">The Edit · ${esc(te.trip_name)}</span><span class="editcard-title">${esc(e.title)}</span>
-    <span class="editcard-meta">${plural(e.entries.length, 'place')}</span></span></a>`;
+    <span class="editcard-meta">${plural(e.entries.length, 'place')}${e.new_count ? ` · ${e.new_count} new` : ''}${e.folder_id ? ' · Saved' : ''}</span></span></a>`;
 }
 
 function homeEdits(tripCount) {
@@ -851,23 +851,31 @@ function homeEdits(tripCount) {
 }
 
 function editsSection(trip) {
-  if (S.curating[trip.id]) {
+  if (S.curating[trip.id] && !(S.edits[trip.id] && S.edits[trip.id].edits.length)) {
     return `<div class="railhead"><h2 class="section-title">The Edits</h2><span class="eyebrow">Curating…</span></div>
       <div class="rail">${'<div class="editcard skeleton"></div>'.repeat(3)}</div>`;
   }
   const te = background(S.edits[trip.id], `edits:${trip.id}`, () => loadEdits(trip.id));
   if (!te) return '';
+  // Edits refresh about once a day (and when your places change), quietly in the background.
+  if (te.edits.length && te.stale && !te.refreshing && !S.curateTried[trip.id] && !isOffline()) setTimeout(() => curate(trip.id, true), 0);
+  if (te.refreshing) pollEdits(trip.id);
+  if (!te.edits.length && te.refreshing) {
+    return `<div class="railhead"><h2 class="section-title">The Edits</h2><span class="eyebrow">Curating…</span></div>
+      <div class="rail">${'<div class="editcard skeleton"></div>'.repeat(3)}</div>`;
+  }
   if (!te.edits.length) {
     if (trip.places.length < 3) return '';
     if (trip.places.length >= 4 && !S.curateTried[trip.id] && !isOffline()) setTimeout(() => curate(trip.id, true), 0);
     return `<div class="section"><div class="invite"><div class="eyebrow">The Edits</div><h2>Curate this trip</h2>
-      <p>Editorial lists from your saved places, tailored to your taste: date nights, slow mornings, one perfect afternoon.</p>
+      <p>Editorial lists tailored to your taste, mixing your saved places with picks from travel and food publications. They refresh daily.</p>
       <div class="invite-actions"><button class="btn" data-act="curate" data-id="${trip.id}">Curate</button></div></div></div>`;
   }
   const profileNewer = S.profile && S.profile.updated_at && te.created_at && new Date(S.profile.updated_at) > new Date(te.created_at);
-  const aside = te.stale || profileNewer
-    ? `<button class="linkbtn" data-act="curate" data-id="${trip.id}">${profileNewer ? 'Refresh for your taste' : 'Refresh'}</button>`
-    : `<span class="eyebrow">${te.curated_by === 'claude' ? 'Curated for you' : 'From your saves'}</span>`;
+  const aside = te.refreshing ? '<span class="eyebrow">Refreshing…</span>'
+    : te.stale || profileNewer
+      ? `<button class="linkbtn" data-act="curate" data-id="${trip.id}">${profileNewer ? 'Refresh for your taste' : 'Refresh'}</button>`
+      : `<span class="eyebrow">${te.curated_by === 'claude+web' ? 'Updated today' : te.curated_by === 'claude' ? 'Curated for you' : 'From your saves'}</span>`;
   return `<div class="railhead"><h2 class="section-title">The Edits</h2>${aside}</div>
     <div class="rail">${te.edits.map((e) => editCard(te, e)).join('')}</div>`;
 }
@@ -887,6 +895,21 @@ async function curate(tripId, auto = false) {
     S.curating[tripId] = false;
     render({ quiet: true });
   }
+}
+
+/** While new edits are being researched (a minute or so), check back every few seconds. */
+const editPolls = {};
+function pollEdits(tripId) {
+  if (editPolls[tripId]) return;
+  editPolls[tripId] = setTimeout(async () => {
+    try {
+      const te = await api(`/v1/trips/${tripId}/edits`);
+      S.edits[tripId] = te; fetchedAt[`edits:${tripId}`] = Date.now();
+      if (!te.refreshing) S.allEdits = null;
+    } catch { /* try again on the next render */ }
+    delete editPolls[tripId];
+    render({ quiet: true });
+  }, 4000);
 }
 
 function briefingHtml(b) {
@@ -2033,25 +2056,38 @@ const VIEWS = {
     const te = S.edits[r.id] || await loadEdits(r.id);
     const e = te.edits.find((x) => x.id === r.editId);
     if (!e) throw new ApiError('This edit was refreshed. Open the trip to see the latest ones.', 404);
-    const entries = e.entries.map((en) => ({ ...en, p: tripPlace(trip, en.place_id) })).filter((en) => en.p);
+    const onTrip = new Set(trip.places.map((p) => p.id));
+    const saveEdit = e.folder_id
+      ? `<a class="btn tint small" href="#/folder/${e.folder_id}">${ICON.done}Saved to Library</a>`
+      : `<button class="btn small" data-act="bookmarkedit" data-trip="${trip.id}" data-id="${e.id}">${ICON.bookmark}Save this edit</button>`;
     const html = `${navbar(e.title, { back: `#/trip/${trip.id}`, backLabel: trip.name })}
       <header class="edithead">${e.cover_photo ? `<div class="edithero"><img src="${esc(photoUrl(e.cover_photo, 1200))}" alt="" decoding="async" onerror="this.parentElement.remove()"></div>` : ''}
         <div class="eyebrow">The Edit · ${esc(trip.name)}</div>
         <h1 class="edittitle" data-anchor>${esc(e.title)}</h1>
         <p class="dek">${esc(e.dek)}</p>
-        <div class="byline">${te.curated_by === 'claude' ? 'Curated for you' : 'From your saves'} · ${plural(entries.length, 'place')}</div></header>
-      <ol class="editlist">${entries.map(({ p, note }, i) => {
-        const photo = p.photos && p.photos[0] && !(e.cover_photo && p.photos[0].url === e.cover_photo.url) ? p.photos[0] : null;
-        const st = openStatus(p.opening_hours);
-        return `<li><a class="editentry" href="${placeHref(p)}">
-          ${photo ? `<span class="ee-photo"><img src="${esc(photoUrl(photo, 900))}" alt="" loading="lazy" decoding="async" onerror="this.parentElement.remove()"></span>` : ''}
+        <div class="byline">${te.curated_by === 'claude+web' ? 'Your saves and the best of the press' : te.curated_by === 'claude' ? 'Curated for you' : 'From your saves'}
+          · ${plural(e.entries.length, 'place')}${e.new_count ? ` · ${e.new_count} new to you` : ''}</div>
+        <div class="editsave">${saveEdit}<span class="s">${e.folder_id ? 'Kept as a folder, even after the edits refresh.' : 'Edits refresh daily. Save this one to keep it as a folder.'}</span></div></header>
+      <ol class="editlist">${e.entries.map((it, i) => {
+        const href = it.saved ? `#/place/${it.place_id}${onTrip.has(it.place_id) ? `?trip=${trip.id}` : ''}` : null;
+        const p = it.saved ? (trip.places.find((x) => x.id === it.place_id) || {}) : {};
+        const st = p.opening_hours ? openStatus(p.opening_hours) : null;
+        const src = it.source ? `<span class="ee-source">${it.saved && !it.source.url ? '' : 'via '}${safeUrl(it.source.url)
+          ? `<a href="${esc(it.source.url)}" target="_blank" rel="noopener" data-act="link">${esc(it.source.name)}</a>` : esc(it.source.name)}</span>` : '';
+        const action = it.saved
+          ? '<span class="ee-saved">' + ICON.done + 'In your library</span>'
+          : `<button class="btn tint small" data-act="saveeditentry" data-trip="${trip.id}" data-edit="${e.id}" data-id="${it.id}">${ICON.bookmark}Save</button>`;
+        const body = `${it.photo ? `<span class="ee-photo"><img src="${esc(photoUrl(it.photo, 900))}" alt="" loading="lazy" decoding="async" onerror="this.parentElement.remove()"></span>` : ''}
           <span class="ee-body"><span class="ee-num">${String(i + 1).padStart(2, '0')}</span>
-            <span class="eyebrow">${esc([CATS[p.category], p.neighborhood].filter(Boolean).join(' · '))}</span>
-            <span class="ee-name">${esc(p.name)}${starMark(p)}</span>
-            ${note ? `<span class="ee-note">${esc(note)}</span>` : ''}
-            ${st ? `<span class="s hours-${st.state}">${esc(st.label)}</span>` : ''}</span></a></li>`;
+            <span class="eyebrow">${esc([CATS[it.category], it.neighborhood].filter(Boolean).join(' · '))}</span>
+            <span class="ee-name">${esc(it.name)}${p.must_do ? starMark(p) : ''}</span>
+            ${it.note ? `<span class="ee-note">${esc(it.note)}</span>` : ''}
+            ${it.rating && !it.saved ? `<span class="s">★ ${it.rating.toFixed(1)}${it.rating_count ? ` · ${fmtCount(it.rating_count)} reviews` : ''}</span>` : ''}
+            ${st ? `<span class="s hours-${st.state}">${esc(st.label)}</span>` : ''}</span>`;
+        return `<li class="${it.saved ? '' : 'isnew'}">${href ? `<a class="editentry" href="${href}">${body}</a>` : `<div class="editentry">${body}</div>`}
+          <div class="ee-foot">${src}${!it.saved && safeUrl(it.maps_url) ? `<a class="linkbtn" href="${esc(it.maps_url)}" target="_blank" rel="noopener">Map</a>` : ''}${action}</div></li>`;
       }).join('')}</ol>
-      <div class="section"><a class="btn tint wide" href="#/trip/${trip.id}/map">${ICON.map}See them on the map</a></div>`;
+      <div class="section"><a class="btn tint wide" href="#/trip/${trip.id}/map">${ICON.map}See your trip on the map</a></div>`;
     return html;
   },
 
@@ -3701,6 +3737,29 @@ async function onAction(act, el) {
     case 'mode': setTravelMode(el.dataset.mode); render(); return;
     case 'dismissinvite': try { localStorage.setItem('tripit.tasteInvite', 'no'); } catch { /* fine */ } render(); return;
     case 'curate': await curate(el.dataset.id); return;
+    case 'saveeditentry': {
+      el.disabled = true;
+      try {
+        const place = await api(`/v1/trips/${el.dataset.trip}/edits/${el.dataset.edit}/entries/${el.dataset.id}/save`, { method: 'POST' });
+        S.edits[el.dataset.trip] = await api(`/v1/trips/${el.dataset.trip}/edits`);
+        await afterLibraryChange();
+        toast(`Saved ${place.name} to your library`);
+      } catch (e) { el.disabled = false; toast(e.message, true); }
+      render({ quiet: true });
+      return;
+    }
+    case 'bookmarkedit': {
+      el.disabled = true;
+      try {
+        const folder = await api(`/v1/trips/${el.dataset.trip}/edits/${el.dataset.id}/bookmark`, { method: 'POST' });
+        S.edits[el.dataset.trip] = await api(`/v1/trips/${el.dataset.trip}/edits`);
+        S.allEdits = null;
+        await afterLibraryChange();
+        toast(`Saved as “${folder.name}” in your Library`);
+      } catch (e) { el.disabled = false; toast(e.message, true); }
+      render({ quiet: true });
+      return;
+    }
     case 'briefrefresh': {
       const r = route();
       const trip = S.trip[r.id];

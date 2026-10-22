@@ -131,6 +131,9 @@ def build_services(app: FastAPI, settings: Settings) -> None:
     app.state.curator = Curator(db, app.state.claude)
     app.state.discover = DiscoverService(db, app.state.claude, app.state.library.geocoder, photos)
     app.state.lounges = LoungeService(db, app.state.claude)
+    cur = app.state.curator
+    cur.geocoder, cur.photo_url = app.state.library.geocoder, app.state.discover.photo_url
+    cur.web, cur.web_searches = settings.edits_web, settings.edits_web_searches
     app.state.calendar = CalendarService(db, photos)
     app.state.needs = NeedsService(db, app.state.claude)
     app.state.events = EventsService(db, app.state.claude, Ticketmaster(settings), app.state.library)
@@ -989,12 +992,40 @@ async def trip_edits(trip_id: str, request: Request) -> TripEdits:
 
 
 @app.post("/v1/trips/{trip_id}/edits", response_model=TripEdits, dependencies=[Auth])
-async def curate_trip(trip_id: str, request: Request) -> TripEdits:
-    """(Re)curates the trip's edits with Claude, or by simple rules if Claude is unavailable."""
+async def curate_trip(trip_id: str, request: Request, wait: bool = False) -> TripEdits:
+    """(Re)curates the trip's edits: your saved places in its city mixed with places travel and food publications
+    recommend. Researching takes a minute, so this starts it in the background and returns the current edits with
+    refreshing=true; poll GET until it's false (or pass wait=true to block)."""
     trip = _trip_or_404(request, trip_id)
-    if len(trip.places) < 3:
+    curator = _curator(request)
+    if len(curator._pool(trip)) < 3:
         raise HTTPException(status_code=422, detail="Save at least three places to curate edits")
-    return await _curator(request).curate(trip)
+    if wait:
+        return await curator.curate(trip)
+    if trip_id not in curator.refreshing:
+        curator.refreshing.add(trip_id)
+        task = asyncio.create_task(curator.curate(trip))
+        request.app.state.tasks.add(task)
+        task.add_done_callback(request.app.state.tasks.discard)
+    return curator.edits(trip)
+
+
+@app.post("/v1/trips/{trip_id}/edits/{edit_id}/entries/{entry_id}/save", response_model=Place, dependencies=[Auth])
+async def save_edit_entry(trip_id: str, edit_id: str, entry_id: str, request: Request) -> Place:
+    """Saves one place from an edit to your saved places."""
+    place = await _curator(request).save_entry(_trip_or_404(request, trip_id), edit_id, entry_id, _library(request))
+    if place is None:
+        raise HTTPException(status_code=404, detail="This edit was refreshed. Open it again to see the latest.")
+    return place
+
+
+@app.post("/v1/trips/{trip_id}/edits/{edit_id}/bookmark", response_model=Folder, dependencies=[Auth])
+async def bookmark_edit(trip_id: str, edit_id: str, request: Request) -> Folder:
+    """Saves a whole edit to the Library as a folder, so it stays after the edits refresh."""
+    folder_id = await _curator(request).bookmark(_trip_or_404(request, trip_id), edit_id, _library(request))
+    if folder_id is None:
+        raise HTTPException(status_code=404, detail="This edit was refreshed. Open it again to see the latest.")
+    return _db(request).get_folder(folder_id)
 
 
 @app.post("/v1/concierge", response_model=ConciergeReply, dependencies=[Auth])

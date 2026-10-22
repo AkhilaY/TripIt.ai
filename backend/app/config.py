@@ -13,6 +13,10 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     claude_model: str = "claude-opus-5-5"
     claude_effort: str = "medium"
+    # Edits mix your saved places with ones recommended by travel and food publications, found with Claude's
+    # web search (about $10 per 1,000 searches, a few per refresh; edits refresh at most once a day per trip).
+    edits_web: bool = True
+    edits_web_searches: int = 4
     # Menus: when a place's website has none, read menu photos listed for it on Google Maps. Google's terms
     # may not allow extracting text from its photos, so check them and turn this off if in doubt.
     # Events during a trip (the "What's on" section), from the Ticketmaster Discovery API. A free key from

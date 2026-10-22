@@ -872,16 +872,15 @@ function editsSection(trip) {
       <div class="invite-actions"><button class="btn" data-act="curate" data-id="${trip.id}">Curate</button></div></div></div>`;
   }
   const profileNewer = S.profile && S.profile.updated_at && te.created_at && new Date(S.profile.updated_at) > new Date(te.created_at);
-  const aside = te.refreshing ? '<span class="eyebrow">Refreshing…</span>'
-    : te.stale || profileNewer
-      ? `<button class="linkbtn" data-act="curate" data-id="${trip.id}">${profileNewer ? 'Refresh for your taste' : 'Refresh'}</button>`
-      : `<span class="eyebrow">${te.curated_by === 'claude+web' ? 'Updated today' : te.curated_by === 'claude' ? 'Curated for you' : 'From your saves'}</span>`;
+  const aside = te.refreshing ? '<span class="eyebrow">Finding new picks…</span>'
+    : `<button class="linkbtn" data-act="curate" data-id="${trip.id}" aria-label="Get new edits">${ICON.sparkle}${profileNewer ? 'Refresh for your taste' : 'New edits'}</button>`;
   return `<div class="railhead"><h2 class="section-title">The Edits</h2>${aside}</div>
     <div class="rail">${te.edits.map((e) => editCard(te, e)).join('')}</div>`;
 }
 
 async function curate(tripId, auto = false) {
-  if (S.curating[tripId]) return;
+  if (S.curating[tripId] || (S.edits[tripId] && S.edits[tripId].refreshing)) return;
+  if (!auto) toast('Finding new picks. This takes about a minute.');
   S.curating[tripId] = true;
   S.curateTried[tripId] = true;
   render({ quiet: auto });

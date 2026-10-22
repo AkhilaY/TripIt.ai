@@ -846,7 +846,12 @@ function homeEdits(tripCount) {
   const all = background(S.allEdits, 'alledits', loadAllEdits);
   if (!all || !all.length) return '';
   const cards = all.flatMap((te) => te.edits.slice(0, 3).map((e) => editCard(te, e))).slice(0, 9);
-  return `<div class="railhead"><h2 class="section-title">The Edits</h2><span class="eyebrow">Curated for you</span></div>
+  const ids = all.map((te) => te.trip_id);
+  const busy = ids.some((id) => S.curating[id] || (S.edits[id] && S.edits[id].refreshing) || all.find((te) => te.trip_id === id).refreshing);
+  ids.forEach((id) => { if ((S.edits[id] && S.edits[id].refreshing) || all.find((te) => te.trip_id === id).refreshing) pollEdits(id); });
+  const aside = busy ? '<span class="eyebrow">Finding new picks…</span>'
+    : `<button class="linkbtn" data-act="curateall" data-ids="${ids.join(',')}" aria-label="Get new edits">${ICON.sparkle}New edits</button>`;
+  return `<div class="railhead"><h2 class="section-title">The Edits</h2>${aside}</div>
     <div class="rail">${cards.join('')}</div><div class="railhead"><h2 class="section-title">Your trips</h2></div>`;
 }
 
@@ -3736,6 +3741,13 @@ async function onAction(act, el) {
     case 'mode': setTravelMode(el.dataset.mode); render(); return;
     case 'dismissinvite': try { localStorage.setItem('tripit.tasteInvite', 'no'); } catch { /* fine */ } render(); return;
     case 'curate': await curate(el.dataset.id); return;
+    case 'curateall': {
+      toast('Finding new picks for your trips. This takes about a minute.');
+      await Promise.all(el.dataset.ids.split(',').filter(Boolean).map((id) => curate(id, true)));
+      S.allEdits = null;
+      render({ quiet: true });
+      return;
+    }
     case 'saveeditentry': {
       el.disabled = true;
       try {

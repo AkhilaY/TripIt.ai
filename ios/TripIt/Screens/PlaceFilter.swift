@@ -73,54 +73,94 @@ struct PlaceFilterBar: View {
     var showSort = true
 
     var body: some View {
-        let counts = Dictionary(grouping: places, by: { PlaceGroup.of($0.category) }).mapValues(\.count)
-        let cities = Dictionary(grouping: places, by: { $0.city.isEmpty ? "Somewhere" : $0.city }).mapValues(\.count)
-            .sorted { $0.value > $1.value || ($0.value == $1.value && $0.key < $1.key) }
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
-                if showSort {
-                    Menu {
-                        Picker("Sort", selection: $sort) {
-                            ForEach(PlaceSort.allCases) { Text($0.label).tag($0) }
-                        }
-                    } label: {
-                        Label(sort.label, systemImage: "arrow.up.arrow.down")
-                            .font(.subheadline.weight(.medium))
-                            .padding(.horizontal, 12).padding(.vertical, 7)
-                            .background(Theme.cell, in: Capsule())
-                            .overlay(Capsule().strokeBorder(Theme.fill, lineWidth: 1))
-                    }
-                    .onChange(of: sort) { _, value in if value == .closest { Location.shared.request() } }
-                }
+                if showSort { sortMenu }
                 FilterChip(label: "Starred", symbol: "star.fill", isOn: filter.starred) { filter.starred.toggle() }
-                ForEach(PlaceGroup.allCases.filter { counts[$0] != nil }) { group in
-                    FilterChip(label: group.label, count: counts[group], isOn: filter.groups.contains(group)) {
-                        if filter.groups.contains(group) { filter.groups.remove(group) } else { filter.groups.insert(group) }
-                    }
-                }
-                Menu {
-                    Toggle("Not in a trip yet", isOn: $filter.unplanned)
-                    if cities.count > 1 {
-                        Section("Cities") {
-                            ForEach(cities, id: \.key) { city, n in
-                                Toggle("\(city) (\(n))", isOn: Binding(
-                                    get: { filter.cities.contains(city) },
-                                    set: { on in if on { filter.cities.insert(city) } else { filter.cities.remove(city) } }))
-                            }
-                        }
-                    }
-                    if filter.isActive {
-                        Button("Clear filters", role: .destructive) { filter = PlaceFilter(query: filter.query) }
-                    }
-                } label: {
-                    FilterChipLabel(text: filter.moreCount > 0 ? "Filters · \(filter.moreCount)" : "More filters",
-                                    isOn: filter.moreCount > 0)
-                }
+                groupChips
+                moreMenu
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 2)
         }
     }
+
+    private var groupCounts: [PlaceGroup: Int] {
+        Dictionary(grouping: places, by: { PlaceGroup.of($0.category) }).mapValues(\.count)
+    }
+
+    private var cityCounts: [CityCount] {
+        let counts = Dictionary(grouping: places, by: { $0.city.isEmpty ? "Somewhere" : $0.city }).mapValues(\.count)
+        return counts.map { CityCount(city: $0.key, count: $0.value) }
+            .sorted { $0.count != $1.count ? $0.count > $1.count : $0.city < $1.city }
+    }
+
+    private var sortMenu: some View {
+        Menu {
+            Picker("Sort", selection: $sort) {
+                ForEach(PlaceSort.allCases) { option in
+                    Text(option.label).tag(option)
+                }
+            }
+        } label: {
+            Label(sort.label, systemImage: "arrow.up.arrow.down")
+                .font(.subheadline.weight(.medium))
+                .padding(.horizontal, 12).padding(.vertical, 7)
+                .background(Theme.cell, in: Capsule())
+                .overlay(Capsule().strokeBorder(Theme.fill, lineWidth: 1))
+        }
+        .onChange(of: sort) { _, value in
+            if value == .closest { Location.shared.request() }
+        }
+    }
+
+    private var groupChips: some View {
+        let counts = groupCounts
+        let shown: [PlaceGroup] = PlaceGroup.allCases.filter { counts[$0] != nil }
+        return ForEach(shown) { group in
+            FilterChip(label: group.label, count: counts[group], isOn: filter.groups.contains(group)) {
+                toggle(group)
+            }
+        }
+    }
+
+    private func toggle(_ group: PlaceGroup) {
+        if filter.groups.contains(group) { filter.groups.remove(group) } else { filter.groups.insert(group) }
+    }
+
+    private func cityBinding(_ city: String) -> Binding<Bool> {
+        Binding(
+            get: { filter.cities.contains(city) },
+            set: { on in
+                if on { filter.cities.insert(city) } else { filter.cities.remove(city) }
+            })
+    }
+
+    private var moreMenu: some View {
+        let cities = cityCounts
+        let label = filter.moreCount > 0 ? "Filters · \(filter.moreCount)" : "More filters"
+        return Menu {
+            Toggle("Not in a trip yet", isOn: $filter.unplanned)
+            if cities.count > 1 {
+                Section("Cities") {
+                    ForEach(cities) { item in
+                        Toggle("\(item.city) (\(item.count))", isOn: cityBinding(item.city))
+                    }
+                }
+            }
+            if filter.isActive {
+                Button("Clear filters", role: .destructive) { filter = PlaceFilter(query: filter.query) }
+            }
+        } label: {
+            FilterChipLabel(text: label, isOn: filter.moreCount > 0)
+        }
+    }
+}
+
+private struct CityCount: Identifiable {
+    let city: String
+    let count: Int
+    var id: String { city }
 }
 
 private struct FilterChipLabel: View {

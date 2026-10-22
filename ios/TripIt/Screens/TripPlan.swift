@@ -217,7 +217,7 @@ struct TripPlan: View {
 
     @ViewBuilder private func legView(day: Int, from: Place, to: Place) -> some View {
         if let leg = legs[day]?["\(from.id)>\(to.id)"] {
-            let time = (leg.times[travelMode] ?? nil) ?? (travelMode == "transit" ? (leg.times["walk"] ?? nil) : nil)
+            let time = travelTime(leg)
             Button {
                 var c = URLComponents(string: "https://maps.apple.com/")!
                 c.queryItems = [.init(name: "saddr", value: "\(from.latitude ?? 0),\(from.longitude ?? 0)"),
@@ -240,6 +240,13 @@ struct TripPlan: View {
             }
             .buttonStyle(.borderless)
         }
+    }
+
+    /// The time for the chosen mode; short hops with no transit route fall back to walking.
+    private func travelTime(_ leg: Leg) -> TravelTime? {
+        if let entry = leg.times[travelMode], let time = entry { return time }
+        if travelMode == "transit", let entry = leg.times["walk"], let time = entry { return time }
+        return nil
     }
 
     private var modeSymbol: String {

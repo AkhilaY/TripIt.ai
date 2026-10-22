@@ -21,7 +21,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Res
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from .concierge import Curator
+from .concierge import Curator, profile_text
 from .config import Settings, get_settings
 from .db import Database
 from .discover import DiscoverService
@@ -62,6 +62,11 @@ from .models import (
     DiscoverKind,
     DiscoverResult,
     HomeRequest,
+    Folder,
+    FolderInput,
+    FolderRename,
+    NewTripRequest,
+    PlaceIds,
     LoungeResult,
     HomeSetting,
     LocateRequest,
@@ -139,19 +144,22 @@ async def notify_import(app: FastAPI, job: Optional[Job]) -> None:
     """Push notification when an import finishes, since sharing from TikTok happens in the background."""
     if job is None or not getattr(app.state, "push", None):
         return
-    trip = app.state.db.get_trip(job.trip_id) if job.trip_id else None
+    places = [p for p in app.state.db.list_places(saved_only=True) if job.reel_id and job.reel_id in p.reel_ids]
+    cities = [p.city for p in places if p.city]
+    city = max(set(cities), key=cities.count) if cities else None
     if job.status == JobStatus.done:
         n = job.added_places
-        if trip and n:
-            title = f"{n} new place{'s' if n != 1 else ''} saved to {trip.name}"
-        elif trip:
-            title = f"Already saved in {trip.name}"
+        where = f" in {city}" if city else ""
+        if n:
+            title = f"{n} new place{'s' if n != 1 else ''} saved{where}"
+        elif places:
+            title = f"Already in your saved places{where}"
         else:
             title = "No places found in that reel"
         body = (job.result.title if job.result and job.result.title else job.message) or ""
         if job.reel and job.reel.uploader:
             body = f"{body} · @{job.reel.uploader}" if body else f"@{job.reel.uploader}"
-        url = f"/#/trip/{trip.id}" if trip else "/#/imports"
+        url = f"/#/saved?reel={job.reel_id}" if places else "/#/imports"
     else:
         title, body, url = "Couldn't import a reel", job.message or "Tap to see what happened", "/#/imports"
     await app.state.push.send_all({"title": title, "body": body, "url": url, "tag": job.id})
@@ -311,6 +319,121 @@ async def list_trips(request: Request) -> list[Trip]:
     return _db(request).list_trips()
 
 
+@app.post("/v1/trips", response_model=TripDetail, status_code=201, dependencies=[Auth])
+async def create_trip(body: NewTripRequest, request: Request) -> TripDetail:
+    """Makes a trip: a city, how many days, the saved places to include, and whether AI plans it
+    (optionally adding suggestions for quiet days) or you build the days yourself."""
+    unknown = [pid for pid in body.place_ids if _db(request).get_place(pid) is None]
+    if unknown:
+        raise HTTPException(status_code=422, detail="Some of those places are no longer saved")
+    return await _library(request).create_trip(body, request.app.state.claude, _taste(request))
+
+
+def _taste(request: Request) -> Optional[str]:
+    try:
+        return profile_text(request.app.state.curator.profile()) or None
+    except Exception:  # the taste profile is a nice-to-have here
+        return None
+
+
+@app.post("/v1/trips/{trip_id}/places", response_model=TripDetail, dependencies=[Auth])
+async def add_trip_places(trip_id: str, body: PlaceIds, request: Request) -> TripDetail:
+    """Adds saved places to a trip (unscheduled until you put them on a day)."""
+    _trip_or_404(request, trip_id)
+    db = _db(request)
+    for pid in dict.fromkeys(body.place_ids):
+        if db.get_place(pid) is None:
+            raise HTTPException(status_code=422, detail="Some of those places are no longer saved")
+        db.add_to_trip(trip_id, pid)
+    return _trip_or_404(request, trip_id)
+
+
+@app.delete("/v1/trips/{trip_id}/places/{place_id}", response_model=TripDetail, dependencies=[Auth])
+async def remove_trip_place(trip_id: str, place_id: str, request: Request) -> TripDetail:
+    """Takes a place off the trip. It stays in your saved places (a suggestion you never kept is dropped)."""
+    _trip_or_404(request, trip_id)
+    _library(request).remove_from_trip(trip_id, place_id)
+    return _trip_or_404(request, trip_id)
+
+
+@app.post("/v1/trips/{trip_id}/places/{place_id}/keep", response_model=TripDetail, dependencies=[Auth])
+async def keep_suggestion(trip_id: str, place_id: str, request: Request) -> TripDetail:
+    """Keeps a place the planner suggested: it joins your saved places and loses its "Suggested" label."""
+    _trip_or_404(request, trip_id)
+    if _library(request).keep_suggestion(trip_id, place_id) is None:
+        raise HTTPException(status_code=404, detail="Place not found in this trip")
+    return _trip_or_404(request, trip_id)
+
+
+@app.post("/v1/trips/{trip_id}/suggest", response_model=TripDetail, dependencies=[Auth])
+async def suggest_for_trip(trip_id: str, request: Request) -> TripDetail:
+    """Adds a few suggestions to the trip's quiet days (days with fewer than three stops)."""
+    trip = _trip_or_404(request, trip_id)
+    if not trip.day_count:
+        raise HTTPException(status_code=422, detail="Set up the trip's days first")
+    if request.app.state.claude is None:
+        raise HTTPException(status_code=503, detail="Suggestions need Claude, which isn't set up on the server")
+    await _library(request).fill_gaps(trip_id, request.app.state.claude, _taste(request))
+    return _trip_or_404(request, trip_id)
+
+
+# ---------- Folders ----------
+
+
+@app.get("/v1/folders", response_model=list[Folder], dependencies=[Auth])
+async def list_folders(request: Request) -> list[Folder]:
+    return _db(request).list_folders()
+
+
+def _folder_or_404(request: Request, folder_id: str) -> Folder:
+    folder = _db(request).get_folder(folder_id)
+    if folder is None:
+        raise HTTPException(status_code=404, detail="Folder not found")
+    return folder
+
+
+@app.post("/v1/folders", response_model=Folder, status_code=201, dependencies=[Auth])
+async def create_folder(body: FolderInput, request: Request) -> Folder:
+    db = _db(request)
+    folder = db.create_folder(" ".join(body.name.split()))
+    for pid in dict.fromkeys(body.place_ids):
+        if db.get_place(pid):
+            db.add_to_folder(folder.id, pid)
+    return db.get_folder(folder.id)
+
+
+@app.patch("/v1/folders/{folder_id}", response_model=Folder, dependencies=[Auth])
+async def rename_folder(folder_id: str, body: FolderRename, request: Request) -> Folder:
+    _folder_or_404(request, folder_id)
+    _db(request).rename_folder(folder_id, " ".join(body.name.split()))
+    return _folder_or_404(request, folder_id)
+
+
+@app.delete("/v1/folders/{folder_id}", status_code=204, dependencies=[Auth])
+async def delete_folder(folder_id: str, request: Request) -> Response:
+    """Deletes the folder; its places stay saved."""
+    _folder_or_404(request, folder_id)
+    _db(request).delete_folder(folder_id)
+    return Response(status_code=204)
+
+
+@app.post("/v1/folders/{folder_id}/places", response_model=Folder, dependencies=[Auth])
+async def add_folder_places(folder_id: str, body: PlaceIds, request: Request) -> Folder:
+    _folder_or_404(request, folder_id)
+    db = _db(request)
+    for pid in dict.fromkeys(body.place_ids):
+        if db.get_place(pid):
+            db.add_to_folder(folder_id, pid)
+    return _folder_or_404(request, folder_id)
+
+
+@app.delete("/v1/folders/{folder_id}/places/{place_id}", response_model=Folder, dependencies=[Auth])
+async def remove_folder_place(folder_id: str, place_id: str, request: Request) -> Folder:
+    _folder_or_404(request, folder_id)
+    _db(request).remove_from_folder(folder_id, place_id)
+    return _folder_or_404(request, folder_id)
+
+
 @app.get("/v1/trips/{trip_id}", response_model=TripDetail, dependencies=[Auth])
 async def get_trip(trip_id: str, request: Request) -> TripDetail:
     return _trip_or_404(request, trip_id)
@@ -362,8 +485,8 @@ async def reorder_day(trip_id: str, day: int, body: ReorderRequest, request: Req
 async def move_in_itinerary(trip_id: str, body: MoveRequest, request: Request) -> TripDetail:
     """Drag and drop: puts a place at a position in a day (day 0 = not scheduled)."""
     _trip_or_404(request, trip_id)
-    place = _place_or_404(request, body.place_id)
-    if place.trip_id != trip_id:
+    place = _db(request).get_place(body.place_id, trip_id)
+    if place is None:
         raise HTTPException(status_code=404, detail="Place not found in this trip")
     _library(request).move_to(place, body.day or None, body.index)
     return _trip_or_404(request, trip_id)
@@ -560,8 +683,7 @@ def _booking_or_404(request: Request, trip_id: str, booking_id: str) -> Booking:
 
 def _check_booking_place(request: Request, trip_id: str, place_id: Optional[str]) -> None:
     if place_id:
-        place = _db(request).get_place(place_id)
-        if place is None or place.trip_id != trip_id:
+        if _db(request).get_place(place_id, trip_id) is None:
             raise HTTPException(status_code=422, detail="That place isn't in this trip")
 
 
@@ -932,7 +1054,8 @@ async def push_test(request: Request) -> dict:
 
 @app.get("/v1/places", response_model=list[Place], dependencies=[Auth])
 async def list_places(request: Request) -> list[Place]:
-    return _db(request).list_places()
+    """Everything you've saved, from reels, screenshots, searches and Discover (with the trips and folders it's in)."""
+    return _db(request).list_places(saved_only=True)
 
 
 @app.post("/v1/places/search", response_model=list[PlaceCandidate], dependencies=[Auth])
@@ -952,15 +1075,16 @@ async def add_place(body: AddPlaceRequest, request: Request, response: Response)
     library = _library(request)
     if body.trip_id and not _db(request).get_trip(body.trip_id):
         raise HTTPException(status_code=404, detail="Trip not found")
+    if body.folder_id:
+        _folder_or_404(request, body.folder_id)
     if body.candidate_id:
         match = await library.geocoder.details(body.candidate_id)
         if match is None:
             raise HTTPException(status_code=422, detail="Couldn't load that place. Try searching again.")
-        place, created = await library.add_match(match, body.trip_id)
+        place, created = await library.add_match(match, body.trip_id, body.folder_id)
     elif body.name:
-        if not body.trip_id and not body.city:
-            raise HTTPException(status_code=422, detail="Choose a trip or a city for this place")
-        place, created = await library.add_by_name(body.name.strip(), body.trip_id, city=body.city, category=body.category.value)
+        place, created = await library.add_by_name(body.name.strip(), body.trip_id, city=body.city, category=body.category.value,
+                                                   folder_id=body.folder_id)
     else:
         raise HTTPException(status_code=422, detail="Search for a place or enter its name")
     if not created:
@@ -973,6 +1097,8 @@ async def add_place_from_link(body: AddFromLinkRequest, request: Request, respon
     """Adds the place from a Google Maps or Apple Maps link."""
     if body.trip_id and not _db(request).get_trip(body.trip_id):
         raise HTTPException(status_code=404, detail="Trip not found")
+    if body.folder_id:
+        _folder_or_404(request, body.folder_id)
     url = find_url(body.url) or body.url.strip()
     if not is_map_link(url):
         raise HTTPException(status_code=422, detail="Paste a Google Maps or Apple Maps link")
@@ -980,7 +1106,7 @@ async def add_place_from_link(body: AddFromLinkRequest, request: Request, respon
         link = parse_map_link(await resolve_map_link(url))
     except NotAMapLink as e:
         raise HTTPException(status_code=422, detail=str(e))
-    place, created = await _library(request).add_from_link(link, body.trip_id)
+    place, created = await _library(request).add_from_link(link, body.trip_id, body.folder_id)
     if not created:
         response.status_code = 200
     return AddPlaceResult(place=place, created=created)
@@ -991,8 +1117,21 @@ async def update_place(place_id: str, body: PlaceUpdate, request: Request) -> Pl
     place = _place_or_404(request, place_id)
     db, library = _db(request), _library(request)
     fields = body.model_fields_set
-    simple = {k: getattr(body, k) for k in ("name", "category", "visited", "user_notes", "must_do", "start_time")
+    # Day, time slot and exact time belong to one trip. An event's own start time doesn't.
+    event_time = place.category.value == "event" and not body.trip_id
+    trip_scoped = ({"day_number", "time_of_day"} & fields or body.clear_time_of_day
+                   or (({"start_time"} & fields or body.clear_start_time) and not event_time))
+    trip_id = body.trip_id or (place.trip_ids[0] if len(place.trip_ids) == 1 else None)
+    if trip_scoped:
+        if not trip_id:
+            raise HTTPException(status_code=422, detail="Say which trip this is for")
+        if db.get_place(place_id, trip_id) is None:
+            raise HTTPException(status_code=404, detail="Place not found in this trip")
+    scope = None if event_time else trip_id
+    simple = {k: getattr(body, k) for k in ("name", "category", "visited", "user_notes", "must_do")
               if k in fields and getattr(body, k) is not None}
+    if "start_time" in fields and body.start_time is not None:
+        db.update_place(place_id, trip_id=scope, start_time=body.start_time)
     if "website" in fields and body.website is not None:
         site = clean_website(body.website) if body.website.strip() else None
         if body.website.strip() and not site:
@@ -1004,19 +1143,19 @@ async def update_place(place_id: str, body: PlaceUpdate, request: Request) -> Pl
     if simple:
         db.update_place(place_id, **simple)
     if "day_number" in fields and body.day_number is not None:
-        library.move_place(place, body.day_number or None)
+        library.move_place(db.get_place(place_id, trip_id), body.day_number or None)
     if body.clear_event_date:
         db.update_place(place_id, event_date=None, event_end_date=None)
     elif "event_date" in fields and body.event_date is not None:
         end = body.event_end_date if body.event_end_date and body.event_end_date > body.event_date else None
         db.update_place(place_id, event_date=body.event_date, event_end_date=end)
     if body.clear_start_time:
-        db.update_place(place_id, start_time=None)
+        db.update_place(place_id, trip_id=scope, start_time=None)
     if body.clear_time_of_day:
-        db.update_place(place_id, time_of_day=None)
+        db.update_place(place_id, trip_id=trip_id, time_of_day=None)
     elif body.time_of_day is not None:
-        db.update_place(place_id, time_of_day=body.time_of_day)
-    return db.get_place(place_id)
+        db.update_place(place_id, trip_id=trip_id, time_of_day=body.time_of_day)
+    return (db.get_place(place_id, scope) if scope else None) or db.get_place(place_id)
 
 
 @app.delete("/v1/places/{place_id}", status_code=204, dependencies=[Auth])

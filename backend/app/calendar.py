@@ -47,13 +47,13 @@ class CalendarService:
     def items(self) -> tuple[list[CalendarItem], list[CalendarItem]]:
         dated: list[CalendarItem] = []
         undated: list[CalendarItem] = []
+        for p in self.db.list_places(saved_only=True):  # events you saved, in a trip or not
+            if p.category.value == "event":
+                (dated if p.event_date else undated).append(self._event(p, p.city))
         for trip in self.db.list_trips():
             detail: Optional[TripDetail] = self.db.get_trip_detail(trip.id)
             if detail is None:
                 continue
-            for p in detail.places:
-                if p.category.value == "event":
-                    (dated if p.event_date else undated).append(self._event(p, detail.name))
             if detail.start_date and detail.day_count:
                 last = detail.start_date + timedelta(days=detail.day_count - 1)
                 dated.append(CalendarItem(id=f"trip:{detail.id}", kind="trip", title=detail.name, date=detail.start_date,

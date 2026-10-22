@@ -115,6 +115,7 @@ class Job(BaseModel):
     warnings: list[str] = []
     # Set once the places are saved to the library.
     trip_id: Optional[str] = None
+    reel_id: Optional[str] = None  # the saved post, whose places are those with it in reel_ids
     added_places: int = 0
 
 
@@ -527,7 +528,7 @@ class MenuRequest(BaseModel):
 
 class Place(BaseModel):
     id: str
-    trip_id: str
+    trip_id: Optional[str] = None  # the trip it is shown in, when read as a trip stop
     reel_id: Optional[str] = None
     name: str
     category: PlaceCategory
@@ -554,6 +555,11 @@ class Place(BaseModel):
     hours_checked_at: Optional[datetime] = None
     photos: list[PlacePhoto] = []
     photos_checked_at: Optional[datetime] = None
+    trip_ids: list[str] = []  # trips this place is a stop on
+    folder_ids: list[str] = []  # folders it is filed in
+    saved: bool = True  # False for a place an AI plan suggested that you haven't kept
+    suggested: bool = False  # on this trip: added by the planner to fill a quiet day
+    suggestion_note: Optional[str] = None
     must_do: bool = False  # shown as a star: starred places rank first everywhere
     start_time: Optional[str] = None  # "HH:MM" local time, e.g. a reservation or an event's start
     event_date: Optional[date] = None  # for an event: the day it happens (or starts)
@@ -623,6 +629,53 @@ class TripUpdate(BaseModel):
     start_date: Optional[date] = None
 
 
+class PlaceSuggestion(BaseModel):
+    name: str = Field(description="The place's real name as you'd type it into a maps search.")
+    category: PlaceCategory
+    neighborhood: Optional[str] = Field(description="Neighbourhood, to help find it on the map, or null.")
+    day: int = Field(description="Which quiet day it goes on.")
+    time_of_day: Optional[TimeOfDay] = Field(description="When in the day it fits best, or null.")
+    why: str = Field(description="Under 14 words on why it fits this person and this day.")
+
+
+class SuggestionResult(BaseModel):
+    suggestions: list[PlaceSuggestion]
+
+
+class Folder(BaseModel):
+    id: str
+    name: str
+    created_at: datetime
+    place_count: int = 0
+    covers: list[PlacePhoto] = []  # up to four photos from its places
+
+
+class FolderInput(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    place_ids: list[str] = Field(default=[], max_length=500)
+
+
+class FolderRename(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+
+
+class PlaceIds(BaseModel):
+    place_ids: list[str] = Field(min_length=1, max_length=500)
+
+
+class NewTripRequest(BaseModel):
+    """A trip made on purpose: a city, a length, the saved places to go to, and who plans it."""
+    city: str = Field(min_length=1, max_length=120)
+    name: Optional[str] = Field(default=None, max_length=120)
+    country: Optional[str] = Field(default=None, max_length=80)
+    days: int = Field(default=3, ge=1, le=21)
+    start_date: Optional[date] = None
+    place_ids: list[str] = Field(default=[], max_length=500)
+    plan: Literal["ai", "manual"] = "manual"
+    fill_gaps: bool = False  # AI only: suggest a few well-rated places for quiet days
+    preferences: Optional[str] = Field(default=None, max_length=1000)
+
+
 class PlaceUpdate(BaseModel):
     name: Optional[str] = Field(default=None, min_length=1, max_length=200)
     category: Optional[PlaceCategory] = None
@@ -636,6 +689,7 @@ class PlaceUpdate(BaseModel):
     start_time: Optional[str] = Field(default=None, pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
     clear_start_time: bool = False
     website: Optional[str] = Field(default=None, max_length=500)  # "" clears it
+    trip_id: Optional[str] = None  # which trip day_number / time_of_day / start_time refer to
     event_date: Optional[date] = None
     event_end_date: Optional[date] = None
     clear_event_date: bool = False
@@ -686,17 +740,19 @@ class AddPlaceRequest(BaseModel):
     name: Optional[str] = Field(default=None, min_length=1, max_length=200)
     city: Optional[str] = Field(default=None, max_length=120)
     category: PlaceCategory = PlaceCategory.other
-    trip_id: Optional[str] = None
+    trip_id: Optional[str] = None  # also add it to this trip
+    folder_id: Optional[str] = None  # also file it in this folder
 
 
 class AddFromLinkRequest(BaseModel):
     url: str = Field(min_length=1, max_length=2000)
     trip_id: Optional[str] = None
+    folder_id: Optional[str] = None
 
 
 class AddPlaceResult(BaseModel):
     place: Place
-    created: bool  # False when the trip already had a place with that name
+    created: bool  # False when you'd already saved a place with that name
 
 
 class ScreenshotJobRequest(BaseModel):

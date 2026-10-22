@@ -102,7 +102,7 @@ class DiscoverService:
                 data = {"items": good, "curated_by": curated, "fetched_at": datetime.now(timezone.utc).isoformat()}
                 self.db.save_discover(key, data)
 
-        saved = [(normalize(p.name), p.latitude, p.longitude) for p in self.db.list_places()]
+        saved = [(normalize(p.name), p.latitude, p.longitude) for p in self.db.list_places(saved_only=True)]
         out = []
         for raw_item in data["items"]:
             item = DiscoverItem(**{**raw_item, "photo": self.photo_url(raw_item["photo"]) if raw_item.get("photo") else None})

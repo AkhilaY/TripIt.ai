@@ -5,6 +5,7 @@ One file, no server to run. On Fly.io/Render put DATABASE_PATH on a persistent v
 
 import json
 import logging
+import re as _re
 import sqlite3
 import threading
 import uuid
@@ -12,7 +13,7 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterable, Optional
 
-from .models import Booking, BookingListItem, ExtractionResult, Job, JobStatus, Place, Reel, ReelMetadata, Trip, TripDetail
+from .models import Booking, BookingListItem, ExtractionResult, Folder, Job, JobStatus, Place, Reel, ReelMetadata, Trip, TripDetail
 
 log = logging.getLogger(__name__)
 
@@ -45,7 +46,7 @@ CREATE TABLE IF NOT EXISTS reels (
 
 CREATE TABLE IF NOT EXISTS places (
     id TEXT PRIMARY KEY,
-    trip_id TEXT NOT NULL REFERENCES trips(id) ON DELETE CASCADE,
+    trip_id TEXT,  -- unused since saved places moved out of trips (see trip_places)
     reel_id TEXT REFERENCES reels(id) ON DELETE SET NULL,
     name TEXT NOT NULL,
     category TEXT NOT NULL DEFAULT 'other',
@@ -140,6 +141,37 @@ CREATE TABLE IF NOT EXISTS trip_events (
     fetched_at TEXT NOT NULL
 );
 
+-- A trip's stops: saved places linked to it, with where they sit in its itinerary. A place can be in
+-- any number of trips (and folders); its own details (stars, notes, hours) are shared by all of them.
+CREATE TABLE IF NOT EXISTS trip_places (
+    trip_id TEXT NOT NULL REFERENCES trips(id) ON DELETE CASCADE,
+    place_id TEXT NOT NULL REFERENCES places(id) ON DELETE CASCADE,
+    day_number INTEGER,
+    day_order INTEGER NOT NULL DEFAULT 0,
+    time_of_day TEXT,
+    day_note TEXT,
+    start_time TEXT,
+    suggested INTEGER NOT NULL DEFAULT 0,
+    suggestion_note TEXT,
+    added_at TEXT NOT NULL,
+    PRIMARY KEY (trip_id, place_id)
+);
+CREATE INDEX IF NOT EXISTS trip_places_place ON trip_places(place_id);
+
+CREATE TABLE IF NOT EXISTS folders (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS folder_places (
+    folder_id TEXT NOT NULL REFERENCES folders(id) ON DELETE CASCADE,
+    place_id TEXT NOT NULL REFERENCES places(id) ON DELETE CASCADE,
+    added_at TEXT NOT NULL,
+    PRIMARY KEY (folder_id, place_id)
+);
+CREATE INDEX IF NOT EXISTS folder_places_place ON folder_places(place_id);
+
 CREATE TABLE IF NOT EXISTS discover_cache (
     key TEXT PRIMARY KEY,
     data TEXT NOT NULL,
@@ -190,6 +222,7 @@ MIGRATIONS = {
         ("reserve_url", "TEXT"), ("reserve_provider", "TEXT"), ("reserve_checked_at", "TEXT"),
         ("booking_kind", "TEXT"), ("booking_need", "TEXT"), ("booking_note", "TEXT"), ("booking_checked_at", "TEXT"),
         ("event_date", "TEXT"), ("event_end_date", "TEXT"), ("venue", "TEXT"),
+        ("saved", "INTEGER NOT NULL DEFAULT 1"),  # 0 for a place an AI plan suggested that you haven't kept
     ],
     "trips": [("share_token", "TEXT"), ("kind", "TEXT NOT NULL DEFAULT 'trip'")],
 }
@@ -201,16 +234,25 @@ PLACE_COLUMNS = (
     "opening_hours", "hours_checked_at", "photos", "photos_checked_at", "must_do", "start_time",
     "rating", "rating_count", "rating_checked_at", "website", "phone", "contact_checked_at",
     "reserve_url", "reserve_provider", "reserve_checked_at", "booking_kind", "booking_need", "booking_note", "booking_checked_at",
-    "event_date", "event_end_date", "venue",
+    "event_date", "event_end_date", "venue", "saved",
 )
+# Where a place sits in one trip's itinerary; kept per trip in trip_places.
+MEMBER_COLUMNS = ("day_number", "day_order", "time_of_day", "day_note", "start_time", "suggested", "suggestion_note")
 BOOKING_COLUMNS = (
     "kind", "title", "start_at", "end_at", "origin", "destination", "address", "confirmation", "party_size",
     "notes", "place_id", "source",
 )
 TRIP_COLUMNS = ("name", "city", "country", "start_date", "day_count", "day_titles", "plan_notes", "planned_by", "share_token", "kind")
 # Places plus the reels that mention them.
-PLACE_SELECT = ("SELECT p.*, (SELECT group_concat(m.reel_id) FROM place_mentions m WHERE m.place_id = p.id) AS mention_reels "
+PLACE_SELECT = ("SELECT p.*, (SELECT group_concat(m.reel_id) FROM place_mentions m WHERE m.place_id = p.id) AS mention_reels, "
+                "(SELECT group_concat(t.trip_id) FROM trip_places t WHERE t.place_id = p.id) AS trip_list, "
+                "(SELECT group_concat(f.folder_id) FROM folder_places f WHERE f.place_id = p.id) AS folder_list "
                 "FROM places p")
+# The same, as a stop on one trip: its day, order and time come from trip_places.
+TRIP_PLACE_SELECT = (PLACE_SELECT[:-len("FROM places p")] + ", tp.trip_id AS m_trip, tp.day_number AS m_day_number, "
+                     "tp.day_order AS m_day_order, tp.time_of_day AS m_time_of_day, tp.day_note AS m_day_note, "
+                     "tp.start_time AS m_start_time, tp.suggested AS m_suggested, tp.suggestion_note AS m_suggestion_note "
+                     "FROM places p JOIN trip_places tp ON tp.place_id = p.id")
 JSON_COLUMNS = {"recommended_items", "day_titles", "warnings", "opening_hours", "photos"}
 
 
@@ -263,11 +305,57 @@ class Database:
         if not self._conn.execute("SELECT 1 FROM settings WHERE key = 'migrated_event_category'").fetchone():
             self._conn.execute("UPDATE places SET category = 'event' WHERE website LIKE '%ticketmaster.%' AND category IN ('nightlife', 'activity')")
             self._conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('migrated_event_category', 'true')")
+        self._migrate_library()
         # Places saved before mentions were tracked count their first reel.
         self._conn.execute(
             "INSERT OR IGNORE INTO place_mentions (place_id, reel_id) "
             "SELECT id, reel_id FROM places WHERE reel_id IS NOT NULL AND reel_id IN (SELECT id FROM reels)"
         )
+
+    def _migrate_library(self) -> None:
+        """Saved places used to belong to exactly one trip, made automatically per city. Now they stand on
+        their own: trips you planned keep their places (as links), the rest become folders named after them."""
+        if self._conn.execute("SELECT 1 FROM settings WHERE key = 'migrated_library'").fetchone():
+            return
+        info = {r["name"]: r for r in self._conn.execute("PRAGMA table_info(places)")}
+        if info["trip_id"]["notnull"]:  # rebuild without the NOT NULL / cascade on trip_id
+            sql = self._conn.execute("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'places'").fetchone()[0]
+            new_sql = _re.sub(r"trip_id TEXT NOT NULL REFERENCES trips\(id\) ON DELETE CASCADE", "trip_id TEXT", sql, count=1)
+            new_sql = new_sql.replace("CREATE TABLE places", "CREATE TABLE places_new", 1).replace('CREATE TABLE "places"', "CREATE TABLE places_new", 1)
+            self._conn.execute("PRAGMA foreign_keys = OFF")
+            try:
+                self._conn.execute("BEGIN")
+                self._conn.execute(new_sql)
+                self._conn.execute("INSERT INTO places_new SELECT * FROM places")
+                self._conn.execute("DROP TABLE places")
+                self._conn.execute("ALTER TABLE places_new RENAME TO places")
+                self._conn.execute("CREATE INDEX IF NOT EXISTS places_trip ON places(trip_id)")
+                self._conn.execute("COMMIT")
+            except Exception:
+                self._conn.execute("ROLLBACK")
+                raise
+            finally:
+                self._conn.execute("PRAGMA foreign_keys = ON")
+        stamp = now().isoformat()
+        for trip in self._conn.execute("SELECT * FROM trips").fetchall():
+            keep = (trip["day_count"] or trip["start_date"] or trip["share_token"]
+                    or self._conn.execute("SELECT 1 FROM bookings WHERE trip_id = ?", (trip["id"],)).fetchone()
+                    or self._conn.execute("SELECT 1 FROM packing WHERE trip_id = ?", (trip["id"],)).fetchone())
+            if keep and (trip["kind"] or "trip") != "local":
+                self._conn.execute(
+                    "INSERT OR IGNORE INTO trip_places (trip_id, place_id, day_number, day_order, time_of_day, day_note, start_time, added_at) "
+                    "SELECT trip_id, id, day_number, day_order, time_of_day, day_note, CASE WHEN category = 'event' THEN NULL ELSE start_time END, created_at "
+                    "FROM places WHERE trip_id = ?", (trip["id"],))
+                continue
+            if self._conn.execute("SELECT 1 FROM places WHERE trip_id = ?", (trip["id"],)).fetchone():
+                folder_id = new_id()
+                self._conn.execute("INSERT INTO folders (id, name, created_at) VALUES (?, ?, ?)", (folder_id, trip["name"], trip["created_at"] or stamp))
+                self._conn.execute("INSERT OR IGNORE INTO folder_places (folder_id, place_id, added_at) SELECT ?, id, created_at FROM places WHERE trip_id = ?",
+                                   (folder_id, trip["id"]))
+            self._conn.execute("DELETE FROM trips WHERE id = ?", (trip["id"],))
+        self._conn.execute("UPDATE places SET trip_id = NULL, day_number = NULL, day_order = 0, time_of_day = NULL, day_note = NULL")
+        self._conn.execute("UPDATE places SET start_time = NULL WHERE category != 'event'")
+        self._conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('migrated_library', 'true')")
 
     def _exec(self, sql: str, params: Iterable[Any] = ()) -> sqlite3.Cursor:
         with self._lock:
@@ -300,8 +388,8 @@ class Database:
     def list_trips(self) -> list[Trip]:
         rows = self._rows("SELECT * FROM trips ORDER BY created_at DESC")
         stats = self._rows(
-            "SELECT trip_id, category, COUNT(*) AS n, SUM(latitude IS NOT NULL) AS mapped "
-            "FROM places GROUP BY trip_id, category"
+            "SELECT tp.trip_id, p.category, COUNT(*) AS n, SUM(p.latitude IS NOT NULL) AS mapped "
+            "FROM trip_places tp JOIN places p ON p.id = tp.place_id GROUP BY tp.trip_id, p.category"
         )
         by_trip: dict[str, list[sqlite3.Row]] = {}
         for s in stats:
@@ -314,8 +402,8 @@ class Database:
         if not rows:
             return None
         stats = self._rows(
-            "SELECT trip_id, category, COUNT(*) AS n, SUM(latitude IS NOT NULL) AS mapped "
-            "FROM places WHERE trip_id = ? GROUP BY category",
+            "SELECT tp.trip_id, p.category, COUNT(*) AS n, SUM(p.latitude IS NOT NULL) AS mapped "
+            "FROM trip_places tp JOIN places p ON p.id = tp.place_id WHERE tp.trip_id = ? GROUP BY p.category",
             (trip_id,),
         )
         return self._trip(rows[0], stats, self._covers(trip_id).get(trip_id))
@@ -338,7 +426,15 @@ class Database:
         self._update("trips", trip_id, TRIP_COLUMNS, changes)
 
     def delete_trip(self, trip_id: str) -> None:
+        """Deletes the trip; its places stay saved. Suggestions you never kept go with it."""
         self._exec("DELETE FROM trips WHERE id = ?", (trip_id,))
+        self.prune_unsaved()
+
+    def prune_unsaved(self) -> list[str]:
+        rows = self._rows("SELECT id FROM places WHERE saved = 0 AND id NOT IN (SELECT place_id FROM trip_places)")
+        for r in rows:
+            self._exec("DELETE FROM places WHERE id = ?", (r["id"],))
+        return [r["id"] for r in rows]
 
     def trip_by_share_token(self, token: str) -> Optional[TripDetail]:
         rows = self._rows("SELECT id FROM trips WHERE share_token = ?", (token,)) if token else []
@@ -347,13 +443,14 @@ class Database:
     def _covers(self, trip_id: Optional[str] = None) -> dict[str, dict]:
         """One cover photo per trip: the first saved place with a photo, preferring real
         photos over reel frames (those often carry caption text)."""
-        sql = "SELECT id, trip_id, photos FROM places WHERE photos IS NOT NULL AND photos != '[]'"
+        sql = ("SELECT p.id, tp.trip_id, p.photos, p.created_at FROM trip_places tp JOIN places p ON p.id = tp.place_id "
+               "WHERE p.photos IS NOT NULL AND p.photos != '[]'")
         args: tuple = ()
         if trip_id:
-            sql += " AND trip_id = ?"
+            sql += " AND tp.trip_id = ?"
             args = (trip_id,)
         best: dict[str, tuple[int, dict]] = {}
-        for row in self._rows(sql + " ORDER BY created_at", args):
+        for row in self._rows(sql + " ORDER BY p.created_at", args):
             refs = list(enumerate(json.loads(row["photos"])))
             i, ref = next(((i, r) for i, r in refs if r["source"] != "reel"), refs[0])
             rank = 1 if ref["source"] == "reel" else 0
@@ -404,19 +501,84 @@ class Database:
     def add_mention(self, place_id: str, reel_id: str) -> None:
         self._exec("INSERT OR IGNORE INTO place_mentions (place_id, reel_id) VALUES (?, ?)", (place_id, reel_id))
 
-    def get_place(self, place_id: str) -> Optional[Place]:
-        rows = self._rows(f"{PLACE_SELECT} WHERE p.id = ?", (place_id,))
+    def get_place(self, place_id: str, trip_id: Optional[str] = None) -> Optional[Place]:
+        """The place itself, or as a stop on a trip (None if it isn't on that trip)."""
+        if trip_id:
+            rows = self._rows(f"{TRIP_PLACE_SELECT} WHERE p.id = ? AND tp.trip_id = ?", (place_id, trip_id))
+        else:
+            rows = self._rows(f"{PLACE_SELECT} WHERE p.id = ?", (place_id,))
         return self._place(rows[0]) if rows else None
 
-    def list_places(self, trip_id: Optional[str] = None) -> list[Place]:
+    def list_places(self, trip_id: Optional[str] = None, saved_only: bool = False) -> list[Place]:
+        """A trip's stops, or every place (saved_only: leave out AI suggestions you haven't kept)."""
         if trip_id:
-            rows = self._rows(f"{PLACE_SELECT} WHERE p.trip_id = ? ORDER BY p.created_at, p.rowid", (trip_id,))
+            rows = self._rows(f"{TRIP_PLACE_SELECT} WHERE tp.trip_id = ? ORDER BY tp.added_at, p.created_at, p.rowid", (trip_id,))
         else:
-            rows = self._rows(f"{PLACE_SELECT} ORDER BY p.created_at, p.rowid")
+            rows = self._rows(f"{PLACE_SELECT}{' WHERE p.saved = 1' if saved_only else ''} ORDER BY p.created_at, p.rowid")
         return [self._place(r) for r in rows]
 
-    def update_place(self, place_id: str, **changes: Any) -> None:
-        self._update("places", place_id, PLACE_COLUMNS, changes)
+    def find_saved(self, name: str, city: Optional[str] = None) -> Optional[Place]:
+        """A saved place with this name (in this city, when given): saving it again shouldn't duplicate it."""
+        key = normalize(name)
+        for row in self._rows("SELECT id, name, city FROM places WHERE saved = 1"):
+            if normalize(row["name"]) == key and (not city or not row["city"] or normalize(row["city"]) == normalize(city)):
+                return self.get_place(row["id"])
+        return None
+
+    def update_place(self, place_id: str, trip_id: Optional[str] = None, **changes: Any) -> None:
+        """Updates a place. Its day, order, time slot and note are per trip, so changing them needs trip_id;
+        start_time with trip_id is the stop's exact time on that trip, without it an event's own start."""
+        member = {k: v for k, v in changes.items() if k in MEMBER_COLUMNS and (trip_id or k != "start_time")}
+        if member and not trip_id:
+            raise ValueError(f"{', '.join(member)} belong to a trip; pass trip_id")
+        if member:
+            assignments = ", ".join(f"{k} = ?" for k in member)
+            self._exec(f"UPDATE trip_places SET {assignments} WHERE trip_id = ? AND place_id = ?",
+                       [_encode(k, v) for k, v in member.items()] + [trip_id, place_id])
+        self._update("places", place_id, PLACE_COLUMNS, {k: v for k, v in changes.items() if k not in member})
+
+    # ---------- Trip stops and folders ----------
+
+    def add_to_trip(self, trip_id: str, place_id: str, suggested: bool = False, note: Optional[str] = None) -> bool:
+        cur = self._exec("INSERT OR IGNORE INTO trip_places (trip_id, place_id, suggested, suggestion_note, added_at) VALUES (?, ?, ?, ?, ?)",
+                         (trip_id, place_id, int(suggested), note, now().isoformat()))
+        return cur.rowcount > 0
+
+    def remove_from_trip(self, trip_id: str, place_id: str) -> None:
+        self._exec("DELETE FROM trip_places WHERE trip_id = ? AND place_id = ?", (trip_id, place_id))
+
+    def list_folders(self) -> list[Folder]:
+        rows = self._rows("SELECT f.*, (SELECT COUNT(*) FROM folder_places fp WHERE fp.folder_id = f.id) AS place_count "
+                          "FROM folders f ORDER BY f.created_at DESC")
+        covers: dict[str, list[dict]] = {}
+        for r in self._rows("SELECT fp.folder_id, p.id, p.photos FROM folder_places fp JOIN places p ON p.id = fp.place_id "
+                            "WHERE p.photos IS NOT NULL AND p.photos != '[]' ORDER BY fp.added_at DESC"):
+            refs = json.loads(r["photos"])
+            if refs and len(covers.setdefault(r["folder_id"], [])) < 4:
+                i, ref = next(((i, x) for i, x in enumerate(refs) if x["source"] != "reel"), (0, refs[0]))
+                covers[r["folder_id"]].append({"source": ref["source"], "url": self.photo_url(r["id"], i, ref["ref"]), "attribution": ref.get("attribution")})
+        return [Folder(id=r["id"], name=r["name"], created_at=r["created_at"], place_count=r["place_count"], covers=covers.get(r["id"], []))
+                for r in rows]
+
+    def get_folder(self, folder_id: str) -> Optional[Folder]:
+        return next((f for f in self.list_folders() if f.id == folder_id), None)
+
+    def create_folder(self, name: str) -> Folder:
+        folder_id = new_id()
+        self._exec("INSERT INTO folders (id, name, created_at) VALUES (?, ?, ?)", (folder_id, name, now().isoformat()))
+        return self.get_folder(folder_id)
+
+    def rename_folder(self, folder_id: str, name: str) -> None:
+        self._exec("UPDATE folders SET name = ? WHERE id = ?", (name, folder_id))
+
+    def delete_folder(self, folder_id: str) -> None:
+        self._exec("DELETE FROM folders WHERE id = ?", (folder_id,))
+
+    def add_to_folder(self, folder_id: str, place_id: str) -> None:
+        self._exec("INSERT OR IGNORE INTO folder_places (folder_id, place_id, added_at) VALUES (?, ?, ?)", (folder_id, place_id, now().isoformat()))
+
+    def remove_from_folder(self, folder_id: str, place_id: str) -> None:
+        self._exec("DELETE FROM folder_places WHERE folder_id = ? AND place_id = ?", (folder_id, place_id))
 
     def delete_place(self, place_id: str) -> None:
         self._exec("DELETE FROM places WHERE id = ?", (place_id,))
@@ -439,6 +601,19 @@ class Database:
         data["reel_ids"] = sorted(mentions.split(","), key=lambda r: r != data["reel_id"]) if mentions else []
         data["mention_count"] = len(data["reel_ids"])
         data["opening_hours"] = json.loads(data["opening_hours"]) if data.get("opening_hours") else None
+        data["trip_ids"] = (data.pop("trip_list", None) or "").split(",") if data.get("trip_list") else []
+        data.pop("trip_list", None)
+        data["folder_ids"] = (data.pop("folder_list", None) or "").split(",") if data.get("folder_list") else []
+        data.pop("folder_list", None)
+        data["saved"] = bool(data.get("saved", 1))
+        event_time = data["start_time"] if data["category"] == "event" else None
+        if "m_trip" in data:  # as a stop on a trip
+            data.update(trip_id=data.pop("m_trip"), day_number=data.pop("m_day_number"), day_order=data.pop("m_day_order") or 0,
+                        time_of_day=data.pop("m_time_of_day"), day_note=data.pop("m_day_note"),
+                        start_time=data.pop("m_start_time") or event_time, suggested=bool(data.pop("m_suggested")),
+                        suggestion_note=data.pop("m_suggestion_note"))
+        else:
+            data.update(trip_id=None, day_number=None, day_order=0, time_of_day=None, day_note=None, start_time=event_time)
         return Place(**data)
 
     # ---------- Reels ----------
@@ -466,7 +641,7 @@ class Database:
                "FROM reels r")
         params: tuple = ()
         if trip_id:
-            sql += " WHERE r.trip_id = ? OR r.id IN (SELECT reel_id FROM places WHERE trip_id = ?)"
+            sql += " WHERE r.trip_id = ? OR r.id IN (SELECT m.reel_id FROM place_mentions m JOIN trip_places tp ON tp.place_id = m.place_id WHERE tp.trip_id = ?)"
             params = (trip_id, trip_id)
         rows = self._rows(sql + " ORDER BY r.imported_at DESC", params)
         return [Reel(**dict(r)) for r in rows]
@@ -663,6 +838,7 @@ class Database:
             result=_load_result(row["result"]),
             warnings=json.loads(row["warnings"]),
             trip_id=row["trip_id"],
+            reel_id=row["reel_id"],
             added_places=row["added_places"],
         )
 

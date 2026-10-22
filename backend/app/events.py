@@ -237,16 +237,18 @@ class EventsService:
         event = next((e for e in (stored.events if stored else []) if e.id == event_id), None)
         if event is None:
             return None, False
-        existing = self.library._same_name(trip.id, event.name)
+        existing = self.library.db.find_saved(event.name, trip.city)
         if existing:
-            return existing, False
+            self.library.db.add_to_trip(trip.id, existing.id)
+            return self.library.db.get_place(existing.id, trip.id), False
         day_part, _, time_part = event.start_at.partition("T")
         place = self.library.db.add_place(
-            trip_id=trip.id, name=event.name, category="event",
+            name=event.name, category="event",
             summary=" · ".join(p for p in (event.genre, event.venue) if p), event_date=date.fromisoformat(day_part), venue=event.venue, city=trip.city, country=trip.country,
             address=event.address, latitude=event.latitude, longitude=event.longitude, website=event.url,
             start_time=time_part or None,
         )
+        self.library.db.add_to_trip(trip.id, place.id)
         if event.day:
-            self.library.move_to(self.library.db.get_place(place.id), event.day, None)
-        return self.library.db.get_place(place.id), True
+            self.library.move_to(self.library.db.get_place(place.id, trip.id), event.day, None)
+        return self.library.db.get_place(place.id, trip.id), True

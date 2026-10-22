@@ -28,6 +28,8 @@ from app.models import (
     BookingNeedResult,
     EventNote,
     DiscoverNotes,
+    PlaceSuggestion,
+    SuggestionResult,
     Lounge,
     LoungeList,
     DiscoverNote,
@@ -93,7 +95,7 @@ class FakeMessages:
 
 
 class FakeGeocoder:
-    COORDS = {"Joe's Pizza": (40.7305, -74.0021), "Prince Street Pizza": (40.7231, -73.9945)}
+    COORDS = {"Joe's Pizza": (40.7305, -74.0021), "Prince Street Pizza": (40.7231, -73.9945), "Russ & Daughters": (40.7223, -73.9883)}
 
     def __init__(self):
         self.queries = []
@@ -251,10 +253,35 @@ def wait_for(c, job_id):
     raise AssertionError("job did not finish")
 
 
-def import_reel(c, url="https://vm.tiktok.com/ZMabc/"):
+def import_reel_trip(c, job):
+    """Puts a finished job's places on a trip for their city; returns the trip id."""
+    places = [p for p in c.get("/v1/places", headers=H).json() if job["reel_id"] in p["reel_ids"]]
+    return c.post("/v1/trips", json={"city": places[0]["city"] or "Saved places", "place_ids": [p["id"] for p in places]}, headers=H).json()["id"]
+
+
+def import_reel(c, url="https://vm.tiktok.com/ZMabc/", trip=True):
+    """Imports a reel. Places go to Saved; with trip=True (most tests) they're then put on a trip for their
+    city, the way the person would, and the job's trip_id points at it."""
     r = c.post("/v1/jobs", json={"url": url}, headers=H)
     assert r.status_code == 202, r.text
-    return wait_for(c, r.json()["id"])
+    job = wait_for(c, r.json()["id"])
+    if not trip or job["status"] != "done":
+        return job
+    places = [p for p in c.get("/v1/places", headers=H).json() if job["reel_id"] in p["reel_ids"]]
+    if not places:
+        return job
+    city = places[0]["city"] or "Saved places"
+    existing = next((t for t in c.get("/v1/trips", headers=H).json() if t["city"] == city), None)
+    if existing:
+        c.post(f"/v1/trips/{existing['id']}/places", json={"place_ids": [p["id"] for p in places]}, headers=H)
+        job["trip_id"] = existing["id"]
+    else:
+        made = c.post("/v1/trips", json={"city": city, "days": 1, "place_ids": [p["id"] for p in places]}, headers=H)
+        assert made.status_code == 201, made.text
+        trip_id = made.json()["id"]
+        c.delete(f"/v1/trips/{trip_id}/plan", headers=H)  # no days yet, like a trip from before
+        job["trip_id"] = trip_id
+    return job
 
 
 # ---------- Jobs ----------
@@ -286,6 +313,12 @@ def test_job_saves_places_into_a_trip(client):
     assert call["fallbacks"] == "default"
     assert any(b["type"] == "image" for b in call["messages"][0]["content"])
 
+    # Places go to Saved; no trip is made until you make one.
+    assert client.get("/v1/trips", headers=H).json() == []
+    saved = client.get("/v1/places", headers=H).json()
+    assert len(saved) == 3 and all(p["trip_ids"] == [] and job["reel_id"] in p["reel_ids"] for p in saved)
+    made = client.post("/v1/trips", json={"city": "New York", "days": 2, "place_ids": [p["id"] for p in saved]}, headers=H).json()
+    job["trip_id"] = made["id"]
     trips = client.get("/v1/trips", headers=H).json()
     assert len(trips) == 1
     assert trips[0]["name"] == "New York"
@@ -416,7 +449,7 @@ def test_rename_and_delete_trip(client):
     assert r.json()["name"] == "NYC with Sam"
     assert client.delete(f"/v1/trips/{job['trip_id']}", headers=H).status_code == 204
     assert client.get("/v1/trips", headers=H).json() == []
-    assert client.get("/v1/places", headers=H).json() == []
+    assert len(client.get("/v1/places", headers=H).json()) == 3  # the places stay saved
 
 
 def test_web_app_is_served(client):
@@ -1016,18 +1049,19 @@ def test_search_and_add_place(client):
     r = client.post("/v1/places", json={"candidate_id": "google:lucali1"}, headers=H)
     assert r.status_code == 201
     place = r.json()["place"]
-    assert place["trip_id"] == job["trip_id"]  # matched the New York trip by city
+    assert place["trip_ids"] == [] and place["city"] == "New York"  # saved, not put on a trip
     assert place["opening_hours"]["weekly"] and place["photos"][0]["source"] == "google"
     assert place["mention_count"] == 0
 
     assert client.post("/v1/places", json={"candidate_id": "google:nope"}, headers=H).status_code == 422
-    assert client.post("/v1/places", json={"name": "Somewhere"}, headers=H).status_code == 422
+    assert client.post("/v1/places", json={}, headers=H).status_code == 422
     r = client.post("/v1/places", json={"name": "Joe's Pizza", "trip_id": job["trip_id"]}, headers=H)
     assert r.json()["created"] is False
     r = client.post("/v1/places", json={"name": "Café de Flore", "city": "Paris", "category": "cafe"}, headers=H)
     assert r.status_code == 201
-    paris = client.get(f"/v1/trips/{r.json()['place']['trip_id']}", headers=H).json()
-    assert paris["name"] == "Paris" and paris["places"][0]["category"] == "cafe"
+    flore = r.json()["place"]
+    assert flore["city"] == "Paris" and flore["category"] == "cafe" and flore["trip_ids"] == []
+    assert len(client.get("/v1/trips", headers=H).json()) == 1  # no Paris trip was made for it
 
 
 def test_map_link_parsing():
@@ -1074,7 +1108,7 @@ def test_add_place_from_map_link(client):
     assert r.status_code == 201
     place = r.json()["place"]
     assert place["name"] == "Nothing Here" and place["latitude"] == pytest.approx(40.75)
-    assert place["trip_id"] == job["trip_id"]  # within 50 km of the New York trip
+    assert place["trip_ids"] == []  # saved on its own
     assert client.post("/v1/places/from-link", json={"url": "https://example.com/x"}, headers=H).status_code == 422
 
 
@@ -1093,7 +1127,7 @@ def test_screenshot_import(client):
     assert job["status"] == "done" and job["added_places"] == 3
     call = client.messages.calls[-1]["messages"][0]["content"]
     assert call[0]["text"] == "Screenshot 1:" and "from a blog" in call[-1]["text"]
-    trip = client.get(f"/v1/trips/{job['trip_id']}", headers=H).json()
+    trip = client.get(f"/v1/trips/{import_reel_trip(client, job)}", headers=H).json()
     assert trip["reels"][0]["platform"] == "screenshot"
     assert trip["places"][0]["photos"][0]["attribution"] == "From your screenshot"
     assert not any(client.uploads.iterdir())  # cleaned up after success
@@ -1164,8 +1198,8 @@ def test_push_subscription_and_import_notification(client):
     request = client.push_log[-1]
     assert str(request.url) == endpoint and request.headers["content-encoding"] == "aes128gcm"
     message = _json.loads(_decrypt_push(request.content, ua_key, auth))
-    assert message["title"] == "3 new places saved to New York"
-    assert message["url"] == f"/#/trip/{job['trip_id']}" and "@slicehunter" in message["body"]
+    assert message["title"] == "3 new places saved in New York"
+    assert message["url"] == f"/#/saved?reel={job['reel_id']}" and "@slicehunter" in message["body"]
 
     # The VAPID token is signed by the server's key and addressed to the push service.
     token = request.headers["authorization"].split("t=")[1].split(",")[0]
@@ -1552,8 +1586,7 @@ def test_bookings_crud_in_trip_detail(client):
 
     other = client.post("/v1/places", json={"name": "Elsewhere", "city": "Paris"}, headers=H).json()["place"]
     assert client.post(f"/v1/trips/{trip_id}/bookings", json={"kind": "reservation", "title": "x", "place_id": other["id"]}, headers=H).status_code == 422
-    other_trip = client.get("/v1/trips", headers=H).json()
-    paris = next(t for t in other_trip if t["id"] != trip_id)["id"]
+    paris = client.post("/v1/trips", json={"city": "Paris", "place_ids": [other["id"]]}, headers=H).json()["id"]
     assert client.patch(f"/v1/trips/{paris}/bookings/{bookings[0]['id']}", json={"notes": "x"}, headers=H).status_code == 404
     assert client.delete(f"/v1/trips/{paris}/bookings/{bookings[0]['id']}", headers=H).status_code == 404
     assert client.post("/v1/trips/nope/bookings", json=flight, headers=H).status_code == 404
@@ -2262,30 +2295,15 @@ def test_event_added_to_the_trip(client):
 # ---------- Local collections ----------
 
 
-def test_places_in_the_home_city_go_to_a_local_collection(client):
+def test_home_city_is_kept_for_discover(client):
     assert client.get("/v1/home", headers=H).json() is None
     home = client.put("/v1/home", json={"city": "new york"}, headers=H)
     assert home.status_code == 200 and home.json()["city"] == "New York" and home.json()["country"] == "USA"
     assert client.get("/v1/home", headers=H).json()["latitude"] == pytest.approx(40.6818)
-
-    job = import_reel(client)  # three New York places
-    trip = client.get(f"/v1/trips/{job['trip_id']}", headers=H).json()
-    assert trip["kind"] == "local" and trip["place_count"] == 3
-    # A place added by name for another city is still a trip.
-    paris = client.post("/v1/places", json={"name": "Café de Flore", "city": "Paris"}, headers=H).json()["place"]
-    assert client.get(f"/v1/trips/{paris['trip_id']}", headers=H).json()["kind"] == "trip"
-    assert {t["kind"] for t in client.get("/v1/trips", headers=H).json()} == {"local", "trip"}
-
-    # A trip can be switched either way, and a name left alone.
-    swapped = client.patch(f"/v1/trips/{paris['trip_id']}", json={"kind": "local"}, headers=H).json()
-    assert swapped["kind"] == "local" and swapped["name"] == "Paris"
-    assert client.patch(f"/v1/trips/{paris['trip_id']}", json={"kind": "boat"}, headers=H).status_code == 422
-    assert client.patch(f"/v1/trips/{paris['trip_id']}", json={"kind": None, "name": "Paris trip"}, headers=H).json()["kind"] == "local"
-
+    import_reel(client, trip=False)  # local places are simply saved; nothing becomes a trip
+    assert client.get("/v1/trips", headers=H).json() == []
     assert client.delete("/v1/home", headers=H).status_code == 204
     assert client.get("/v1/home", headers=H).json() is None
-    again = client.post("/v1/places", json={"name": "Somewhere", "city": "Rome"}, headers=H).json()["place"]
-    assert client.get(f"/v1/trips/{again['trip_id']}", headers=H).json()["kind"] == "trip"
 
 
 def test_home_city_must_be_found(client):
@@ -2376,7 +2394,8 @@ def test_curated_edits_with_claude_and_offline(client):
 
     client.delete(f"/v1/places/{ids[1]}", headers=H)
     client.delete(f"/v1/places/{ids[2]}", headers=H)
-    small = client.post("/v1/places", json={"name": "X", "city": "Oslo"}, headers=H).json()["place"]["trip_id"]
+    x = client.post("/v1/places", json={"name": "X", "city": "Oslo"}, headers=H).json()["place"]["id"]
+    small = client.post("/v1/trips", json={"city": "Oslo", "place_ids": [x]}, headers=H).json()["id"]
     assert client.post(f"/v1/trips/{small}/edits", headers=H).status_code == 422
 
 
@@ -2599,3 +2618,123 @@ def test_calendar_feed_subscription(client):
     client.delete("/v1/calendar/feed", headers=H)
     assert client.get("/" + new["url"].split("/", 3)[3]).status_code == 404
     assert client.get("/v1/calendar/item.ics?id=event:x&sig=bad").status_code in (403, 404)
+
+
+# ---------- Library: saved places, folders, trips made on purpose ----------
+
+
+def saved_ids(client):
+    return {p["name"]: p["id"] for p in client.get("/v1/places", headers=H).json()}
+
+
+def test_folders_hold_saved_places(client):
+    import_reel(client, trip=False)
+    ids = saved_ids(client)
+    folder = client.post("/v1/folders", json={"name": "  Pizza   nights ", "place_ids": [ids["Lucali"], ids["Joe's Pizza"]]}, headers=H).json()
+    assert folder["name"] == "Pizza nights" and folder["place_count"] == 2
+    brunch = client.post("/v1/folders", json={"name": "Brunch"}, headers=H).json()
+    client.post(f"/v1/folders/{brunch['id']}/places", json={"place_ids": [ids["Lucali"]]}, headers=H)
+    lucali = next(p for p in client.get("/v1/places", headers=H).json() if p["name"] == "Lucali")
+    assert set(lucali["folder_ids"]) == {folder["id"], brunch["id"]}  # one place, two folders
+    assert client.patch(f"/v1/folders/{folder['id']}", json={"name": "Slices"}, headers=H).json()["name"] == "Slices"
+    joes = ids["Joe's Pizza"]
+    assert client.delete(f"/v1/folders/{folder['id']}/places/{joes}", headers=H).json()["place_count"] == 1
+    assert client.delete(f"/v1/folders/{folder['id']}", headers=H).status_code == 204
+    assert len(client.get("/v1/places", headers=H).json()) == 3  # deleting a folder keeps its places
+    assert [f["name"] for f in client.get("/v1/folders", headers=H).json()] == ["Brunch"]
+    assert client.post("/v1/folders", json={"name": ""}, headers=H).status_code == 422
+    # Adding a place straight into a folder.
+    r = client.post("/v1/places", json={"name": "Café de Flore", "city": "Paris", "folder_id": brunch["id"]}, headers=H).json()
+    assert brunch["id"] in r["place"]["folder_ids"]
+
+
+def test_one_place_in_two_trips_keeps_separate_days(client):
+    import_reel(client, trip=False)
+    ids = saved_ids(client)
+    may = client.post("/v1/trips", json={"city": "New York", "name": "May", "days": 2, "place_ids": list(ids.values())}, headers=H).json()
+    dec = client.post("/v1/trips", json={"city": "New York", "name": "December", "days": 1, "place_ids": [ids["Lucali"]]}, headers=H).json()
+    assert may["planned_by"] == "you" and may["day_count"] == 2 and dec["day_count"] == 1
+    client.post(f"/v1/trips/{may['id']}/add-to-day", json={"place_ids": [ids["Lucali"]], "day": 2}, headers=H)
+    client.post(f"/v1/trips/{dec['id']}/add-to-day", json={"place_ids": [ids["Lucali"]], "day": 1}, headers=H)
+    client.patch(f"/v1/places/{ids['Lucali']}", json={"trip_id": dec["id"], "start_time": "20:00"}, headers=H)
+    in_may = next(p for p in client.get(f"/v1/trips/{may['id']}", headers=H).json()["places"] if p["name"] == "Lucali")
+    in_dec = next(p for p in client.get(f"/v1/trips/{dec['id']}", headers=H).json()["places"] if p["name"] == "Lucali")
+    assert (in_may["day_number"], in_may["start_time"]) == (2, None) and (in_dec["day_number"], in_dec["start_time"]) == (1, "20:00")
+    # A star is the place's own: it shows in both trips.
+    client.patch(f"/v1/places/{ids['Lucali']}", json={"must_do": True}, headers=H)
+    assert all(next(p for p in client.get(f"/v1/trips/{t}", headers=H).json()["places"] if p["name"] == "Lucali")["must_do"] for t in (may["id"], dec["id"]))
+    # In two trips, a day change must say which trip.
+    assert client.patch(f"/v1/places/{ids['Lucali']}", json={"day_number": 1}, headers=H).status_code == 422
+    # Taking it off one trip leaves it saved and on the other.
+    client.delete(f"/v1/trips/{may['id']}/places/{ids['Lucali']}", headers=H)
+    lucali = next(p for p in client.get("/v1/places", headers=H).json() if p["name"] == "Lucali")
+    assert lucali["trip_ids"] == [dec["id"]]
+    # Deleting the place itself removes it everywhere.
+    client.delete(f"/v1/places/{ids['Lucali']}", headers=H)
+    assert not client.get(f"/v1/trips/{dec['id']}", headers=H).json()["places"]
+
+
+def test_ai_trip_with_suggestions_for_quiet_days(client):
+    import_reel(client, trip=False)
+    ids = saved_ids(client)
+    client.messages.outputs[PlanResult] = PlanResult(days=[
+        PlannedDay(day_number=1, title="Pizza", stops=[PlannedStop(place_id=ids["Joe's Pizza"], time_of_day="lunch", note=None),
+                                                       PlannedStop(place_id=ids["Lucali"], time_of_day="dinner", note=None)]),
+        PlannedDay(day_number=2, title="Nolita", stops=[PlannedStop(place_id=ids["Prince Street Pizza"], time_of_day="afternoon", note=None)]),
+    ], unscheduled_place_ids=[], notes=None)
+    client.messages.outputs[SuggestionResult] = SuggestionResult(suggestions=[
+        PlaceSuggestion(name="Lucali", category="food", neighborhood=None, day=2, time_of_day="dinner", why="dup"),  # already planned
+        PlaceSuggestion(name="Russ & Daughters", category="food", neighborhood="Lower East Side", day=2, time_of_day="morning", why="Bagels to start the day"),
+        PlaceSuggestion(name="Nothing Real", category="food", neighborhood=None, day=2, time_of_day=None, why="x"),  # not on the map
+        PlaceSuggestion(name="The Met", category="attraction", neighborhood=None, day=9, time_of_day=None, why="x"),  # no such day
+    ])
+    trip = client.post("/v1/trips", json={"city": "New York", "days": 2, "plan": "ai", "fill_gaps": True,
+                                          "place_ids": list(ids.values())}, headers=H).json()
+    assert trip["planned_by"] == "claude" and trip["day_count"] == 2
+    suggested = [p for p in trip["places"] if p["suggested"]]
+    assert len(suggested) == 1 and suggested[0]["day_number"] == 2 and suggested[0]["suggestion_note"] == "Bagels to start the day"
+    assert suggested[0]["saved"] is False
+    assert suggested[0]["id"] not in {p["id"] for p in client.get("/v1/places", headers=H).json()}  # not in Saved until kept
+    sent = client.messages.calls[-1]["messages"][0]["content"][0]["text"]
+    assert '"quiet_days"' in sent and '"day": 2' in sent
+    # Keep it: it joins Saved.
+    kept = client.post(f"/v1/trips/{trip['id']}/places/{suggested[0]['id']}/keep", headers=H).json()
+    assert not next(p for p in kept["places"] if p["id"] == suggested[0]["id"])["suggested"]
+    assert suggested[0]["id"] in {p["id"] for p in client.get("/v1/places", headers=H).json()}
+
+
+def test_removing_a_suggestion_drops_it(client):
+    import_reel(client, trip=False)
+    ids = saved_ids(client)
+    trip = client.post("/v1/trips", json={"city": "New York", "days": 2, "place_ids": [ids["Lucali"]]}, headers=H).json()
+    client.messages.outputs[SuggestionResult] = SuggestionResult(suggestions=[
+        PlaceSuggestion(name="Russ & Daughters", category="food", neighborhood=None, day=1, time_of_day=None, why="Bagels")])
+    trip = client.post(f"/v1/trips/{trip['id']}/suggest", headers=H).json()
+    s = next(p for p in trip["places"] if p["suggested"])
+    trip = client.delete(f"/v1/trips/{trip['id']}/places/{s['id']}", headers=H).json()
+    assert all(p["id"] != s["id"] for p in trip["places"])
+    assert client.get(f"/v1/places/{s['id']}/menu", headers=H).status_code == 404  # gone altogether
+
+
+def test_old_trips_become_folders_or_stay_trips(tmp_path):
+    import sqlite3
+    from app import db as dbmod
+    path = tmp_path / "old.db"
+    old_schema = dbmod.SCHEMA.replace("trip_id TEXT,  -- unused since saved places moved out of trips (see trip_places)",
+                                      "trip_id TEXT NOT NULL REFERENCES trips(id) ON DELETE CASCADE,")
+    conn = sqlite3.connect(path)
+    conn.executescript(old_schema)
+    conn.execute("INSERT INTO trips (id, name, city, created_at, day_count, day_titles) VALUES ('t1', 'New York', 'New York', '2026-01-01', 2, '[\"A\",\"B\"]')")
+    conn.execute("INSERT INTO trips (id, name, city, created_at) VALUES ('t2', 'Lisbon', 'Lisbon', '2026-01-02')")
+    for pid, trip, day in (("p1", "t1", 1), ("p2", "t1", 2), ("p3", "t2", None)):
+        conn.execute("INSERT INTO places (id, trip_id, name, created_at, day_number, day_order) VALUES (?, ?, ?, '2026-01-01', ?, 0)", (pid, trip, pid, day))
+    conn.commit()
+    conn.close()
+    db = dbmod.Database(str(path))
+    assert [t.name for t in db.list_trips()] == ["New York"]  # the planned trip stays
+    assert {p.id: p.day_number for p in db.list_places("t1")} == {"p1": 1, "p2": 2}
+    assert [(f.name, f.place_count) for f in db.list_folders()] == [("Lisbon", 1)]  # the unplanned one became a folder
+    assert {p.id for p in db.list_places(saved_only=True)} == {"p1", "p2", "p3"}
+    db.delete_trip("t1")
+    assert len(db.list_places(saved_only=True)) == 3  # trips no longer take their places with them
+    dbmod.Database(str(path))  # opening again doesn't migrate twice

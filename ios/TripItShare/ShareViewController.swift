@@ -2,8 +2,8 @@ import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
 
-/// Receives a TikTok / Instagram link from the share sheet, starts processing on the backend and
-/// queues it for the app. The extension stays short-lived; the app saves the places when opened.
+/// "Share → TripIt" from TikTok, Instagram, YouTube, Maps or Safari: sends the link to your TripIt account,
+/// which finds the places in the background (you get them in Saved a minute later).
 final class ShareViewController: UIViewController {
     private let model = ShareModel()
 
@@ -12,7 +12,6 @@ final class ShareViewController: UIViewController {
         model.onFinish = { [weak self] in
             self?.extensionContext?.completeRequest(returningItems: nil)
         }
-
         let host = UIHostingController(rootView: ShareView(model: model))
         addChild(host)
         host.view.translatesAutoresizingMaskIntoConstraints = false
@@ -24,7 +23,6 @@ final class ShareViewController: UIViewController {
             host.view.bottomAnchor.constraint(equalTo: view.bottomAnchor),
         ])
         host.didMove(toParent: self)
-
         Task { await model.handle(items: extensionContext?.inputItems as? [NSExtensionItem] ?? []) }
     }
 }
@@ -33,7 +31,7 @@ final class ShareViewController: UIViewController {
 final class ShareModel: ObservableObject {
     enum Phase: Equatable {
         case working
-        case saved(String)
+        case saved
         case error(String)
     }
 
@@ -43,27 +41,41 @@ final class ShareModel: ObservableObject {
     func handle(items: [NSExtensionItem]) async {
         let (url, text) = await Self.loadLink(from: items)
         guard let url else {
-            phase = .error("Couldn't find a link to save. Share a TikTok or Instagram post.")
+            phase = .error("There's no link to save here. Share a TikTok, Instagram or YouTube post, or a map link.")
             return
         }
-
-        var pending = PendingImport(url: url.absoluteString, sharedText: text)
-        // Kick off the backend job now so the places are often ready by the time the app opens.
-        // If this fails (offline, slow server) the app submits it later.
-        do {
-            let job = try await APIClient(timeout: 10).createJob(url: pending.url, sharedText: text)
-            pending.jobID = job.id
-            pending.state = .processing
-        } catch {
-            pending.message = error.localizedDescription
+        guard let token = SessionStore.token else {
+            phase = .error("Open TripIt and sign in first, then share again.")
+            return
         }
-        PendingImportStore.add(pending)
+        do {
+            try await Self.send(url: url, text: text, token: token)
+            phase = .saved
+            try? await Task.sleep(for: .seconds(1.4))
+            onFinish()
+        } catch ShareError.signedOut {
+            SessionStore.clear()
+            phase = .error("You've been signed out. Open TripIt, sign in, then share again.")
+        } catch {
+            phase = .error("Couldn't reach TripIt. Check your connection and try again.")
+        }
+    }
 
-        phase = .saved(pending.state == .processing
-                       ? "Finding places… open TripIt to see them on your map."
-                       : "Saved. TripIt will process it when you open the app.")
-        try? await Task.sleep(for: .seconds(1.6))
-        onFinish()
+    enum ShareError: Error { case signedOut, server }
+
+    private static func send(url: URL, text: String?, token: String) async throws {
+        var request = URLRequest(url: AppConfig.baseURL.appendingPathComponent("v1/jobs"))
+        request.httpMethod = "POST"
+        request.timeoutInterval = 20
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        var body: [String: String] = ["url": url.absoluteString]
+        if let text, !text.isEmpty { body["shared_text"] = String(text.prefix(4000)) }
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let (_, response) = try await URLSession.shared.data(for: request)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        if status == 401 || status == 403 { throw ShareError.signedOut }
+        if !(200..<300).contains(status) { throw ShareError.server }
     }
 
     private static func loadLink(from items: [NSExtensionItem]) async -> (URL?, String?) {
@@ -95,23 +107,24 @@ struct ShareView: View {
     @ObservedObject var model: ShareModel
 
     var body: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: 14) {
             switch model.phase {
             case .working:
                 ProgressView()
                 Text("Saving to TripIt…").font(.headline)
-            case .saved(let message):
-                Image(systemName: "mappin.circle.fill")
-                    .font(.system(size: 48))
-                    .foregroundStyle(.tint)
-                Text("Saved to TripIt").font(.headline)
-                Text(message).font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
+            case .saved:
+                Image(systemName: "bookmark.circle.fill")
+                    .font(.system(size: 52))
+                    .foregroundStyle(Color(red: 0.17, green: 0.13, blue: 0.10))
+                Text("Saved to TripIt").font(.title3.weight(.semibold))
+                Text("Finding the places now. They'll be in Saved in about a minute.")
+                    .font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
             case .error(let message):
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .font(.system(size: 44))
+                Image(systemName: "exclamationmark.circle.fill")
+                    .font(.system(size: 46))
                     .foregroundStyle(.orange)
                 Text(message).multilineTextAlignment(.center)
-                Button("Close") { model.onFinish() }.buttonStyle(.borderedProminent)
+                Button("Close") { model.onFinish() }.buttonStyle(.borderedProminent).tint(Color(red: 0.17, green: 0.13, blue: 0.10))
             }
         }
         .padding(32)

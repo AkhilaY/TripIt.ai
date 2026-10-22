@@ -1,35 +1,17 @@
 import Foundation
 
-/// Settings shared between the app and the Share Extension through the App Group.
+/// Settings shared by the app and the Share Extension, read from Info.plist (filled from Config/Secrets.xcconfig).
 enum AppConfig {
-    static let appGroupID: String = Bundle.main.object(forInfoDictionaryKey: "AppGroupID") as? String ?? ""
+    static let appGroupID: String = bundled("AppGroupID") ?? ""
 
-    static var sharedDefaults: UserDefaults {
-        UserDefaults(suiteName: appGroupID) ?? .standard
+    /// Where TripIt runs, e.g. https://my-tripit.fly.dev
+    static var baseURL: URL {
+        URL(string: (bundled("TripItAPIBaseURL") ?? "").trimmingCharacters(in: .whitespaces))
+            ?? URL(string: "https://my-tripit.fly.dev")!
     }
 
-    private enum Keys {
-        static let baseURL = "apiBaseURL"
-        static let apiKey = "apiKey"
-    }
-
-    /// Backend URL: the value set in Settings, falling back to the one baked in at build time.
-    static var apiBaseURL: URL? {
-        get {
-            let stored = sharedDefaults.string(forKey: Keys.baseURL)
-            let raw = (stored?.isEmpty == false ? stored : bundled("TripItAPIBaseURL")) ?? ""
-            return URL(string: raw.trimmingCharacters(in: .whitespaces))
-        }
-        set { sharedDefaults.set(newValue?.absoluteString, forKey: Keys.baseURL) }
-    }
-
-    static var apiKey: String {
-        get {
-            let stored = sharedDefaults.string(forKey: Keys.apiKey)
-            return (stored?.isEmpty == false ? stored : bundled("TripItAPIKey")) ?? ""
-        }
-        set { sharedDefaults.set(newValue, forKey: Keys.apiKey) }
-    }
+    /// The web app's sign-in cookie. The app copies it to the shared Keychain so the Share Extension can use it.
+    static let sessionCookie = "tripit_session"
 
     private static func bundled(_ key: String) -> String? {
         guard let value = Bundle.main.object(forInfoDictionaryKey: key) as? String,

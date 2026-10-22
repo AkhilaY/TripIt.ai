@@ -17,7 +17,6 @@ settings:
     DEVELOPMENT_TEAM: $(TRIPIT_TEAM_ID)
     CODE_SIGN_STYLE: Automatic
     APP_GROUP_ID: group.$(TRIPIT_BUNDLE_ID)
-    ICLOUD_CONTAINER_ID: iCloud.$(TRIPIT_BUNDLE_ID)
 
 targets:
   TripIt:

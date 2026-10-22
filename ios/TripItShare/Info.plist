@@ -41,7 +41,5 @@
 	<string>$(APP_GROUP_ID)</string>
 	<key>TripItAPIBaseURL</key>
 	<string>$(TRIPIT_API_BASE_URL)</string>
-	<key>TripItAPIKey</key>
-	<string>$(TRIPIT_API_KEY)</string>
 </dict>
 </plist>

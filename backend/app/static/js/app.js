@@ -453,6 +453,9 @@ const byPriority = (a, b) => (b.must_do - a.must_do) || ((b.mention_count || 0) 
 
 // ---------- Filters, sorting and starring (home "Places") ----------
 
+/** Running inside the TripIt iOS app (it adds this to the user agent): it has its own share button. */
+const NATIVE = /TripItiOS\//.test(navigator.userAgent);
+
 /** The chips on the home screen: friendlier groups of the app's categories. */
 const GROUPS = [
   { id: 'food', label: 'Food', cats: ['food', 'dessert'] },
@@ -2210,18 +2213,21 @@ const VIEWS = {
           <span class="s">${esc(tasteSummary(S.profile) || 'Tailors your edits, briefings and concierge')}</span></span>${ICON.chev}</a>
       </div></div>
 
-      <div class="section"><div class="section-h">Notifications</div><div class="group tiles">
+      ${NATIVE ? '' : `<div class="section"><div class="section-h">Notifications</div><div class="group tiles">
         <label class="row" for="push-toggle">${tile('red', 'bell')}<span class="main"><span class="t">Import notifications</span></span>
           <input class="switch" type="checkbox" id="push-toggle" data-act="pushtoggle" ${push === 'on' ? 'checked' : ''} ${['on', 'off'].includes(push) ? '' : 'disabled'}></label>
         ${push === 'on' ? `<button class="row" data-act="pushtest">${tile('gray', 'bell')}<span class="main"><span class="t link">Send a test notification</span></span></button>` : ''}
-      </div><div class="section-f">${pushNote}</div></div>
+      </div><div class="section-f">${pushNote}</div></div>`}
 
       <div class="section"><div class="section-h">Offline</div><div class="group tiles">
         <div class="row">${tile('teal', 'offline')}<span class="main"><span class="t">Works without signal</span>
           <span class="s">Trips you open are kept on this phone, with their photos and the map areas you’ve viewed. Today’s trip is saved automatically.</span></span></div>
       </div><div class="section-f">To save a whole trip before you go, open it and choose ••• → Save for offline.</div></div>
 
-      <div class="section"><div class="section-h">Share from TikTok &amp; Instagram</div><div class="group">
+      ${NATIVE ? `<div class="section"><div class="section-h">Share from TikTok &amp; Instagram</div><div class="group tiles">
+        <div class="row">${tile('indigo', 'share')}<span class="main"><span class="t">Share → TripIt</span>
+          <span class="s">In TikTok tap Share → More (•••); in Instagram tap the paper plane → Share to…. The places appear in Saved about a minute later.</span></span></div>
+      </div></div>` : `<div class="section"><div class="section-h">Share from TikTok &amp; Instagram</div><div class="group">
         <div class="row">${tile('indigo', 'share', 'md')}<span class="main"><span class="t b">iPhone share button</span><span class="s">A one-time shortcut in the Shortcuts app</span></span></div>
         <ol class="steps">
           <li>Open the <b>Shortcuts</b> app, tap <b>+</b> and name the shortcut <b>TripIt</b>.</li>
@@ -2246,7 +2252,7 @@ const VIEWS = {
           <li>Open this page in <b>Safari</b>.</li>
           <li>Tap the <b>Share</b> button, then <b>Add to Home Screen</b>.</li>
           <li>On Android, use Chrome’s <b>Install app</b> and TripIt appears in the share sheet automatically.</li>
-        </ol></div></div>
+        </ol></div></div>`}
 
       <div class="section"><div class="section-h">Server</div><div class="group tiles">
         <div class="row">${tile('gray', 'server')}<span class="main"><span class="s">Address</span><span class="t">${esc(origin)}</span></span></div>

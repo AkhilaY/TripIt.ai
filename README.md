@@ -23,7 +23,7 @@ TikTok / Instagram ──Share──▶ "TripIt" Shortcut ──POST /v1/jobs─
 |---|---|
 | `backend/app/` | FastAPI server: imports reels, stores trips, plans itineraries |
 | `backend/app/static/` | The web app (plain HTML/CSS/JS, no build step) |
-| `ios/` | Optional native SwiftUI app + Share Extension, for when you have an Apple Developer account (builds in CI) |
+| `ios/` | Optional native iOS app (the web app plus a Share Extension) for TestFlight and the App Store (builds in CI) |
 | `docs/iphone-shortcut.md` | Step-by-step iPhone share-sheet setup |
 
 ---
@@ -76,7 +76,7 @@ Other hosts work too, as long as they run the Docker image with a **persistent d
 
 ## 3. Set up your iPhone
 
-1. Open `https://<app>.fly.dev` in **Safari**, enter your API key, then tap **Share → Add to Home Screen**.
+1. Open `https://<app>.fly.dev` in **Safari**, sign in (or create your account; see [Accounts](#accounts)), then tap **Share → Add to Home Screen**.
 2. Create the **TripIt** Shortcut so it shows up in the share sheet. Your **Profile** in the app (the person button, top right) shows the exact steps with your server address and key ready to copy. They're also in [docs/iphone-shortcut.md](docs/iphone-shortcut.md).
 3. In TikTok tap **Share → More (•••) → TripIt**. In Instagram tap the **paper plane → Share to… → TripIt**. Open TripIt about 30–60 seconds later and the places are on the map.
 
@@ -232,4 +232,35 @@ All `/v1` routes need the `X-API-Key` header when `APP_API_KEY` is set.
 
 ## Native iOS app (optional)
 
-`ios/` has a native SwiftUI version with a real Share Extension and iCloud sync. It compiles in GitHub Actions on every push (no Mac needed). Installing it on a phone requires the Apple Developer Program ($99/year). It uses the same server.
+`ios/` is a small native app around the same web app: it shows TripIt full screen, keeps you signed in and adds a real **Share → TripIt** button to the share sheet, so you don't need the Shortcut. Nothing is duplicated. Every change to the web app shows up in the iOS app straight away, without an App Store update.
+
+- **App:** a web view of your server. It allows only your domain, so the offline mode (service worker) works. Pull down to refresh. Links to other sites open in an in-app Safari sheet, and calendar files and phone numbers go to the Calendar and Phone apps.
+- **Share Extension:** shares a TikTok, Instagram, YouTube, Maps or Safari link to `POST /v1/jobs` with your session (`Authorization: Bearer`). The places appear in **Saved** about a minute later. When you sign in, the app copies your session to the Keychain it shares with the extension (through the App Group). Signing out removes that copy. If you share while signed out, the extension asks you to open TripIt and sign in.
+- GitHub Actions compiles it for the simulator on every push, so you don't need a Mac to check that it builds.
+
+### Getting it on your phone (TestFlight)
+
+You need the **Apple Developer Program** ($99 a year, [developer.apple.com/programs](https://developer.apple.com/programs/)) and a Mac with Xcode 16 or later. Enrolling as an individual takes about a day. A company enrollment needs a D-U-N-S number and takes longer.
+
+1. **Config.** Copy `ios/Config/Secrets.example.xcconfig` to `ios/Config/Secrets.xcconfig` and fill in:
+   - your Team ID (developer.apple.com → Membership);
+   - a bundle ID that is yours, e.g. `com.yourname.tripit`;
+   - your server address.
+2. **Icon.** Put a 1024×1024 PNG icon in `ios/TripIt/Assets.xcassets/AppIcon.appiconset` and reference it in that folder's `Contents.json`, or drag it into Xcode.
+3. **Project.** Run `brew install xcodegen`, then `cd ios && xcodegen generate && open TripIt.xcodeproj`.
+4. **Signing.** In Xcode, sign in under **Settings → Accounts**. Signing is automatic: on the first build Xcode registers the app, the `.share` extension and the App Group `group.<bundle id>`. If it asks, turn on **App Groups** for both targets under **Signing & Capabilities** and tick the same group in each.
+5. **Try it on your phone.** Plug in your iPhone, choose it as the run destination and press Run. You'll need to turn on Developer Mode on the phone the first time.
+6. **TestFlight.**
+   1. Create the app in [App Store Connect](https://appstoreconnect.apple.com) → **Apps → +**, using the same bundle ID.
+   2. In Xcode, choose **Product → Archive → Distribute App → App Store Connect**.
+   3. After about 15 minutes of processing, add testers under **TestFlight**. Internal testers (up to 100 people on your team) can install right away. External testers (up to 10,000, by email or public link) need a short beta review first.
+
+Before each upload, raise `CURRENT_PROJECT_VERSION` in `ios/project.yml`. Raise `MARKETING_VERSION` for new releases.
+
+### Before an App Store release
+
+- **Review account.** App Review signs in with a test account. Make one with an invite code and put its email and password in **App Review Information**.
+- **Account deletion.** Apple requires a way to delete your account inside the app. It's at the bottom of **Profile** (**Delete account**).
+- **Privacy.** You need a privacy policy URL and the **App Privacy** answers. TripIt stores your email, the links you share and the places you save, and it sends reels to Claude and Google for processing. There's no tracking or ads.
+- **Screenshots and listing.** You need 6.9" iPhone screenshots, a subtitle, a description and keywords. Pick the final name first: "TripIt" is already an App Store app.
+- **Native features.** Apple sometimes rejects apps that are "just a website" (guideline 4.2). The Share Extension is a real native feature. Native push notifications and a home-screen widget would make the case stronger if review pushes back.

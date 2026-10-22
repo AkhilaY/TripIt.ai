@@ -75,6 +75,8 @@ function mapsLinks(p, trip) {
 // ---------- State & cached data ----------
 
 const S = {
+  folders: null,        // your folders, from /v1/folders
+  libf: {},             // filters per saved-places list ('saved' or a folder id)
   cal: null,            // everything dated, from /v1/calendar
   calv: { month: null, day: null, filter: 'all', scrollTo: null },
   bookingsAll: null,    // every booking across trips
@@ -196,6 +198,8 @@ function route() {
   if (!parts.length) return { name: 'trips', params };
   if (parts[0] === 'trip' && parts[1] && parts[2] === 'bookings') return { name: 'bookings', params: new URLSearchParams(`trip=${parts[1]}`) };
   if (parts[0] === 'settings') return { name: 'profile', params };
+  if (parts[0] === 'saved') return { name: 'trips', params, tab: 'saved' };
+  if (parts[0] === 'folder' && parts[1]) return { name: 'folder', id: parts[1], params };
   if (parts[0] === 'trip' && parts[1]) return { name: 'trip', id: parts[1], mode: parts[2] || 'places', params };
   if (parts[0] === 'place' && parts[1]) return { name: 'place', id: parts[1], mode: parts[2] === 'menu' ? 'menu' : 'overview', params };
   if (parts[0] === 'today' && parts[1]) return { name: 'today', id: parts[1], params };
@@ -207,14 +211,14 @@ function route() {
 }
 
 const TAB_FOR = {
-  trips: 'trips', trip: 'trips', place: 'trips', today: 'trips', edit: 'trips', packing: 'trips', events: 'trips', map: 'map', concierge: 'concierge',
+  trips: 'trips', folder: 'trips', trip: 'trips', place: 'trips', today: 'trips', edit: 'trips', packing: 'trips', events: 'trips', map: 'map', concierge: 'concierge',
   discover: 'discover', bookings: 'bookings', add: 'trips',
 };
 // Profile, calendar and their pages open over whichever tab you were on.
 const tabOf = (name) => TAB_FOR[name] || S.lastTab || 'trips';
 const TAB_INDEX = { trips: 0, discover: 1, map: 2, bookings: 3, concierge: 4 };
-const TAB_LABEL = { trips: 'Trips', discover: 'Discover', map: 'Map', bookings: 'Bookings', concierge: 'Concierge' };
-const DEPTH = { profile: 1, calendar: 1, imports: 2, taste: 2, trip: 1, today: 1, taste: 1, packing: 1, events: 1, edit: 2, place: 2 };
+const TAB_LABEL = { trips: 'Library', discover: 'Discover', map: 'Map', bookings: 'Bookings', concierge: 'Concierge' };
+const DEPTH = { profile: 1, calendar: 1, imports: 2, taste: 2, folder: 1, trip: 1, today: 1, taste: 1, packing: 1, events: 1, edit: 2, place: 2 };
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
 let renderToken = 0;
 let lastKey = '';
@@ -480,10 +484,10 @@ const SORTS = {
 
 const HOME_KEY = 'tripit.home';
 function loadHome() {
-  const home = { tab: 'trips', cat: 'all', sort: 'popular', trip: 'all', starred: false };
+  const home = { tab: 'saved', cat: 'all', sort: 'popular', trip: 'all', starred: false };
   try {
     const saved = JSON.parse(localStorage.getItem(HOME_KEY) || '{}');
-    if (saved.tab === 'places') home.tab = 'places';
+    if (saved.tab === 'trips') home.tab = 'trips';
     if (saved.cat === 'all' || GROUPS.some((g) => g.id === saved.cat)) home.cat = saved.cat;
     if (SORTS[saved.sort] && saved.sort !== 'closest') home.sort = saved.sort; // that one needs a fresh location
   } catch { /* private mode or bad data: use the defaults */ }
@@ -522,7 +526,8 @@ const starButton = (p) => `<button class="starbtn${p.must_do ? ' on' : ''}" data
 
 // Selecting places to build an itinerary by hand.
 const resetSel = () => { S.sel = { on: false, picked: new Set() }; };
-const findAnyPlace = (id) => allPlaces().find((x) => x.id === id) || (S.places || []).find((x) => x.id === id);
+const findAnyPlace = (id) => allPlaces().find((x) => x.id === id && x.trip_id === contextTrip()) || allPlaces().find((x) => x.id === id)
+  || (S.places || []).find((x) => x.id === id) || (placeDetail[id] || {}).place;
 const selTripId = () => {
   const first = [...S.sel.picked][0];
   const p = first && findAnyPlace(first);
@@ -541,17 +546,15 @@ function placeRow(p, { home = false } = {}) {
     ? `<span class="distchip">${fmtDistance(distanceTo(p))} away</span>` : '';
   const body = `${thumb(p, 56)}
     <span class="main"><span class="t ${p.visited ? 'strike' : ''}">${esc(p.name)}${isNew(p)}${p.latitude == null ? ' <span class="flag" title="Not on the map yet">●</span>' : ''}</span>
-    <span class="s">${esc(sub.join(' · '))}${p.category === 'event' ? `<span class="datechip">${p.event_date ? esc(shortDay(p.event_date)) : 'Date TBC'}</span>` : ''}${needChip(p)}${ratingChip(p)}${hotChip(p)}${dayChip(p)}${dist}</span>
+    <span class="s">${esc(sub.join(' · '))}${p.category === 'event' ? `<span class="datechip">${p.event_date ? esc(shortDay(p.event_date)) : 'Date TBC'}</span>` : ''}${p.suggested ? '<span class="suggchip">Suggested</span>' : ''}${needChip(p)}${ratingChip(p)}${hotChip(p)}${dayChip(p)}${dist}</span>
     ${p.recommended_items.length ? `<span class="s clip">Try: ${esc(p.recommended_items.join(', '))}</span>` : ''}
     ${hoursLine(p)}${hereChip(p)}</span>`;
   if (S.sel.on) {
     const picked = S.sel.picked.has(p.id);
-    const tripId = selTripId();
-    const blocked = tripId && p.trip_id !== tripId;
-    return `<button class="row prow sel${picked ? ' picked' : ''}${blocked ? ' blocked' : ''}" data-act="pick" data-id="${p.id}" aria-pressed="${picked}">
+    return `<button class="row prow sel${picked ? ' picked' : ''}" data-act="pick" data-id="${p.id}" aria-pressed="${picked}">
       <span class="check" aria-hidden="true">${picked ? ICON.done : ''}</span>${body}</button>`;
   }
-  return `<div class="row prow"><a class="rowlink" href="#/place/${p.id}">${body}</a>${starButton(p)}</div>`;
+  return `<div class="row prow"><a class="rowlink" href="${placeHref(p)}">${body}</a>${starButton(p)}</div>`;
 }
 
 function jobRow(job) {
@@ -562,6 +565,7 @@ function jobRow(job) {
     ${(job.warnings || []).map((w) => `<span class="s" style="color:var(--warn)">${esc(w)}</span>`).join('')}</span>`;
   if (active) return `<div class="row">${inner}<span class="spinner"></span></div>`;
   if (job.status === 'done' && job.trip_id) return `<a class="row" href="#/trip/${job.trip_id}">${inner}${ICON.chev}</a>`;
+  if (job.status === 'done' && job.reel_id) return `<a class="row" href="#/saved?reel=${job.reel_id}">${inner}${ICON.chev}</a>`;
   if (job.status === 'failed') return `<div class="row">${inner}<button class="btn tint small" data-act="retry" data-id="${job.id}">Retry</button></div>`;
   return `<div class="row">${inner}</div>`;
 }
@@ -756,10 +760,10 @@ function nextCard(trip, p, n, total, isToday, dayIdx) {
   const changed = S.lastNext[trip.id] && S.lastNext[trip.id] !== p.id;
   S.lastNext[trip.id] = p.id;
   return `<div class="nextcard${changed ? ' enter' : ''}" style="${cvar(p.category)}">
-    ${photo ? `<a class="next-photo" href="#/place/${p.id}"><img src="${esc(photoUrl(photo, 1000))}" alt="" decoding="async" onerror="this.parentElement.remove()"></a>` : ''}
+    ${photo ? `<a class="next-photo" href="${placeHref(p)}"><img src="${esc(photoUrl(photo, 1000))}" alt="" decoding="async" onerror="this.parentElement.remove()"></a>` : ''}
     <div class="next-body">
       <div class="next-label">${isToday ? 'Up next' : 'First up'} · stop ${n} of ${total}</div>
-      <h2><a href="#/place/${p.id}">${esc(p.name)}</a>${starMark(p)}</h2>
+      <h2><a href="${placeHref(p)}">${esc(p.name)}</a>${starMark(p)}</h2>
       <div class="s">${esc([startsIn(p, isToday), CATS[p.category], p.neighborhood].filter(Boolean).join(' · '))}</div>
       ${liveStatus(p, isToday, dayIdx)}
       ${p.day_note ? `<div class="daynote">${esc(p.day_note)}</div>` : ''}
@@ -1009,64 +1013,26 @@ if (window.visualViewport) {
 
 const addButton = `<button class="gbtn tint" data-act="add" aria-label="Add a reel">${ICON.plus}</button>`;
 
-/** Trips | Places switch under the home title. */
-const homeSwitch = () => segControl('home', [['trips', 'Trips'], ['places', 'Places']].map(([k, label]) => ({
+/** Saved | Trips switch under the Library title. */
+const homeSwitch = () => segControl('home', [['saved', 'Saved'], ['trips', 'Trips']].map(([k, label]) => ({
   on: S.home.tab === k,
   html: `<button class="${S.home.tab === k ? 'on' : ''}" data-act="hometab" data-tab="${k}" aria-pressed="${S.home.tab === k}">${label}</button>`,
 })));
-
-async function placesHome(trips) {
-  const places = await cachedPlaces();
-  ensureNeeds([...new Set(places.filter((p) => !p.booking_checked_at).map((p) => p.trip_id))]);
-  const h = S.home;
-  if (h.trip !== 'all' && !trips.some((t) => t.id === h.trip)) h.trip = 'all';
-  const tripName = Object.fromEntries(trips.map((t) => [t.id, t.name]));
-  const inTrip = places.filter((p) => h.trip === 'all' || p.trip_id === h.trip);
-  const base = inTrip.filter((p) => !h.starred || p.must_do);
-  const counts = {};
-  base.forEach((p) => { counts[GROUP_OF[p.category] || 'other'] = (counts[GROUP_OF[p.category] || 'other'] || 0) + 1; });
-  if (h.cat !== 'all' && !counts[h.cat]) h.cat = 'all';
-  const list = sortPlaces(base.filter((p) => h.cat === 'all' || (GROUP_OF[p.category] || 'other') === h.cat), h.sort);
-  const starredCount = inTrip.filter((p) => p.must_do).length;
-
-  const chip = (id, label, n, on) => `<button class="fchip${on ? ' on' : ''}" data-act="homecat" data-cat="${id}" aria-pressed="${on}">${label}<span class="n">${n}</span></button>`;
-  const chips = `<div class="fchips" role="group" aria-label="Filter by type">
-    <button class="fchip star${h.starred ? ' on' : ''}" data-act="homestarred" aria-pressed="${h.starred}">${ICON.star}Starred<span class="n">${starredCount}</span></button>
-    ${chip('all', 'All', base.length, h.cat === 'all')}
-    ${GROUPS.filter((g) => counts[g.id]).map((g) => chip(g.id, g.label, counts[g.id], h.cat === g.id)).join('')}</div>`;
-  const controls = `<div class="homectl">
-    ${trips.length > 1 ? `<button class="pillbtn" data-act="hometrip">${esc(h.trip === 'all' ? 'All trips' : tripName[h.trip])}</button>` : ''}
-    <button class="pillbtn" data-act="homesort" aria-label="Sort: ${esc(SORTS[h.sort].label)}">${esc(SORTS[h.sort].label)}</button>
-    <button class="pillbtn${S.sel.on ? ' on' : ''}" data-act="selecttoggle">${S.sel.on ? 'Done' : 'Select'}</button></div>`;
-
-  const group = (items) => `<div class="group thumbs">${items.map((p) => placeRow(p, { home: true })).join('')}</div>`;
-  const starred = list.filter((p) => p.must_do);
-  const rest = list.filter((p) => !p.must_do);
-  let body;
-  if (!places.length) {
-    body = emptyState('accent', 'pin', 'No places yet', 'Places from the reels you save appear here, ready to filter, star and add to an itinerary.',
-      `<button class="btn" data-act="add">${ICON.link}Paste a link</button>`);
-  } else if (!list.length) {
-    body = emptyState('gray', 'pinslash', 'Nothing matches', 'Try another filter.',
-      '<button class="btn tint" data-act="homeclear">Clear filters</button>');
-  } else if (starred.length && rest.length) {
-    body = `<div class="section"><div class="section-h">${ICON.star}Starred</div>${group(starred)}</div>
-      <div class="section"><div class="section-h">${CATS_OF_FILTER()}</div>${group(rest)}</div>`;
-  } else {
-    body = `<div class="section">${group(list)}</div>`;
-  }
-  const subtitle = `${plural(places.length, 'place')} across ${plural(trips.length, 'trip')}`;
-  return `${rootNav('Places', { right: addButton })}<h1 class="largetitle" data-anchor>Places</h1>
-    <div class="subtitle"><span>${esc(subtitle)}</span></div>${homeSwitch()}${places.length ? chips + controls : ''}${body}${selBar()}`;
-}
-const CATS_OF_FILTER = () => (S.home.cat === 'all' ? 'More places' : esc(GROUPS.find((g) => g.id === S.home.cat).label));
 
 /** Floating bar while selecting places. */
 function selBar() {
   if (!S.sel.on) return '';
   const n = S.sel.picked.size;
-  return `<div class="selbar" role="region" aria-label="Selected places"><span class="selcount">${n ? `${plural(n, 'place')} selected` : 'Tap places to select them'}</span>
-    <button class="btn small" data-act="selectadd" ${n ? '' : 'disabled'}>${ICON.calendarPlus}Add to itinerary</button></div>`;
+  const r = route();
+  const dis = n ? '' : 'disabled';
+  const actions = r.name === 'trip'
+    ? `<button class="btn small" data-act="selectadd" ${dis}>${ICON.calendarPlus}Add to a day</button>
+       <button class="btn tint small" data-act="selremovetrip" ${dis}>Remove</button>`
+    : `<button class="btn small" data-act="seladdtrip" ${dis}>${ICON.plane}Trip</button>
+       <button class="btn tint small" data-act="seladdfolder" ${dis}>${ICON.folder}Folder</button>
+       ${r.name === 'folder' ? `<button class="btn tint small" data-act="selremovefolder" data-id="${r.id}" ${dis}>Remove</button>` : ''}`;
+  return `<div class="selbar" role="region" aria-label="Selected places"><span class="selcount">${n ? `${n} selected` : 'Tap places to select'}</span>
+    <span class="selacts">${actions}</span></div>`;
 }
 
 // ---------- Discover ----------
@@ -1452,28 +1418,373 @@ async function bookingWithTrip(id) {
   return b ? { trip, b } : {};
 }
 
+// ---------- Library: saved places and folders ----------
+
+const loadFolders = () => once('folders', async () => { S.folders = await api('/v1/folders'); fetchedAt.folders = Date.now(); return S.folders; });
+const cachedFolders = () => { if (!S.folders) return loadFolders(); revalidate('folders', loadFolders); return S.folders; };
+const placeHref = (p, suffix = '') => `#/place/${p.id}${suffix}${p.trip_id ? `?trip=${p.trip_id}` : ''}`;
+/** Filters for a list of saved places, kept per list (Saved, or a folder). */
+const libFilter = (scope) => (S.libf[scope] ||= { cats: new Set(), cities: new Set(), starred: false, unplanned: false, q: '' });
+const libActive = (f) => f.cats.size + f.cities.size + (f.starred ? 1 : 0) + (f.unplanned ? 1 : 0) + (f.q ? 1 : 0);
+
+function filterSaved(list, f) {
+  const q = normText(f.q);
+  return list.filter((p) => (!f.cats.size || f.cats.has(GROUP_OF[p.category] || 'other'))
+    && (!f.cities.size || f.cities.has(p.city || 'Somewhere'))
+    && (!f.starred || p.must_do)
+    && (!f.unplanned || !p.trip_ids.length)
+    && (!q || normText(`${p.name} ${p.neighborhood || ''} ${p.city || ''} ${p.venue || ''}`).includes(q)));
+}
+function normText(s) { return String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim(); }
+
+/** Search, type chips (pick several), more filters, sort and select, above a list of saved places. */
+function libControls(scope, places) {
+  const f = libFilter(scope);
+  const counts = {};
+  places.forEach((p) => { const g = GROUP_OF[p.category] || 'other'; counts[g] = (counts[g] || 0) + 1; });
+  const more = f.cities.size + (f.unplanned ? 1 : 0);
+  return `<div class="libsearch"><label class="searchbox">${ICON.search}<input type="search" data-act="libq" data-scope="${esc(scope)}" value="${esc(f.q)}"
+      placeholder="Search your saved places" aria-label="Search your saved places" autocomplete="off" enterkeyhint="search"></label></div>
+    <div class="fchips" role="group" aria-label="Filter by type (choose any)">
+      <button class="fchip star${f.starred ? ' on' : ''}" data-act="libstar" data-scope="${esc(scope)}" aria-pressed="${f.starred}">${ICON.star}Starred</button>
+      ${GROUPS.filter((g) => counts[g.id]).map((g) => `<button class="fchip${f.cats.has(g.id) ? ' on' : ''}" data-act="libcat" data-scope="${esc(scope)}" data-cat="${g.id}" aria-pressed="${f.cats.has(g.id)}">${g.label}<span class="n">${counts[g.id]}</span></button>`).join('')}
+    </div>
+    <div class="homectl">
+      <button class="pillbtn${more ? ' on' : ''}" data-act="libmore" data-scope="${esc(scope)}">${more ? `Filters · ${more}` : 'More filters'}</button>
+      <button class="pillbtn" data-act="homesort" aria-label="Sort: ${esc(SORTS[S.home.sort].label)}">${esc(SORTS[S.home.sort].label)}</button>
+      <button class="pillbtn${S.sel.on ? ' on' : ''}" data-act="selecttoggle">${S.sel.on ? 'Done' : 'Select'}</button>
+      ${libActive(f) ? `<button class="linkbtn" data-act="libclear" data-scope="${esc(scope)}">Clear</button>` : ''}</div>`;
+}
+
+/** The list itself (redrawn in place while typing in the search box). */
+function libList(scope, places) {
+  const f = libFilter(scope);
+  const list = sortPlaces(filterSaved(places, f), S.home.sort);
+  if (!places.length) return '';
+  if (!list.length) {
+    return emptyState('gray', 'pinslash', 'Nothing matches', f.q ? `No saved place matches “${esc(f.q)}”.` : 'Try fewer filters.',
+      `<button class="btn tint" data-act="libclear" data-scope="${esc(scope)}">Clear filters</button>`);
+  }
+  return `<div class="libcount">${libActive(f) ? `${plural(list.length, 'place')} match` : plural(list.length, 'place')}</div>
+    <div class="section"><div class="group thumbs">${list.map((p) => placeRow(p, { home: true })).join('')}</div></div>`;
+}
+
+function folderCard(fo) {
+  const imgs = fo.covers.slice(0, 4);
+  const cover = imgs.length >= 3
+    ? `<span class="fcover grid">${imgs.slice(0, 4).map((c) => `<img src="${esc(photoUrl(c, 300))}" alt="" loading="lazy" decoding="async" onerror="this.remove()">`).join('')}</span>`
+    : imgs.length ? `<span class="fcover"><img src="${esc(photoUrl(imgs[0], 500))}" alt="" loading="lazy" decoding="async" onerror="this.remove()"></span>`
+      : `<span class="fcover empty">${ICON.folder}</span>`;
+  return `<a class="fcard" href="#/folder/${fo.id}">${cover}<span class="fname">${esc(fo.name)}</span><span class="fcount">${plural(fo.place_count, 'place')}</span></a>`;
+}
+
+async function savedView(r) {
+  const [places, folders] = await Promise.all([cachedPlaces(), cachedFolders()]);
+  const reel = r.params.get('reel');
+  const shown = reel ? places.filter((p) => p.reel_ids.includes(reel)) : places;
+  const strip = `<div class="section"><div class="section-h hrow"><span>Your folders</span>
+      ${folders.length ? '<button class="linkbtn" data-act="newfolder">New folder</button>' : ''}</div>
+    <div class="folders" role="list">
+      ${folders.map(folderCard).join('')}
+      <button class="fcard new" data-act="newfolder"><span class="fcover empty">${ICON.plus}</span><span class="fname">New folder</span>
+        <span class="fcount">${folders.length ? 'Name it anything' : 'e.g. Date night, Brunch'}</span></button>
+    </div></div>`;
+  const banner = reel ? `<div class="reelbanner">${ICON.link}<span>${plural(shown.length, 'place')} from one post</span><a class="linkbtn" href="#/">Show everything</a></div>` : '';
+  const body = !places.length
+    ? emptyState('accent', 'bookmark', 'Nothing saved yet',
+      'Share a TikTok or Instagram post to TripIt, paste a link, or search for a place. Everything you save lands here, ready to sort into folders and trips.',
+      `<button class="btn" data-act="add">${ICON.plus}Add a place</button><a class="linkbtn" href="#/profile">Set up the share button</a>`)
+    : `<div class="section-h hrow libhead"><span>All saved</span></div>${libControls('saved', shown)}<div id="libbody" data-scope="saved">${libList('saved', shown)}</div>`;
+  return `${strip}${banner}${body}${selBar()}`;
+}
+
+async function folderView(r) {
+  const [places, folders] = await Promise.all([cachedPlaces(), cachedFolders()]);
+  const fo = folders.find((x) => x.id === r.id);
+  if (!fo) throw new ApiError('This folder was deleted.', 404);
+  const inside = places.filter((p) => p.folder_ids.includes(fo.id));
+  const more = `<button class="gbtn" data-act="foldermenu" data-id="${fo.id}" aria-label="Folder options">${ICON.more}</button>`;
+  const head = `${navbar(fo.name, { back: '#/', backLabel: 'Library', right: more })}<h1 class="largetitle" data-anchor>${esc(fo.name)}</h1>
+    <div class="subtitle"><span>${plural(inside.length, 'place')}</span></div>
+    <div class="actionsrow"><button class="btn tint small" data-act="folderadd" data-id="${fo.id}">${ICON.plus}Add places</button>
+      ${inside.length ? `<button class="btn small" data-act="newtrip" data-folder="${fo.id}">${ICON.plane}Plan a trip from this</button>` : ''}</div>`;
+  if (!inside.length) {
+    return head + emptyState('gray', 'folder', 'This folder is empty', 'Add places from everything you’ve saved. A place can be in as many folders as you like.',
+      `<button class="btn" data-act="folderadd" data-id="${fo.id}">${ICON.plus}Add places</button>`);
+  }
+  return `${head}${libControls(fo.id, inside)}<div id="libbody" data-scope="${fo.id}">${libList(fo.id, inside)}</div>${selBar()}`;
+}
+
+/** Redraws a saved-places list after the search text changes, without touching the search box. */
+function redrawLibList(scope) {
+  const box = document.getElementById('libbody');
+  if (!box || box.dataset.scope !== scope || !S.places) return;
+  const places = scope === 'saved' ? S.places : S.places.filter((p) => p.folder_ids.includes(scope));
+  box.innerHTML = libList(scope, places);
+  hydrateIcons(box);
+}
+
+function libMoreSheet(scope) {
+  const f = libFilter(scope);
+  const base = scope === 'saved' ? S.places || [] : (S.places || []).filter((p) => p.folder_ids.includes(scope));
+  const cities = {};
+  base.forEach((p) => { const c = p.city || 'Somewhere'; cities[c] = (cities[c] || 0) + 1; });
+  const st = { cities: new Set(f.cities), unplanned: f.unplanned };
+  openSheet({
+    type: 'form', title: 'Filters', confirm: 'Show', st,
+    body: () => `<div class="section"><div class="section-h">City</div><div class="fchips wrap">
+        ${Object.entries(cities).sort((a, b) => b[1] - a[1]).map(([c, n]) => `<button class="fchip${st.cities.has(c) ? ' on' : ''}" data-act="libcity" data-city="${esc(c)}" aria-pressed="${st.cities.has(c)}">${esc(c)}<span class="n">${n}</span></button>`).join('')}
+      </div></div>
+      <div class="section"><div class="group tiles"><label class="row" for="lib-unplanned">${tile('blue', 'trips')}<span class="main"><span class="t">Not in a trip yet</span></span>
+        <input class="switch" type="checkbox" id="lib-unplanned" data-act="libunplanned" ${st.unplanned ? 'checked' : ''}></label></div>
+      <div class="section-f">Pick as many as you like. Type chips and the search box add to these.</div></div>`,
+    ok() {
+      f.cities = st.cities; f.unplanned = st.unplanned;
+      closeSheet(); render({ quiet: true });
+    },
+  });
+}
+
+/** Tick saved places from everything (or one folder) and search; used to fill folders and trips. */
+function pickerBody(st) {
+  const folders = S.folders || [];
+  const q = normText(st.q);
+  const pool = (S.places || []).filter((p) => !st.exclude.has(p.id)
+    && (st.folder === 'all' || p.folder_ids.includes(st.folder))
+    && (!q || normText(`${p.name} ${p.city} ${p.neighborhood || ''}`).includes(q)));
+  pool.sort((a, b) => (st.picked.has(b.id) - st.picked.has(a.id)) || (Number(b.must_do) - Number(a.must_do)) || a.name.localeCompare(b.name));
+  const rows = pool.map((p) => {
+    const on = st.picked.has(p.id);
+    return `<button class="row prow sel${on ? ' picked' : ''}" data-act="sheetpick" data-id="${p.id}" aria-pressed="${on}"><span class="check" aria-hidden="true">${on ? ICON.done : ''}</span>${thumb(p, 44)}
+      <span class="main"><span class="t">${esc(p.name)}${starMark(p)}</span><span class="s">${esc([CATS[p.category], p.neighborhood || p.city].filter(Boolean).join(' · '))}</span></span></button>`;
+  }).join('');
+  return `<div class="libsearch"><label class="searchbox">${ICON.search}<input type="search" data-act="pkq" value="${esc(st.q)}" placeholder="Search your saved places" aria-label="Search" autocomplete="off"></label></div>
+    ${folders.length ? `<div class="fchips" role="group" aria-label="From">
+      <button class="fchip${st.folder === 'all' ? ' on' : ''}" data-act="pkfolder" data-f="all">All saved</button>
+      ${folders.map((fo) => `<button class="fchip${st.folder === fo.id ? ' on' : ''}" data-act="pkfolder" data-f="${fo.id}">${ICON.folder}${esc(fo.name)}</button>`).join('')}</div>` : ''}
+    <div class="section" id="pklist">${pool.length ? `<div class="group thumbs">${rows}</div>` : '<div class="section-f">Nothing here to add.</div>'}</div>`;
+}
+
+async function pickSavedSheet({ title, exclude = new Set(), confirm = 'Add', onDone }) {
+  await Promise.all([cachedPlaces(), cachedFolders()]);
+  const st = { picked: new Set(), q: '', folder: 'all', exclude };
+  openSheet({
+    type: 'form', title, confirm, st,
+    body: () => pickerBody(st),
+    async ok() {
+      if (!st.picked.size) { toast('Tick at least one place', true); return; }
+      S.sheet.busy = true; renderOverlay();
+      try { await onDone([...st.picked]); closeSheet(); } catch (e) { S.sheet.busy = false; renderOverlay(); toast(e.message, true); }
+    },
+  });
+}
+
+function folderNameSheet({ title = 'New folder', name = '', confirm = 'Create', onDone }) {
+  openSheet({
+    type: 'form', title, confirm, st: {},
+    body: () => `<div class="section"><div class="group"><div class="row"><input class="field" id="folder-name" value="${esc(name)}" maxlength="80"
+      placeholder="e.g. Date night, Brunch spots, Paris someday" aria-label="Folder name" autocomplete="off"></div></div></div>`,
+    async ok() {
+      const value = $('#folder-name').value.trim();
+      if (!value) { toast('Give the folder a name', true); return; }
+      S.sheet.busy = true; renderOverlay();
+      try { await onDone(value); } catch (e) { S.sheet.busy = false; renderOverlay(); toast(e.message, true); }
+    },
+  });
+}
+
+function afterLibraryChange() {
+  fetchedAt.folders = 0; fetchedAt.places = 0; fetchedAt.trips = 0;
+  return Promise.all([loadFolders(), loadPlaces()]).catch(() => {});
+}
+
+async function addToFolderSheet(ids) {
+  const folders = await cachedFolders();
+  const add = async (fid, name) => {
+    await api(`/v1/folders/${fid}/places`, { method: 'POST', body: { place_ids: ids } });
+    await afterLibraryChange(); resetSel();
+    toast(`Added ${plural(ids.length, 'place')} to ${name}`); render();
+  };
+  openSheet({ type: 'actions', title: `Add ${plural(ids.length, 'place')} to a folder`, actions: [
+    ...folders.map((fo) => ({ label: fo.name, run: () => add(fo.id, fo.name) })),
+    { label: 'New folder…', run: () => folderNameSheet({ onDone: async (name) => {
+      const fo = await api('/v1/folders', { method: 'POST', body: { name, place_ids: ids } });
+      closeSheet(); await afterLibraryChange(); resetSel();
+      toast(`Made ${fo.name} with ${plural(ids.length, 'place')}`); render();
+    } }) },
+  ] });
+}
+
+async function addToTripSheet(ids) {
+  const trips = await cachedTrips();
+  openSheet({ type: 'actions', title: `Add ${plural(ids.length, 'place')} to a trip`, actions: [
+    ...trips.map((t) => ({ label: t.name, run: async () => {
+      syncTrip(await api(`/v1/trips/${t.id}/places`, { method: 'POST', body: { place_ids: ids } }));
+      await afterLibraryChange(); resetSel();
+      toast(`Added to ${t.name}`); render();
+    } })),
+    { label: 'New trip with these…', run: () => newTripSheet({ placeIds: ids }) },
+  ] });
+}
+
+// ---------- A place's folders and trips ----------
+
+const placeDetail = {}; // id -> {place, reels} for places opened outside a trip
+const loadPlaceDetail = (id) => once(`pd:${id}`, async () => { placeDetail[id] = await api(`/v1/places/${id}`); fetchedAt[`pd:${id}`] = Date.now(); return placeDetail[id]; });
+const cachedPlaceDetail = (id) => { if (!placeDetail[id]) return loadPlaceDetail(id); revalidate(`pd:${id}`, () => loadPlaceDetail(id)); return placeDetail[id]; };
+/** The trip a place is being looked at in (from the page address), if any. */
+const contextTrip = () => { const r = route(); return r.name === 'trip' ? r.id : (r.name === 'place' ? r.params.get('trip') : null); };
+
+async function placeFoldersSheet(id) {
+  const [folders, places] = await Promise.all([cachedFolders(), cachedPlaces()]);
+  const p = places.find((x) => x.id === id) || findAnyPlace(id);
+  const st = { place: id, inside: new Set(p ? p.folder_ids : []) };
+  openSheet({
+    type: 'form', title: 'Folders', confirm: 'Done', st,
+    body: () => `<div class="section">${folders.length ? `<div class="group tiles">${folders.map((fo) => {
+      const on = st.inside.has(fo.id);
+      return `<button class="row prow sel${on ? ' picked' : ''}" data-act="pffolder" data-f="${fo.id}" aria-pressed="${on}"><span class="check" aria-hidden="true">${on ? ICON.done : ''}</span>
+        ${tile('gold', 'folder')}<span class="main"><span class="t">${esc(fo.name)}</span><span class="s">${plural(fo.place_count, 'place')}</span></span></button>`;
+    }).join('')}</div>` : '<div class="section-f">No folders yet.</div>'}
+      <div class="section"><button class="btn tint wide" data-act="pfnew" data-id="${id}">${ICON.plus}New folder</button></div>
+      <div class="section-f">A place can be in as many folders as you like.</div></div>`,
+    ok() { closeSheet(); render(); },
+  });
+}
+
+async function placeTripsSheet(id) {
+  const trips = await cachedTrips();
+  const places = await cachedPlaces();
+  const p = places.find((x) => x.id === id) || findAnyPlace(id);
+  const inTrips = new Set(p ? p.trip_ids : []);
+  openSheet({ type: 'actions', title: `Add ${p ? p.name : 'this place'} to a trip`, actions: [
+    ...trips.map((t) => ({ label: `${inTrips.has(t.id) ? '✓ ' : ''}${t.name}`, run: async () => {
+      if (inTrips.has(t.id)) { go(`#/trip/${t.id}`); return; }
+      syncTrip(await api(`/v1/trips/${t.id}/places`, { method: 'POST', body: { place_ids: [id] } }));
+      await afterLibraryChange(); delete placeDetail[id];
+      toast(`Added to ${t.name}`); render();
+    } })),
+    { label: 'New trip with this place…', run: () => newTripSheet({ placeIds: [id] }) },
+  ] });
+}
+
+/** A booking belongs to a trip: use the one the place is on, or ask (and add the place to it). */
+async function withTripFor(p, then) {
+  if (p.trip_id && S.trip[p.trip_id]) { then(S.trip[p.trip_id]); return; }
+  const trips = await cachedTrips();
+  const mine = trips.filter((t) => (p.trip_ids || []).includes(t.id));
+  if (mine.length === 1) { then(await loadTrip(mine[0].id)); return; }
+  const list = mine.length ? mine : trips;
+  if (!list.length) { toast('Make a trip first to keep bookings with it', true); return; }
+  openSheet({ type: 'actions', title: 'Which trip is this for?', actions: list.map((t) => ({ label: t.name, run: async () => {
+    if (!(p.trip_ids || []).includes(t.id)) syncTrip(await api(`/v1/trips/${t.id}/places`, { method: 'POST', body: { place_ids: [p.id] } }));
+    then(await loadTrip(t.id));
+  } })) });
+}
+
+// ---------- New trip ----------
+
+/** Make a trip in three short steps: where and how long, who plans it, which places. */
+async function newTripSheet({ placeIds = [], folderId = null } = {}) {
+  const [places] = await Promise.all([cachedPlaces(), cachedFolders()]);
+  const fromFolder = folderId ? places.filter((p) => p.folder_ids.includes(folderId)).map((p) => p.id) : [];
+  const picked = new Set([...placeIds, ...fromFolder]);
+  const cities = {};
+  places.forEach((p) => { if (p.city) cities[p.city] = (cities[p.city] || 0) + 1; });
+  const guess = [...picked].map((id) => places.find((p) => p.id === id)).filter(Boolean).map((p) => p.city).find(Boolean) || '';
+  const st = { step: 1, city: guess, name: '', days: 3, start: '', mode: null, fill: true, prefs: '', picked, q: '', folder: 'all', exclude: new Set(), touched: picked.size > 0 };
+  const steps = (n) => `<div class="steps-dots" aria-label="Step ${n} of 3">${[1, 2, 3].map((i) => `<i class="${i <= n ? 'on' : ''}"></i>`).join('')}</div>`;
+  const back = '<button class="linkbtn backstep" data-act="ntback">‹ Back</button>';
+  const body = () => {
+    if (st.step === 1) {
+      const sugg = Object.entries(cities).sort((a, b) => b[1] - a[1]).slice(0, 6);
+      return `${steps(1)}<div class="section"><div class="section-h">Where to?</div><div class="group"><div class="row">
+          <input class="field" data-act="ntfield" data-f="city" value="${esc(st.city)}" placeholder="City, e.g. Lisbon" aria-label="City" autocomplete="off" autocapitalize="words"></div></div>
+        ${sugg.length ? `<div class="fchips wrap">${sugg.map(([c, n]) => `<button class="fchip${normText(c) === normText(st.city) ? ' on' : ''}" data-act="ntcity" data-city="${esc(c)}">${esc(c)}<span class="n">${n}</span></button>`).join('')}</div>
+          <div class="section-f">Cities you’ve saved places in.</div>` : ''}</div>
+        <div class="section"><div class="group tiles">
+          <div class="row"><span class="main"><span class="t">Trip name</span></span><input class="field right" data-act="ntfield" data-f="name" value="${esc(st.name)}" placeholder="${esc(st.city ? `${st.city} trip` : 'Optional')}" aria-label="Trip name" maxlength="120"></div>
+          <div class="row"><span class="main"><span class="t">Days</span></span>
+            <span class="stepper"><button class="gbtn small" data-act="ntdays" data-d="-1" aria-label="One day fewer" ${st.days <= 1 ? 'disabled' : ''}>−</button>
+            <b aria-live="polite">${st.days}</b><button class="gbtn small" data-act="ntdays" data-d="1" aria-label="One more day" ${st.days >= 21 ? 'disabled' : ''}>+</button></span></div>
+          <label class="row"><span class="main"><span class="t">Start date</span><span class="s">Optional</span></span><input class="datefield" type="date" data-act="ntfield" data-f="start" value="${esc(st.start)}"></label>
+        </div></div>
+        <div class="section"><button class="btn wide" data-act="sheetok">Next</button></div>`;
+    }
+    if (st.step === 2) {
+      const card = (m, icon, title, text) => `<button class="choice${st.mode === m ? ' on' : ''}" data-act="ntmode" data-m="${m}">${tile(m === 'ai' ? 'gold' : 'indigo', icon, 'md')}
+        <span class="main"><span class="t">${title}</span><span class="s">${text}</span></span>${ICON.chev}</button>`;
+      return `${steps(2)}${back}<div class="section"><div class="section-h">How would you like to plan it?</div>
+        ${card('ai', 'sparkle', 'Plan it for me', `AI arranges your places into ${plural(st.days, 'day')}, grouped by area with sensible times. It can suggest a few extras for quiet days.`)}
+        ${card('manual', 'calendar', 'I’ll build it myself', `${plural(st.days, 'empty day')} for you to fill from your saved places. You can ask AI to tidy it later.`)}</div>`;
+    }
+    const n = st.picked.size;
+    return `${steps(3)}${back}<div class="section-h pad">${n ? `${plural(n, 'place')} picked` : 'Pick places to include'}${st.city ? ` · ${esc(st.city)}` : ''}</div>
+      ${st.mode === 'ai' ? `<div class="section"><div class="group tiles">
+        <label class="row" for="nt-fill">${tile('gold', 'sparkle')}<span class="main"><span class="t">Suggest places for quiet days</span><span class="s">Marked “Suggested”, easy to keep or remove</span></span>
+          <input class="switch" type="checkbox" id="nt-fill" data-act="ntfill" ${st.fill ? 'checked' : ''}></label>
+        <div class="row"><input class="field" data-act="ntfield" data-f="prefs" value="${esc(st.prefs)}" placeholder="Anything to keep in mind? e.g. slow mornings, no museums" aria-label="Preferences" maxlength="1000"></div>
+      </div></div>` : ''}
+      ${pickerBody(st)}
+      <div class="stickycta"><button class="btn wide" data-act="sheetok">${st.mode === 'ai' ? `${ICON.sparkle}Plan my trip` : 'Create trip'}${n ? ` · ${plural(n, 'place')}` : ''}</button></div>`;
+  };
+  openSheet({
+    type: 'form', title: 'New trip', confirm: 'Next', st, body,
+    async ok() {
+      if (st.step === 1) {
+        st.city = st.city.trim();
+        if (!st.city) { toast('Where are you going?', true); return; }
+        if (!st.touched) { // start with everything saved in that city ticked
+          places.filter((p) => normText(p.city) === normText(st.city)).forEach((p) => st.picked.add(p.id));
+          st.touched = true;
+        }
+        st.step = 2; S.sheet.confirm = null; renderOverlay(); return;
+      }
+      if (st.step === 2) return;
+      if (st.mode === 'ai' && !st.picked.size && !st.fill) { toast('Pick some places, or turn on suggestions', true); return; }
+      S.sheet.busy = true; renderOverlay();
+      try {
+        const trip = await api('/v1/trips', { method: 'POST', body: {
+          city: st.city, name: st.name.trim() || null, days: st.days, start_date: st.start || null, place_ids: [...st.picked],
+          plan: st.mode, fill_gaps: st.mode === 'ai' && st.fill, preferences: st.prefs.trim() || null,
+        } });
+        S.trip[trip.id] = trip;
+        await afterLibraryChange(); await loadTrips();
+        resetSel(); closeSheet();
+        toast(st.mode === 'ai' ? (trip.planned_by === 'claude' ? 'Your trip is planned' : 'Planned by location (AI unavailable)') : 'Your days are ready to fill');
+        go(`#/trip/${trip.id}/itinerary`);
+      } catch (e) {
+        if (S.sheet) { S.sheet.busy = false; renderOverlay(); }
+        toast(e.message, true);
+      }
+    },
+  });
+}
+
 const VIEWS = {
+  async folder(r) { return folderView(r); },
+
   async calendar() { return calendarView(); },
 
   async bookings(r) { return bookingsTab(r); },
 
   async discover() { return discoverView(); },
 
-  async trips() {
-    const trips = await cachedTrips();
-    if (S.home.tab === 'places') return placesHome(trips);
+  async trips(r) {
+    if (r.tab) S.home.tab = r.tab;
+    const head = `${rootNav('Library', { right: addButton })}<h1 class="largetitle" data-anchor>Library</h1>${homeSwitch()}`;
     const inflightJobs = S.jobs.filter((j) => ACTIVE.has(j.status));
-    const body = !trips.length && !inflightJobs.length
-      ? emptyState('accent', 'plane', 'No trips yet',
-        'Share a travel reel from TikTok or Instagram to TripIt, or paste a link. The places land here, pinned on a map.',
-        `<button class="btn" data-act="add">${ICON.link}Paste a link</button><a class="linkbtn" href="#/settings">Set up the share button</a>`)
-      : `${inflightJobs.length ? `<div class="section"><div class="group tiles">${inflightJobs.map(jobRow).join('')}</div></div>` : ''}
-         ${trips.length ? `<div class="cards">${trips.map(tripCard).join('')}</div>` : ''}`;
+    const jobs = inflightJobs.length ? `<div class="section"><div class="group tiles">${inflightJobs.map(jobRow).join('')}</div></div>` : '';
+    if (S.home.tab !== 'trips') return head + jobs + await savedView(r);
+    const trips = await cachedTrips();
     const active = activeTrip(trips);
     if (active && !S.trip[active.trip.id]) loadTrip(active.trip.id).then(() => render({ quiet: true })).catch(() => {});
+    const cta = `<button class="newtrip" data-act="newtrip">${tile('gold', 'plane', 'md')}<span class="main"><span class="t">Plan a new trip</span>
+      <span class="s">Pick a city and your saved places. AI can plan it, or build it yourself.</span></span>${ICON.chev}</button>`;
+    const body = trips.length ? `<div class="cards">${trips.map(tripCard).join('')}</div>`
+      : `<div class="section-f centered">Your trips appear here.</div>`;
     return {
-      html: `${rootNav('Trips', { right: addButton })}<h1 class="largetitle" data-anchor>Trips</h1>${homeSwitch()}${active ? todayCard(active) : ''}
-        ${tasteInvite()}${homeEdits(trips.length)}${body}`,
+      html: `${head}${active ? todayCard(active) : ''}<div class="section">${cta}</div>${tasteInvite()}${homeEdits(trips.length)}${body}`,
       // Warm the cache so opening a trip is instant.
       after: () => setTimeout(() => trips.slice(0, 8).forEach((t) => { if (!S.trip[t.id]) loadTrip(t.id).catch(() => {}); }), 400),
     };
@@ -1564,8 +1875,8 @@ const VIEWS = {
         <span class="main"><span class="t ${p.visited ? 'strike' : ''}">${esc(p.name)}${starMark(p)}</span>
         <span class="s">${esc([startsIn(p, isToday), CATS[p.category]].filter(Boolean).join(' · '))}</span></span>`;
       return p.visited
-        ? `<div class="row"><a class="rowlink" href="#/place/${p.id}">${inner}</a><button class="linkbtn" data-act="undone" data-id="${p.id}" aria-label="Mark ${esc(p.name)} not visited">Undo</button></div>`
-        : `<a class="row" href="#/place/${p.id}">${inner}${ICON.chev}</a>`;
+        ? `<div class="row"><a class="rowlink" href="${placeHref(p)}">${inner}</a><button class="linkbtn" data-act="undone" data-id="${p.id}" aria-label="Mark ${esc(p.name)} not visited">Undo</button></div>`
+        : `<a class="row" href="${placeHref(p)}">${inner}${ICON.chev}</a>`;
     };
     const bag = await todayBag(trip, day);
     const html = `${head(title)}<h1 class="largetitle" data-anchor>${title}</h1>
@@ -1586,12 +1897,20 @@ const VIEWS = {
   },
 
   async place(r) {
-    const trip = await findPlace(r.id);
-    const p = tripPlace(trip, r.id);
-    if (!p) throw new ApiError('This place was deleted.', 404);
+    // Opened from a trip (?trip=…) it shows that trip's day and time; from Saved or a folder, just the place.
+    const ctxId = r.params.get('trip');
+    const inTrip = ctxId ? await cachedTrip(ctxId).catch(() => null) : null;
+    let p = inTrip ? tripPlace(inTrip, r.id) : null;
+    let reels;
+    if (p) {
+      const reelIds = p.reel_ids && p.reel_ids.length ? p.reel_ids : [p.reel_id].filter(Boolean);
+      reels = reelIds.map((id) => inTrip.reels.find((x) => x.id === id)).filter(Boolean);
+    } else {
+      const d = await cachedPlaceDetail(r.id);
+      p = d.place; reels = d.reels;
+    }
+    const trip = p.trip_id && inTrip ? inTrip : { id: null, name: 'Library', city: p.city, bookings: [], day_count: 0, places: [p], reels };
     const links = mapsLinks(p, trip);
-    const reelIds = p.reel_ids && p.reel_ids.length ? p.reel_ids : [p.reel_id].filter(Boolean);
-    const reels = reelIds.map((id) => trip.reels.find((x) => x.id === id)).filter(Boolean);
     const isLocated = located(p);
     const photos = p.photos || [];
     const pages = photos.map((ph, i) => `<button class="gimg" data-act="viewphoto" data-id="${p.id}" data-index="${i}" aria-label="Open photo ${i + 1} of ${photos.length}">
@@ -1634,9 +1953,9 @@ const VIEWS = {
     const mode = hasMenu && r.mode === 'menu' ? 'menu' : 'overview';
     const tabs = hasMenu ? segControl(`pseg:${p.id}`, [['overview', 'Overview'], ['menu', 'Menu']].map(([m, label]) => ({
       on: m === mode,
-      html: `<a href="#/place/${p.id}${m === 'menu' ? '/menu' : ''}" class="${m === mode ? 'on' : ''}" ${m === mode ? 'aria-current="page"' : ''}>${label}</a>`,
+      html: `<a href="${placeHref(p, m === 'menu' ? '/menu' : '')}" class="${m === mode ? 'on' : ''}" ${m === mode ? 'aria-current="page"' : ''}>${label}</a>`,
     }))) : '';
-    const head = `${navbar(p.name, { back: `#/trip/${trip.id}`, backLabel: trip.name, right: star })}
+    const head = `${navbar(p.name, { back: trip.id ? `#/trip/${trip.id}` : '#/', backLabel: trip.name, right: star })}
       ${mode === 'menu' ? '' : hero}
       <div class="ph" style="${cvar(p.category)}">
         <span class="cat">${catTile(p.category, 'sm')}${CATS[p.category]}</span>
@@ -1662,6 +1981,7 @@ const VIEWS = {
         <button class="qbtn" data-act="directions" data-id="${p.id}">${tile('orange', 'route')}Directions</button>
       </div>
 
+      ${librarySection(p, trip)}
       ${eventWhen(p)}
       ${reservationSection(p, trip)}
 
@@ -1704,7 +2024,7 @@ const VIEWS = {
         <span class="s">${esc([platformName(reel.platform), reel.creator ? `@${reel.creator}` : ''].filter(Boolean).join(' · '))}</span></span>
         ${safeUrl(reel.url) ? `${ICON.chev}</a>` : '</div>'}`).join('')}</div></div>` : ''}
 
-      <div class="section"><div class="group"><button class="row destructive" data-act="askdeleteplace" data-id="${p.id}" data-trip="${trip.id}">Delete place</button></div></div>`;
+      <div class="section"><div class="group"><button class="row destructive" data-act="askdeleteplace" data-id="${p.id}" data-trip="${trip.id || ''}">Delete place</button></div></div>`;
     return { html, after };
   },
 
@@ -1723,7 +2043,7 @@ const VIEWS = {
       <ol class="editlist">${entries.map(({ p, note }, i) => {
         const photo = p.photos && p.photos[0] && !(e.cover_photo && p.photos[0].url === e.cover_photo.url) ? p.photos[0] : null;
         const st = openStatus(p.opening_hours);
-        return `<li><a class="editentry" href="#/place/${p.id}">
+        return `<li><a class="editentry" href="${placeHref(p)}">
           ${photo ? `<span class="ee-photo"><img src="${esc(photoUrl(photo, 900))}" alt="" loading="lazy" decoding="async" onerror="this.parentElement.remove()"></span>` : ''}
           <span class="ee-body"><span class="ee-num">${String(i + 1).padStart(2, '0')}</span>
             <span class="eyebrow">${esc([CATS[p.category], p.neighborhood].filter(Boolean).join(' · '))}</span>
@@ -1782,13 +2102,17 @@ const VIEWS = {
   },
 
   async map() {
-    const [trips, places] = await Promise.all([cachedTrips(), cachedPlaces()]);
-    if (!S.mapTrip || (S.mapTrip !== 'all' && !trips.some((t) => t.id === S.mapTrip))) S.mapTrip = trips[0] ? trips[0].id : 'all';
-    const shown = S.mapTrip === 'all' ? places : places.filter((p) => p.trip_id === S.mapTrip);
-    const chips = `<div class="mapchips top">${[{ id: 'all', name: 'All' }, ...trips].map((t) =>
-      `<button class="mapchip ${S.mapTrip === t.id ? 'on' : ''}" data-act="maptrip" data-id="${t.id}" aria-pressed="${S.mapTrip === t.id}">${esc(t.name)}${t.place_count != null ? ` · ${t.place_count}` : ''}</button>`).join('')}</div>`;
+    const [trips, places, folders] = await Promise.all([cachedTrips(), cachedPlaces(), cachedFolders()]);
+    const groups = [{ id: 'all', name: 'All saved', n: places.length },
+      ...trips.map((t) => ({ id: t.id, name: t.name, n: t.place_count, has: (p) => p.trip_ids.includes(t.id) })),
+      ...folders.map((fo) => ({ id: fo.id, name: fo.name, n: fo.place_count, folder: true, has: (p) => p.folder_ids.includes(fo.id) }))];
+    if (!S.mapTrip || !groups.some((g) => g.id === S.mapTrip)) S.mapTrip = 'all';
+    const group = groups.find((g) => g.id === S.mapTrip);
+    const shown = group.has ? places.filter(group.has) : places;
+    const chips = `<div class="mapchips top">${groups.map((g) =>
+      `<button class="mapchip ${S.mapTrip === g.id ? 'on' : ''}" data-act="maptrip" data-id="${g.id}" aria-pressed="${S.mapTrip === g.id}">${g.folder ? ICON.folder : ''}${esc(g.name)} · ${g.n}</button>`).join('')}</div>`;
     return {
-      html: `<h1 class="vh">All places</h1><div class="map fill"><div id="all-map" style="position:absolute;inset:0"></div>${trips.length ? chips : ''}
+      html: `<h1 class="vh">All places</h1><div class="map fill"><div id="all-map" style="position:absolute;inset:0"></div>${groups.length > 1 ? chips : ''}
         ${!places.length ? '<div class="mapnote">No places yet. Share a reel to start.</div>' : ''}</div>`,
       after: () => renderMap($('#all-map'), shown, { popup: popupHtml, newIds: S.newIds, pad: { top: 90, bottom: 120 } }),
     };
@@ -1800,7 +2124,7 @@ const VIEWS = {
     return `${navbar('Imports', { back: '#/profile', backLabel: 'Profile', right: addButton })}
       <h1 class="largetitle" data-anchor>Imports</h1>
       ${S.jobs.length ? `<div class="section"><div class="group tiles">${S.jobs.map(jobRow).join('')}</div>
-        <div class="section-f">Tap a finished import to open its trip.</div></div>`
+        <div class="section-f">Tap a finished import to see its places.</div></div>`
         : emptyState('blue', 'tray', 'Nothing imported yet', 'Reels you share to TripIt show up here while they’re processed.')}`;
   },
 
@@ -2001,6 +2325,26 @@ async function runFindMenu(id, refresh) {
 }
 
 /** Rating, website and phone rows for a place's Details (only the ones we have). */
+/** On a place's page: the folders and trips it's in, with ways to add it to more. */
+function librarySection(p, trip) {
+  const folders = (S.folders || []).filter((fo) => (p.folder_ids || []).includes(fo.id)).map((fo) => fo.name);
+  const trips = (S.trips || []).filter((t) => (p.trip_ids || []).includes(t.id)).map((t) => t.name);
+  if (!S.folders) loadFolders().then(() => render({ quiet: true })).catch(() => {});
+  if (p.suggested && trip.id) {
+    return `<div class="section"><div class="group tiles"><div class="row">${tile('gold', 'sparkle')}<span class="main"><span class="t">Suggested for this trip</span>
+      <span class="s">${esc(p.suggestion_note || 'Added by AI to fill a quiet day')}</span></span>
+      <button class="btn tint small" data-act="keepsugg" data-trip="${trip.id}" data-id="${p.id}">Keep</button></div></div></div>`;
+  }
+  return `<div class="section"><div class="section-h">In your library</div><div class="group tiles">
+    <button class="row" data-act="placefolders" data-id="${p.id}">${tile('gold', 'folder')}<span class="main"><span class="t">Folders</span>
+      <span class="s">${esc(folders.join(', ') || 'Not in a folder')}</span></span><span class="s link">Edit</span>${ICON.chev}</button>
+    <button class="row" data-act="placetrips" data-id="${p.id}">${tile('blue', 'plane')}<span class="main"><span class="t">Trips</span>
+      <span class="s">${esc(trips.join(', ') || 'Not in a trip yet')}</span></span><span class="s link">Add</span>${ICON.chev}</button>
+    ${trip.id ? `<button class="row" data-act="removefromtrip" data-trip="${trip.id}" data-id="${p.id}">${tile('gray', 'close')}<span class="main"><span class="t">Remove from ${esc(trip.name)}</span>
+      <span class="s">It stays in your saved places</span></span></button>` : ''}
+  </div></div>`;
+}
+
 function contactRows(p) {
   const rows = [];
   const googleLink = safeUrl(p.maps_url) && /^https?:\/\/([a-z0-9-]+\.)*(google\.[a-z.]+|goo\.gl)\//i.test(p.maps_url) ? p.maps_url : null;
@@ -2059,11 +2403,24 @@ function gettingThere(p) {
 }
 
 function placesList(trip) {
-  if (!trip.places.length) return emptyState('gray', 'pinslash', 'No places', 'Places you save from reels appear here.');
-  const bar = `<div class="planbar"><span class="planned-by">${S.sel.on ? 'Tick places, then add them to a day' : 'Star the places you love'}</span>
+  const addBtn = `<button class="btn tint small" data-act="tripaddplaces" data-id="${trip.id}">${ICON.plus}Add from saved</button>`;
+  if (!trip.places.length) {
+    return emptyState('gray', 'pinslash', 'No places on this trip yet', 'Add places from everything you’ve saved, or from one of your folders.',
+      `<button class="btn" data-act="tripaddplaces" data-id="${trip.id}">${ICON.plus}Add from saved</button>`);
+  }
+  const bar = `<div class="planbar"><span class="planned-by">${S.sel.on ? 'Tick places, then add them to a day' : addBtn}</span>
     <button class="linkbtn" data-act="selecttoggle">${S.sel.on ? 'Done' : 'Select'}</button></div>`;
-  return bar + CAT_ORDER.filter((c) => trip.places.some((p) => p.category === c)).map((c) => {
-    const list = trip.places.filter((p) => p.category === c).sort(byPriority);
+  const sugg = trip.places.filter((p) => p.suggested);
+  const suggHtml = sugg.length ? `<div class="section"><h2 class="section-title">${tile('gold', 'sparkle')}Suggested for quiet days<span class="count">${sugg.length}</span></h2>
+    <div class="group thumbs">${sugg.map((p) => `<div class="row prow"><a class="rowlink" href="${placeHref(p)}">${thumb(p, 56)}<span class="main">
+      <span class="t">${esc(p.name)}</span><span class="s">${esc([CATS[p.category], p.neighborhood].filter(Boolean).join(' · '))}${dayChip(p)}</span>
+      ${p.suggestion_note ? `<span class="s why">${esc(p.suggestion_note)}</span>` : ''}</span></a>
+      <span class="suggacts"><button class="btn tint small" data-act="keepsugg" data-trip="${trip.id}" data-id="${p.id}">Keep</button>
+      <button class="linkbtn" data-act="dropsugg" data-trip="${trip.id}" data-id="${p.id}" aria-label="Remove ${esc(p.name)}">Remove</button></span></div>`).join('')}</div>
+    <div class="section-f">Keep one and it joins your saved places too.</div></div>` : '';
+  const mine = { ...trip, places: trip.places.filter((p) => !p.suggested) };
+  return bar + suggHtml + CAT_ORDER.filter((c) => mine.places.some((p) => p.category === c)).map((c) => {
+    const list = mine.places.filter((p) => p.category === c).sort(byPriority);
     return `<div class="section"><h2 class="section-title">${catTile(c)}${CATS[c]}<span class="count">${list.length}</span></h2>
       <div class="group thumbs">${list.map(placeRow).join('')}</div></div>`;
   }).join('')
@@ -2120,7 +2477,7 @@ function itinerary(trip) {
         const next = locatedList[locatedList.indexOf(p) + 1];
         const legRow = located(p) && next && !S.editDay
           ? `<div class="leg" data-day="${d}" data-from="${p.id}" data-to="${next.id}"><span class="spinner" style="width:14px;height:14px"></span></div>` : '';
-        return (S.editDay ? dragRow(p, inner) : `<a class="row" href="#/place/${p.id}">${inner}${ICON.chev}</a>`) + legRow;
+        return (S.editDay ? dragRow(p, inner) : `<a class="row" href="${placeHref(p)}">${inner}${ICON.chev}</a>`) + legRow;
       }).join('') || `<div class="row dropempty"><span class="s">${S.editDay ? 'Drop a place here' : 'Nothing planned yet.'}</span></div>`}${S.editDay ? '' : `<button class="row addrow" data-act="daypick" data-day="${d}" data-id="${trip.id}"><span class="addic">${ICON.plus}</span><span class="t link">Add places</span></button>`}</div></div>`;
   }
   if (!S.editDay && trip.day_count < 21) {
@@ -2164,7 +2521,7 @@ async function onItineraryDrop(placeId, day, index) {
 
 function popupHtml(p) {
   return `<strong>${esc(p.name)}</strong><br><span style="color:var(--secondary);font-size:13px">${esc(CATS[p.category])}${p.neighborhood ? ` · ${esc(p.neighborhood)}` : ''}</span>
-    <a class="popup-link" href="#/place/${p.id}">Details ›</a>`;
+    <a class="popup-link" href="${placeHref(p)}">Details ›</a>`;
 }
 
 // ---------- Sheets & toasts ----------
@@ -2235,7 +2592,8 @@ const findLink = (text) => (text.match(/https?:\/\/[^\s<>"']+/) || [null])[0];
 
 /** One sheet for every way to add: a reel link, a Google/Apple Maps link, a place name, or screenshots. */
 function addSheet({ tripId = '' } = {}) {
-  const st = { text: '', trip: tripId, results: '', hint: '' };
+  const r = route();
+  const st = { text: '', trip: tripId, folder: r.name === 'folder' ? r.id : null, results: '', hint: '' };
   openSheet({
     type: 'form', title: 'Add', confirm: 'Add', st,
     body: () => `<div class="section"><div class="group"><label class="row searchrow" for="add-input">${ICON.search}
@@ -2244,9 +2602,9 @@ function addSheet({ tripId = '' } = {}) {
         <div class="section-f" id="add-hint">${st.hint || 'TikTok, Instagram and YouTube links find every place in the video. Google Maps and Apple Maps links add that place.'}</div></div>
       <div id="add-results">${st.results}</div>
       <div class="section"><div class="group tiles">
-        <label class="row" for="add-trip">${tile('blue', 'trips')}<span class="main"><span class="t">Trip</span></span>
+        <label class="row" for="add-trip">${tile('blue', 'trips')}<span class="main"><span class="t">Also add to</span></span>
           <select class="select" id="add-trip" data-act="addtrip">
-            <option value="">Choose by location</option>
+            <option value="">Just save it</option>
             ${(S.trips || []).map((t) => `<option value="${t.id}" ${t.id === st.trip ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}
           </select></label>
         <button class="row" data-act="pickshots">${tile('pink', 'photo')}<span class="main"><span class="t">Choose screenshots</span>
@@ -2314,12 +2672,13 @@ function addInputChanged(value) {
 async function addPlace(path, body) {
   S.sheet.busy = true; renderOverlay();
   try {
-    const res = await api(path, { method: 'POST', body });
-    const trip = await loadTrip(res.place.trip_id);
-    fetchedAt.trips = 0;
+    const res = await api(path, { method: 'POST', body: { ...body, folder_id: S.sheet && S.sheet.st && S.sheet.st.folder || null } });
+    const trip = res.place.trip_id ? await loadTrip(res.place.trip_id) : null;
+    await afterLibraryChange();
     closeSheet();
-    toast(res.created ? `Added ${res.place.name} to ${trip.name}` : `${res.place.name} is already in ${trip.name}`);
-    go(`#/place/${res.place.id}`);
+    const where = trip ? trip.name : 'your saved places';
+    toast(res.created ? `Saved ${res.place.name}${trip ? ` to ${trip.name}` : ''}` : `${res.place.name} is already in ${where}`);
+    go(placeHref(res.place));
   } catch (e) {
     if (S.sheet) { S.sheet.busy = false; renderOverlay(); }
     toast(e.message, true);
@@ -2694,7 +3053,7 @@ function checkReservePending() {
   try { localStorage.removeItem(RESERVE_KEY); } catch { /* ignore */ }
   if (age > 6 * 3600 * 1000) return;
   const p = findAnyPlace(pending.placeId);
-  const trip = p && S.trip[p.trip_id];
+  const trip = p && (S.trip[p.trip_id] || (p.trip_ids && p.trip_ids.length === 1 ? S.trip[p.trip_ids[0]] : null));
   if (!p || !trip || (trip.bookings || []).some((b) => b.place_id === p.id && b.kind === 'reservation')) return;
   bookingForm(trip, { kind: 'reservation', title: p.name, place_id: p.id, source: 'reserve', address: p.address || null },
     { title: `Did you book ${p.name}?` });
@@ -2902,7 +3261,7 @@ function ensureNeeds(tripIds) {
 }
 
 function dateOfPlace(trip, p) {
-  if (!trip.start_date || !p.day_number) return '';
+  if (!trip || !trip.start_date || !p.day_number) return p.event_date || '';
   const [y, m, d] = trip.start_date.split('-').map(Number);
   return isoDate(new Date(y, m - 1, d + p.day_number - 1));
 }
@@ -2957,7 +3316,7 @@ async function addToDay(tripId, ids, day) {
 /** After ticking places in a list: which day do they go on? */
 async function addSelectedSheet() {
   const ids = [...S.sel.picked];
-  const tripId = selTripId();
+  const tripId = route().name === 'trip' ? route().id : selTripId();
   if (!ids.length || !tripId) return;
   const trip = await cachedTrip(tripId);
   const title = (d) => (trip.day_titles[d - 1] && trip.day_titles[d - 1] !== `Day ${d}` ? ` · ${trip.day_titles[d - 1]}` : '');
@@ -3304,18 +3663,13 @@ async function onAction(act, el) {
 
     case 'tripmenu': {
       const t = S.trip[el.dataset.id];
-      const setKind = (kind) => async () => {
-        S.trip[t.id] = await api(`/v1/trips/${t.id}`, { method: 'PATCH', body: { kind } });
-        fetchedAt.trips = 0;
-        toast(kind === 'local' ? 'Saved as a local collection' : 'Now a trip');
-        render();
-      };
       const actions = [
-        ...(t.kind === 'local' ? [] : [{ label: t.day_count ? 'Re-plan trip' : 'Plan my trip', run: () => planSheet(t) }]),
-        { label: 'Add a place', run: () => addSheet({ tripId: t.id }) },
-        ...(t.kind === 'local' ? [] : [{ label: 'Add a booking', run: () => addBookingSheet(t) }]),
-        ...(t.kind === 'local' ? [{ label: 'Turn into a trip', run: setKind('trip') }] : [{ label: 'Mark as near home', run: setKind('local') }]),
-        ...(t.kind === 'local' ? [] : [{ label: 'Packing list', run: () => go(`#/packing/${t.id}`) }]),
+        { label: t.day_count ? 'Re-plan with AI' : 'Plan with AI', run: () => planSheet(t) },
+        { label: 'Add from your saved places', run: () => onAction('tripaddplaces', { dataset: { id: t.id } }) },
+        { label: 'Search for a new place', run: () => addSheet({ tripId: t.id }) },
+        ...(t.day_count ? [{ label: 'Suggest places for quiet days', run: () => onAction('tripsuggest', { dataset: { id: t.id } }) }] : []),
+        { label: 'Add a booking', run: () => addBookingSheet(t) },
+        { label: 'Packing list', run: () => go(`#/packing/${t.id}`) },
         { label: 'Save for offline', run: () => saveOffline(t.id) },
         { label: 'Rename', run: () => renameSheet(t) },
         { label: 'Update hours, photos & ratings', run: async () => {
@@ -3406,6 +3760,129 @@ async function onAction(act, el) {
     case 'homecat': S.home.cat = el.dataset.cat; saveHome(); render(); return;
     case 'homestarred': S.home.starred = !S.home.starred; render(); return;
     case 'homeclear': S.home.cat = 'all'; S.home.starred = false; S.home.trip = 'all'; saveHome(); render(); return;
+    case 'libcat': {
+      const f = libFilter(el.dataset.scope);
+      if (f.cats.has(el.dataset.cat)) f.cats.delete(el.dataset.cat); else f.cats.add(el.dataset.cat);
+      render({ quiet: true });
+      return;
+    }
+    case 'libstar': { const f = libFilter(el.dataset.scope); f.starred = !f.starred; render({ quiet: true }); return; }
+    case 'libclear': { delete S.libf[el.dataset.scope]; render({ quiet: true }); return; }
+    case 'libmore': libMoreSheet(el.dataset.scope); return;
+    case 'libcity': {
+      const { st } = S.sheet;
+      if (st.cities.has(el.dataset.city)) st.cities.delete(el.dataset.city); else st.cities.add(el.dataset.city);
+      renderOverlay();
+      return;
+    }
+    case 'libunplanned': S.sheet.st.unplanned = el.checked; return;
+    case 'newfolder':
+      folderNameSheet({ onDone: async (name) => {
+        const fo = await api('/v1/folders', { method: 'POST', body: { name } });
+        closeSheet(); await afterLibraryChange();
+        go(`#/folder/${fo.id}`);
+      } });
+      return;
+    case 'folderadd': {
+      const fid = el.dataset.id;
+      pickSavedSheet({ title: 'Add to folder', exclude: new Set((S.places || []).filter((p) => p.folder_ids.includes(fid)).map((p) => p.id)),
+        onDone: async (ids) => {
+          await api(`/v1/folders/${fid}/places`, { method: 'POST', body: { place_ids: ids } });
+          await afterLibraryChange(); toast(`Added ${plural(ids.length, 'place')}`); render();
+        } });
+      return;
+    }
+    case 'foldermenu': {
+      const fo = (S.folders || []).find((x) => x.id === el.dataset.id);
+      if (!fo) return;
+      openSheet({ type: 'actions', title: fo.name, actions: [
+        { label: 'Add places', run: () => onAction('folderadd', el) },
+        { label: 'Plan a trip from this folder', run: () => newTripSheet({ folderId: fo.id }) },
+        { label: 'Rename', run: () => folderNameSheet({ title: 'Rename folder', name: fo.name, confirm: 'Save', onDone: async (name) => {
+          await api(`/v1/folders/${fo.id}`, { method: 'PATCH', body: { name } });
+          closeSheet(); await afterLibraryChange(); render();
+        } }) },
+        { label: 'Delete folder', destructive: true, run: () => openSheet({ type: 'actions', title: `Delete “${fo.name}”? Its places stay saved.`, actions: [
+          { label: 'Delete folder', destructive: true, run: async () => {
+            await api(`/v1/folders/${fo.id}`, { method: 'DELETE' });
+            await afterLibraryChange(); toast('Folder deleted'); go('#/');
+          } }] }) },
+      ] });
+      return;
+    }
+    case 'newtrip': newTripSheet({ folderId: el.dataset.folder || null }); return;
+    case 'ntcity': S.sheet.st.city = el.dataset.city; renderOverlay(); return;
+    case 'ntdays': { const { st } = S.sheet; st.days = Math.max(1, Math.min(21, st.days + Number(el.dataset.d))); renderOverlay(); return; }
+    case 'ntmode': { const { st } = S.sheet; st.mode = el.dataset.m; st.step = 3; S.sheet.confirm = 'Create trip'; renderOverlay(); return; }
+    case 'ntfill': S.sheet.st.fill = el.checked; return;
+    case 'ntback': { const { st } = S.sheet; st.step -= 1; S.sheet.confirm = st.step === 2 ? null : 'Next'; renderOverlay(); return; }
+    case 'pkfolder': S.sheet.st.folder = el.dataset.f; renderOverlay(); return;
+    case 'seladdfolder': await addToFolderSheet([...S.sel.picked]); return;
+    case 'seladdtrip': await addToTripSheet([...S.sel.picked]); return;
+    case 'selremovefolder': {
+      const ids = [...S.sel.picked];
+      for (const id of ids) await api(`/v1/folders/${el.dataset.id}/places/${id}`, { method: 'DELETE' });
+      await afterLibraryChange(); resetSel(); toast(`Removed ${plural(ids.length, 'place')} from the folder`); render();
+      return;
+    }
+    case 'selremovetrip': {
+      const tripId = route().id;
+      const ids = [...S.sel.picked];
+      let res;
+      for (const id of ids) res = await api(`/v1/trips/${tripId}/places/${id}`, { method: 'DELETE' });
+      if (res) syncTrip(res);
+      await afterLibraryChange(); resetSel(); toast(`Removed ${plural(ids.length, 'place')} from the trip. They’re still saved.`); render();
+      return;
+    }
+    case 'tripaddplaces': {
+      const trip = S.trip[el.dataset.id];
+      pickSavedSheet({ title: `Add to ${trip.name}`, exclude: new Set(trip.places.map((p) => p.id)), onDone: async (ids) => {
+        syncTrip(await api(`/v1/trips/${trip.id}/places`, { method: 'POST', body: { place_ids: ids } }));
+        await afterLibraryChange(); toast(`Added ${plural(ids.length, 'place')}`); render();
+      } });
+      return;
+    }
+    case 'keepsugg':
+      syncTrip(await api(`/v1/trips/${el.dataset.trip}/places/${el.dataset.id}/keep`, { method: 'POST' }));
+      await afterLibraryChange(); toast('Kept, and added to your saved places'); render();
+      return;
+    case 'dropsugg':
+      syncTrip(await api(`/v1/trips/${el.dataset.trip}/places/${el.dataset.id}`, { method: 'DELETE' }));
+      toast('Suggestion removed'); render();
+      return;
+    case 'tripsuggest': {
+      toast('Looking for places to fill quiet days…');
+      const res = await api(`/v1/trips/${el.dataset.id}/suggest`, { method: 'POST' });
+      const before = (S.trip[res.id].places || []).filter((p) => p.suggested).length;
+      syncTrip(res);
+      const n = res.places.filter((p) => p.suggested).length - before;
+      toast(n > 0 ? `Added ${plural(n, 'suggestion')}` : 'No quiet days to fill');
+      render();
+      return;
+    }
+    case 'placefolders': await placeFoldersSheet(el.dataset.id); return;
+    case 'placetrips': await placeTripsSheet(el.dataset.id); return;
+    case 'removefromtrip': {
+      const { trip: tripId, id } = el.dataset;
+      syncTrip(await api(`/v1/trips/${tripId}/places/${id}`, { method: 'DELETE' }));
+      await afterLibraryChange(); toast('Removed from the trip. It’s still saved.'); go(`#/trip/${tripId}`);
+      return;
+    }
+    case 'pfnew':
+      folderNameSheet({ onDone: async (name) => {
+        await api('/v1/folders', { method: 'POST', body: { name, place_ids: [el.dataset.id] } });
+        closeSheet(); await afterLibraryChange(); toast(`Saved to ${name}`); render();
+      } });
+      return;
+    case 'pffolder': {
+      const { st } = S.sheet;
+      const on = !st.inside.has(el.dataset.f);
+      await api(`/v1/folders/${el.dataset.f}/places${on ? '' : `/${st.place}`}`, on ? { method: 'POST', body: { place_ids: [st.place] } } : { method: 'DELETE' });
+      if (on) st.inside.add(el.dataset.f); else st.inside.delete(el.dataset.f);
+      afterLibraryChange().then(() => render({ quiet: true }));
+      renderOverlay();
+      return;
+    }
     case 'disckind': S.disc.kind = el.dataset.kind; render(); return;
     case 'discrefresh': loadDiscover(true); render({ quiet: true }); return;
     case 'discarea': {
@@ -3476,7 +3953,6 @@ async function onAction(act, el) {
       const p = findAnyPlace(el.dataset.id);
       if (!p) return;
       if (S.sel.picked.has(p.id)) S.sel.picked.delete(p.id);
-      else if (selTripId() && p.trip_id !== selTripId()) { toast('Pick places from one trip at a time', true); return; }
       else S.sel.picked.add(p.id);
       render();
       return;
@@ -3491,10 +3967,17 @@ async function onAction(act, el) {
       el.classList.toggle('picked', on);
       el.setAttribute('aria-pressed', String(on));
       el.querySelector('.check').innerHTML = on ? ICON.done : '';
+      const cta = overlay.querySelector('.stickycta .btn');
+      if (cta && st.step === 3) {
+        const n = st.picked.size;
+        cta.innerHTML = `${st.mode === 'ai' ? `${ICON.sparkle}Plan my trip` : 'Create trip'}${n ? ` · ${plural(n, 'place')}` : ''}`;
+        const head = overlay.querySelector('.section-h.pad');
+        if (head) head.textContent = `${n ? `${plural(n, 'place')} picked` : 'Pick places to include'}${st.city ? ` · ${st.city}` : ''}`;
+      }
       return;
     }
     case 'tidy': tidySheet(S.trip[el.dataset.id]); return;
-    case 'chatgptbook': { const p = findAnyPlace(el.dataset.id); chatgptSheet(p, S.trip[p.trip_id]); return; }
+    case 'chatgptbook': { const p = findAnyPlace(el.dataset.id) || (placeDetail[el.dataset.id] || {}).place; chatgptSheet(p, S.trip[p.trip_id] || null); return; }
     case 'eventfilter': S.eventFilter[el.dataset.trip] = el.dataset.f; render(); return;
     case 'eventsrefresh': {
       const id = el.dataset.id;
@@ -3556,8 +4039,8 @@ async function onAction(act, el) {
     }
     case 'bkskip': if (S.bkflow) { S.bkflow.i += 1; closeSheet(); nextDraft(); } return;
     case 'bookedplace': {
-      const p = findAnyPlace(el.dataset.id);
-      bookingForm(S.trip[p.trip_id], { kind: 'reservation', title: p.name, place_id: p.id, source: 'manual', address: p.address || null }, { title: `Booked at ${p.name}` });
+      const p = findAnyPlace(el.dataset.id) || (placeDetail[el.dataset.id] || {}).place;
+      await withTripFor(p, (trip) => bookingForm(trip, { kind: 'reservation', title: p.name, place_id: p.id, source: 'manual', address: p.address || null }, { title: `Booked at ${p.name}` }));
       return;
     }
     case 'lounges': {
@@ -3666,9 +4149,7 @@ async function onAction(act, el) {
           S.sheet.busy = true; renderOverlay();
           try {
             const place = await api(`/v1/places/${p.id}`, { method: 'PATCH', body: { website: url } });
-            const t = S.trip[place.trip_id];
-            if (t) t.places = t.places.map((x) => (x.id === place.id ? place : x));
-            if (S.places) S.places = S.places.map((x) => (x.id === place.id ? place : x));
+            updatePlaceEverywhere(place);
             delete S.menu[p.id];
             closeSheet();
             await runFindMenu(p.id, true);
@@ -3720,7 +4201,7 @@ async function onAction(act, el) {
       return;
     }
     case 'directions': {
-      const place = allPlaces().find((x) => x.id === el.dataset.id);
+      const place = allPlaces().find((x) => x.id === el.dataset.id) || (placeDetail[el.dataset.id] || {}).place;
       const trip = place && S.trip[place.trip_id];
       if (!place) return;
       const links = mapsLinks(place, trip);
@@ -3784,15 +4265,16 @@ async function onAction(act, el) {
     }
     case 'askdeleteplace':
       openSheet({
-        type: 'actions', title: 'Delete this place?',
+        type: 'actions', title: 'Delete this place everywhere? It leaves your saved places, folders and trips.',
         actions: [{ label: 'Delete place', destructive: true, run: async () => {
           await api(`/v1/places/${el.dataset.id}`, { method: 'DELETE' });
           const t = S.trip[el.dataset.trip];
           if (t) t.places = t.places.filter((p) => p.id !== el.dataset.id);
           if (S.places) S.places = S.places.filter((p) => p.id !== el.dataset.id);
           fetchedAt.trips = 0;
+          await afterLibraryChange();
           toast('Place deleted');
-          go(`#/trip/${el.dataset.trip}`);
+          go(el.dataset.trip ? `#/trip/${el.dataset.trip}` : '#/');
         } }],
       });
       return;
@@ -3809,15 +4291,24 @@ async function onAction(act, el) {
   }
 }
 
+/** Day, time slot and exact time are per trip; star, notes and the rest belong to the place everywhere. */
+const TRIP_FIELDS = ['trip_id', 'day_number', 'day_order', 'time_of_day', 'day_note', 'start_time', 'suggested', 'suggestion_note'];
+function updatePlaceEverywhere(place) {
+  const shared = Object.fromEntries(Object.entries(place).filter(([k]) => !TRIP_FIELDS.includes(k)));
+  Object.values(S.trip).forEach((t) => {
+    t.places = t.places.map((x) => (x.id !== place.id ? x : (place.trip_id === t.id ? place : { ...x, ...shared })));
+  });
+  if (S.places) S.places = S.places.map((x) => (x.id === place.id ? { ...x, ...shared } : x));
+  if (placeDetail[place.id]) placeDetail[place.id].place = { ...placeDetail[place.id].place, ...shared };
+}
+
 async function patchPlace(id, body, rerender = true) {
   try {
+    const ctx = contextTrip();
+    if (ctx && ['day_number', 'time_of_day', 'start_time', 'clear_time_of_day', 'clear_start_time'].some((k) => k in body)) body = { ...body, trip_id: ctx };
     const place = await api(`/v1/places/${id}`, { method: 'PATCH', body });
-    const t = S.trip[place.trip_id];
-    if (t) {
-      t.places = t.places.map((p) => (p.id === id ? place : p));
-      if ('day_number' in body) await loadTrip(place.trip_id); // day count may have changed
-    }
-    if (S.places) S.places = S.places.map((p) => (p.id === id ? place : p));
+    updatePlaceEverywhere(place);
+    if ('day_number' in body && place.trip_id) await loadTrip(place.trip_id); // day count may have changed
     if ('category' in body || 'must_do' in body) fetchedAt.trips = 0;
     if (rerender) render();
   } catch (e) {
@@ -3835,9 +4326,7 @@ async function patchPlace(id, body, rerender = true) {
 async function locate(id, query) {
   try {
     const place = await api(`/v1/places/${id}/locate`, { method: 'POST', body: { query } });
-    const t = S.trip[place.trip_id];
-    if (t) t.places = t.places.map((p) => (p.id === id ? place : p));
-    if (S.places) S.places = S.places.map((p) => (p.id === id ? place : p));
+    updatePlaceEverywhere(place);
     toast('Pinned on the map');
     render();
   } catch (e) {
@@ -3879,6 +4368,13 @@ document.addEventListener('input', (ev) => {
   if (el.dataset && el.dataset.act === 'addinput') addInputChanged(el.value);
   if (el.dataset && el.dataset.act === 'tastenotes' && S.taste) S.taste.p.notes = el.value;
   if (el.dataset && el.dataset.act === 'tidytext' && S.sheet && S.sheet.st) S.sheet.st.text = el.value;
+  if (el.dataset && el.dataset.act === 'ntfield' && S.sheet && S.sheet.st) S.sheet.st[el.dataset.f] = el.value;
+  if (el.dataset && el.dataset.act === 'libq') { libFilter(el.dataset.scope).q = el.value; redrawLibList(el.dataset.scope); }
+  if (el.dataset && el.dataset.act === 'pkq' && S.sheet && S.sheet.st) {
+    S.sheet.st.q = el.value;
+    const box = document.getElementById('pklist');
+    if (box) { const tmp = document.createElement('div'); tmp.innerHTML = pickerBody(S.sheet.st); box.replaceWith(tmp.querySelector('#pklist')); hydrateIcons(overlay); }
+  }
   if (el.id === 'chat-input') { el.style.height = 'auto'; el.style.height = `${Math.min(el.scrollHeight, 140)}px`; }
 });
 

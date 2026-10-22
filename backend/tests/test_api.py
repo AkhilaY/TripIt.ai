@@ -2738,3 +2738,12 @@ def test_old_trips_become_folders_or_stay_trips(tmp_path):
     db.delete_trip("t1")
     assert len(db.list_places(saved_only=True)) == 3  # trips no longer take their places with them
     dbmod.Database(str(path))  # opening again doesn't migrate twice
+    assert (tmp_path / "old.db.before-library.bak").exists()  # a copy from before the move
+
+
+def test_place_detail_has_its_reels(client):
+    job = import_reel(client, trip=False)
+    lucali = saved_ids(client)["Lucali"]
+    d = client.get(f"/v1/places/{lucali}", headers=H).json()
+    assert d["place"]["name"] == "Lucali" and d["reels"][0]["id"] == job["reel_id"]
+    assert client.get("/v1/places/nope", headers=H).status_code == 404

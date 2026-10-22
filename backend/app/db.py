@@ -285,6 +285,7 @@ class Database:
     def __init__(self, path: str):
         if path != ":memory:":
             Path(path).parent.mkdir(parents=True, exist_ok=True)
+        self._path = path
         self._conn = sqlite3.connect(path, check_same_thread=False, isolation_level=None)
         self._conn.row_factory = sqlite3.Row
         self._lock = threading.RLock()
@@ -317,6 +318,12 @@ class Database:
         their own: trips you planned keep their places (as links), the rest become folders named after them."""
         if self._conn.execute("SELECT 1 FROM settings WHERE key = 'migrated_library'").fetchone():
             return
+        if self._path != ":memory:" and self._conn.execute("SELECT 1 FROM trips").fetchone():
+            # A copy from before the move, in case anything needs to be looked up later.
+            backup = sqlite3.connect(f"{self._path}.before-library.bak")
+            with backup:
+                self._conn.backup(backup)
+            backup.close()
         info = {r["name"]: r for r in self._conn.execute("PRAGMA table_info(places)")}
         if info["trip_id"]["notnull"]:  # rebuild without the NOT NULL / cascade on trip_id
             sql = self._conn.execute("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'places'").fetchone()[0]
@@ -337,6 +344,15 @@ class Database:
             finally:
                 self._conn.execute("PRAGMA foreign_keys = ON")
         stamp = now().isoformat()
+        self._conn.execute("BEGIN")
+        try:
+            self._move_trips_to_library(stamp)
+            self._conn.execute("COMMIT")
+        except Exception:
+            self._conn.execute("ROLLBACK")
+            raise
+
+    def _move_trips_to_library(self, stamp: str) -> None:
         for trip in self._conn.execute("SELECT * FROM trips").fetchall():
             keep = (trip["day_count"] or trip["start_date"] or trip["share_token"]
                     or self._conn.execute("SELECT 1 FROM bookings WHERE trip_id = ?", (trip["id"],)).fetchone()
@@ -635,6 +651,11 @@ class Database:
             (reel_id,),
         )
         return Reel(**dict(rows[0])) if rows else None
+
+    def place_reels(self, place_id: str) -> list[Reel]:
+        rows = self._rows("SELECT r.*, (SELECT COUNT(*) FROM place_mentions pm WHERE pm.reel_id = r.id) AS place_count "
+                          "FROM reels r JOIN place_mentions m ON m.reel_id = r.id WHERE m.place_id = ? ORDER BY r.imported_at", (place_id,))
+        return [Reel(**dict(r)) for r in rows]
 
     def list_reels(self, trip_id: Optional[str] = None) -> list[Reel]:
         sql = ("SELECT r.*, (SELECT COUNT(*) FROM places p WHERE p.reel_id = r.id) AS place_count "

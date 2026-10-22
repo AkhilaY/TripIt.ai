@@ -642,6 +642,11 @@ class SuggestionResult(BaseModel):
     suggestions: list[PlaceSuggestion]
 
 
+class PlaceDetail(BaseModel):
+    place: Place
+    reels: list["Reel"] = []  # the posts that recommended it
+
+
 class Folder(BaseModel):
     id: str
     name: str
@@ -904,3 +909,6 @@ class DayBriefing(BriefingText):
     day: int
     curated_by: str  # "claude" or "offline"
     created_at: datetime
+
+
+PlaceDetail.model_rebuild()

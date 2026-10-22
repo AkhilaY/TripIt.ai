@@ -67,6 +67,7 @@ from .models import (
     FolderRename,
     NewTripRequest,
     PlaceIds,
+    PlaceDetail,
     LoungeResult,
     HomeSetting,
     LocateRequest,
@@ -1110,6 +1111,13 @@ async def add_place_from_link(body: AddFromLinkRequest, request: Request, respon
     if not created:
         response.status_code = 200
     return AddPlaceResult(place=place, created=created)
+
+
+@app.get("/v1/places/{place_id}", response_model=PlaceDetail, dependencies=[Auth])
+async def get_place(place_id: str, request: Request) -> PlaceDetail:
+    """One saved place with the posts that recommended it (its trips and folders are in trip_ids / folder_ids)."""
+    place = _place_or_404(request, place_id)
+    return PlaceDetail(place=place, reels=_db(request).place_reels(place_id))
 
 
 @app.patch("/v1/places/{place_id}", response_model=Place, dependencies=[Auth])

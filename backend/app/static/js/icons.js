@@ -45,6 +45,8 @@ export const ICON = {
   bike: sv('<circle cx="6" cy="16" r="3.5"/><circle cx="18" cy="16" r="3.5"/>' + P('M6 16l4-8h5l3 8M10 8l2.5 8H6M14 5h2')),
   locate: sv(P('M12 2v3M12 19v3M2 12h3M19 12h3') + '<circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2" fill="currentColor"/>'),
   clock: sv('<circle cx="12" cy="12" r="9.5"/>' + P('M12 7v5l3 2')),
+  folder: sv(P('M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z')),
+  bookmark: sv(P('M6 3h12v18l-6-4.5L6 21z')),
   close: sv(P('M6 6l12 12M18 6L6 18'), 'stroke-width="2.6"'),
   done: sv(P('M5 12.5l4.5 4.5L19 7'), 'stroke-width="2.8"'),
   camera: sv('<rect x="3.5" y="3.5" width="17" height="17" rx="5"/><circle cx="12" cy="12" r="4"/><circle cx="17" cy="7" r=".7" fill="currentColor"/>'),

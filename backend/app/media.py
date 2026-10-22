@@ -1,5 +1,6 @@
 """Downloading reels and turning them into things Claude can read: caption, audio, frames."""
 
+from datetime import date, datetime, timezone
 import logging
 import os
 import re
@@ -202,7 +203,20 @@ def _metadata(info: dict, url: str, platform: str) -> ReelMetadata:
         uploader=info.get("uploader") or info.get("channel"),
         thumbnail_url=info.get("thumbnail"),
         duration_seconds=info.get("duration"),
+        posted_on=_posted_on(info),
     )
+
+
+def _posted_on(info: dict):
+    raw = str(info.get("upload_date") or "")
+    try:
+        if len(raw) == 8 and raw.isdigit():
+            return date(int(raw[:4]), int(raw[4:6]), int(raw[6:]))
+        if info.get("timestamp"):
+            return datetime.fromtimestamp(float(info["timestamp"]), tz=timezone.utc).date()
+    except (ValueError, OverflowError, OSError):
+        pass
+    return None
 
 
 def extract_audio(video: Path, workdir: Path) -> Optional[Path]:

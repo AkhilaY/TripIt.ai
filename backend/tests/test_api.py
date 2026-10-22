@@ -1,4 +1,5 @@
 import json
+from datetime import date
 import time
 from types import SimpleNamespace
 
@@ -208,6 +209,8 @@ def client(monkeypatch, tmp_path):
     app.state.needs = NeedsService(db, claude)
     from app.lounges import LoungeService
     app.state.lounges = LoungeService(db, claude)
+    from app.calendar import CalendarService
+    app.state.calendar = CalendarService(db, app.state.photos)
     from app.discover import DiscoverService
     app.state.discover = DiscoverService(db, claude, geocoder, app.state.photos)
     tm_state = {"fail": False, "events": [], "log": []}
@@ -235,7 +238,7 @@ def client(monkeypatch, tmp_path):
         c.uploads = tmp_path / "uploads"
         yield c
     app.dependency_overrides.clear()
-    for attr in ("db", "store", "claude", "library", "pipeline", "router", "photos", "push", "curator", "menus", "packing", "events", "needs", "discover", "lounges"):
+    for attr in ("db", "store", "claude", "library", "pipeline", "router", "photos", "push", "curator", "menus", "packing", "events", "needs", "discover", "lounges", "calendar"):
         delattr(app.state, attr)
 
 
@@ -2247,7 +2250,7 @@ def test_event_added_to_the_trip(client):
     client.get(f"/v1/trips/{trip_id}/events", headers=H)
     trip = client.post(f"/v1/trips/{trip_id}/events/e1/add", headers=H).json()
     place = next(p for p in trip["places"] if p["name"] == "Jazz at the Steel")
-    assert place["start_time"] == "19:30" and place["day_number"] == 2 and place["category"] == "nightlife"
+    assert place["start_time"] == "19:30" and place["day_number"] == 2 and place["category"] == "event" and place["event_date"] is not None
     assert place["latitude"] == 40.7165 and place["website"] == "https://www.ticketmaster.com/event/e1" and place["address"] == "319 Frost St, Brooklyn"
     again = client.post(f"/v1/trips/{trip_id}/events/e1/add", headers=H).json()
     assert [p["name"] for p in again["places"]].count("Jazz at the Steel") == 1
@@ -2531,3 +2534,68 @@ def test_lounges_need_a_real_airport(client):
     fake = client.post(f"/v1/trips/{tid}/bookings", json={"kind": "flight", "title": "XX 2", "origin": "Nowhere"}, headers=H).json()["bookings"][-1]
     client.messages.outputs[LoungeList] = LoungeList(airport_name=None, lounges=[])
     assert client.get(f"/v1/trips/{tid}/bookings/{fake['id']}/lounges", headers=H).json()["status"] == "no_airport"
+
+
+# ---------- Bookings tab, events and calendar ----------
+
+
+def test_all_bookings_list_carries_the_trip(client):
+    tid = import_reel(client)["trip_id"]
+    client.post(f"/v1/trips/{tid}/bookings", json={"kind": "hotel", "title": "Hoxton", "start_at": "2026-11-03", "end_at": "2026-11-05"}, headers=H)
+    client.post(f"/v1/trips/{tid}/bookings", json={"kind": "flight", "title": "BA 178", "origin": "JFK", "destination": "LHR", "start_at": "2026-11-02T19:30"}, headers=H)
+    rows = client.get("/v1/bookings", headers=H).json()
+    assert [r["title"] for r in rows] == ["BA 178", "Hoxton"] and rows[0]["trip_name"] == "New York"
+
+
+def test_reel_events_get_dates_and_land_on_the_calendar(client):
+    client.messages.outputs[ExtractionResult] = ExtractionResult(
+        title="Pop-ups this week", destination_city="New York", destination_country="USA", summary="Events",
+        places=[{**extracted("Matcha & Pilates Morning"), **{"category": "event", "event_date": date(2026, 11, 7), "event_time": "09:00", "venue": "Lucali"}},
+                {**extracted("Glossier Pop-up"), **{"category": "event", "event_date": date(2026, 11, 6), "event_end_date": date(2026, 11, 9)}},
+                {**extracted("Mystery Supper Club"), **{"category": "event"}}])
+    tid = import_reel(client)["trip_id"]
+    trip = client.get(f"/v1/trips/{tid}", headers=H).json()
+    pilates = next(p for p in trip["places"] if p["name"].startswith("Matcha"))
+    assert pilates["category"] == "event" and pilates["event_date"] == "2026-11-07" and pilates["start_time"] == "09:00" and pilates["venue"] == "Lucali"
+    cal = client.get("/v1/calendar", headers=H).json()
+    events = [i for i in cal["items"] if i["kind"] == "event"]
+    assert [e["title"] for e in events] == ["Glossier Pop-up", "Matcha & Pilates Morning"]
+    assert events[0]["end_date"] == "2026-11-09"
+    assert [u["title"] for u in cal["undated"]] == ["Mystery Supper Club"]
+    assert "calendar.google.com/calendar/render" in events[1]["google_url"] and "20261107T090000" in events[1]["google_url"]
+    ics = client.get(events[1]["ics_url"])
+    assert ics.status_code == 200 and "DTSTART:20261107T090000" in ics.text and "SUMMARY:Matcha & Pilates Morning" in ics.text
+    assert "DTSTART;VALUE=DATE:20261106" in client.get(events[0]["ics_url"]).text and "DTEND;VALUE=DATE:20261110" in client.get(events[0]["ics_url"]).text
+    # Setting a date by hand moves it onto the calendar.
+    supper = next(p for p in trip["places"] if p["name"] == "Mystery Supper Club")
+    client.patch(f"/v1/places/{supper['id']}", json={"event_date": "2026-11-08"}, headers=H)
+    cal = client.get("/v1/calendar", headers=H).json()
+    assert not cal["undated"] and any(i["title"] == "Mystery Supper Club" for i in cal["items"])
+    client.patch(f"/v1/places/{supper['id']}", json={"clear_event_date": True}, headers=H)
+    assert client.get("/v1/calendar", headers=H).json()["undated"][0]["title"] == "Mystery Supper Club"
+
+
+def test_calendar_includes_bookings_stops_and_trips(client):
+    tid = import_reel(client)["trip_id"]
+    client.post(f"/v1/trips/{tid}/plan", json={"days": 2}, headers=H)
+    client.patch(f"/v1/trips/{tid}", json={"start_date": "2026-12-01"}, headers=H)
+    client.post(f"/v1/trips/{tid}/bookings", json={"kind": "flight", "title": "BA 178", "origin": "JFK", "destination": "LHR", "start_at": "2026-12-01T08:00"}, headers=H)
+    items = client.get("/v1/calendar", headers=H).json()["items"]
+    kinds = {i["kind"] for i in items}
+    assert kinds == {"trip", "stop", "booking"}
+    assert items[0]["kind"] == "trip" and items[0]["date"] == "2026-12-01"
+    assert next(i for i in items if i["kind"] == "booking")["title"] == "BA 178 JFK → LHR"
+
+
+def test_calendar_feed_subscription(client):
+    assert client.get("/v1/calendar", headers=H).json()["feed"] is None
+    feed = client.post("/v1/calendar/feed", headers=H).json()
+    assert feed["webcal_url"].startswith("webcal://") and "calendar.google.com/calendar/r?cid=webcal" in feed["google_url"]
+    path = "/" + feed["url"].split("/", 3)[3]
+    r = client.get(path)
+    assert r.status_code == 200 and r.text.startswith("BEGIN:VCALENDAR")
+    new = client.post("/v1/calendar/feed", headers=H).json()
+    assert client.get(path).status_code == 404  # the old link stops working
+    client.delete("/v1/calendar/feed", headers=H)
+    assert client.get("/" + new["url"].split("/", 3)[3]).status_code == 404
+    assert client.get("/v1/calendar/item.ics?id=event:x&sig=bad").status_code in (403, 404)

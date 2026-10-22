@@ -1,6 +1,7 @@
 """Claude calls: pull places out of a reel, and turn saved places into a day-by-day plan."""
 
 import base64
+from datetime import date
 import json
 import logging
 from pathlib import Path
@@ -29,6 +30,7 @@ Rules:
 - Never invent addresses, prices or dishes that weren't mentioned or shown. Use null when unknown.
 - confidence: high when the name is clearly stated or shown; low when you had to infer it from partial or garbled text.
 - image_labels: pick up to 3 images that actually show the place (its storefront, sign, interior, view or food), copying their labels exactly. Skip images that only show the creator, text cards or other places.
+- Events count too: pop-ups, brand activations, markets, classes (pilates, matcha, pottery), run clubs, networking and social nights, concerts, collaborations. Name the event as people would ("Glossier x Sweetgreen pop-up"), use category event, put where it happens in venue, and fill event_date / event_end_date / event_time when the post gives them. Resolve "this Saturday" or "next Friday" from the post date; never guess a date that isn't given.
 - List places in the order they appear in the video. If the reel has no identifiable places, return an empty list."""
 
 PLAN_SYSTEM = """You are a travel planner. Arrange the given saved places into a realistic day-by-day itinerary.
@@ -152,6 +154,7 @@ class ClaudeService:
             f"Platform: {reel.platform}",
             f"Creator: {reel.uploader or 'unknown'}",
             f"Title: {reel.title or '(none)'}",
+            f"Posted: {reel.posted_on.isoformat() if reel.posted_on else 'unknown'} (today is {date.today().isoformat()})",
             f"Caption:\n{reel.caption or '(none)'}",
         ]
         if shared_text and shared_text.strip() != (reel.caption or "").strip():

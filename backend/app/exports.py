@@ -11,7 +11,7 @@ from .models import Place, TripDetail
 SLOTS = {"morning": (9, 0, 120), "lunch": (12, 30, 90), "afternoon": (14, 30, 150), "dinner": (19, 0, 120), "evening": (21, 0, 120)}
 CATEGORY_NAMES = {
     "food": "Food", "cafe": "Cafés", "dessert": "Sweets", "drinks": "Drinks", "nightlife": "Nightlife", "attraction": "Sights",
-    "activity": "Things to do", "nature": "Outdoors", "shopping": "Shopping", "stay": "Stay", "other": "Other",
+    "activity": "Things to do", "event": "Events", "nature": "Outdoors", "shopping": "Shopping", "stay": "Stay", "other": "Other",
 }
 
 

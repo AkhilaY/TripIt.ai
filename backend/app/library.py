@@ -83,9 +83,15 @@ class Library:
                 address=extracted.address,
                 city=city,
                 country=country,
+                event_date=extracted.event_date,
+                event_end_date=extracted.event_end_date if extracted.event_date and extracted.event_end_date and extracted.event_end_date > extracted.event_date else None,
+                start_time=extracted.event_time if extracted.event_date else None,
+                venue=" ".join((extracted.venue or "").split())[:200] or None,
             )
             self._add_reel_photos(place.id, extracted.image_labels, images, photo_attribution)
-            await self.locate(self.db.get_place(place.id))
+            # An event's own name isn't on the map; its venue is.
+            venue = extracted.venue if extracted.category == "event" and extracted.venue else None
+            await self.locate(self.db.get_place(place.id), query=f"{venue}, {city}" if venue else None)
             added += 1
 
         self.db.set_reel_trip(reel.id, first_trip)

@@ -13,6 +13,7 @@ PREFERRED_TIME = {
     PlaceCategory.food: TimeOfDay.lunch,
     PlaceCategory.drinks: TimeOfDay.evening,
     PlaceCategory.nightlife: TimeOfDay.evening,
+    PlaceCategory.event: TimeOfDay.evening,
     PlaceCategory.stay: TimeOfDay.evening,
 }
 TIME_ORDER = list(TimeOfDay)

@@ -13,6 +13,7 @@ class PlaceCategory(str, Enum):
     nightlife = "nightlife"
     attraction = "attraction"
     activity = "activity"
+    event = "event"
     nature = "nature"
     shopping = "shopping"
     stay = "stay"
@@ -42,7 +43,7 @@ class OpeningHours(BaseModel):
 
 class ExtractedPlace(BaseModel):
     name: str = Field(description="Official business or landmark name, as you'd type it into a maps search.")
-    category: PlaceCategory
+    category: PlaceCategory = Field(description="event is for a dated happening (a concert, show, festival, match, pop-up or limited exhibition); a venue itself takes its usual category.")
     city: str
     country: str
     neighborhood: Optional[str] = Field(description="Neighborhood or district, if known.")
@@ -55,6 +56,10 @@ class ExtractedPlace(BaseModel):
         description="Where in the reel the place was identified."
     )
     confidence: Literal["high", "medium", "low"]
+    event_date: Optional[date] = Field(default=None, description="For an event: the date it happens (or starts), resolving words like 'this Saturday' from the post date. Null when no date is given or for a regular place.")
+    event_end_date: Optional[date] = Field(default=None, description="For a multi-day event (a pop-up running all week): the last day. Null otherwise.")
+    event_time: Optional[str] = Field(default=None, pattern=r"^([01]\d|2[0-3]):[0-5]\d$", description="For an event: its start time as 'HH:MM' (24 hour), or null.")
+    venue: Optional[str] = Field(default=None, description="For an event: the venue or address where it happens, as you'd search for it on a map. Null otherwise.")
     image_labels: list[str] = Field(
         description="Labels of up to 3 frames or slides, copied exactly (e.g. 'Slide 2', 'Frame at 12s'), that "
         "clearly show this place itself: storefront, sign, interior, view or its food. Empty if none do."
@@ -95,6 +100,7 @@ class ReelMetadata(BaseModel):
     uploader: Optional[str] = None
     thumbnail_url: Optional[str] = None
     duration_seconds: Optional[float] = None
+    posted_on: Optional[date] = None  # when the post went up, to resolve 'this Saturday'
 
 
 class Job(BaseModel):
@@ -189,6 +195,12 @@ class Booking(BaseModel):
     place_id: Optional[str] = None  # the saved place a table reservation is for
     source: Literal["manual", "screenshot", "text", "reserve"] = "manual"
     created_at: datetime
+
+
+class BookingListItem(Booking):
+    """A booking with the trip it belongs to, for the Bookings tab."""
+    trip_name: str
+    trip_kind: Literal["trip", "local"] = "trip"
 
 
 class BookingInput(BaseModel):
@@ -298,6 +310,40 @@ class Lounge(BaseModel):
     location: Optional[str] = Field(description="Where in the terminal, e.g. 'Airside, near gate B22, level 2', under 14 words, or null.")
     access: list[str] = Field(description="Ways in, each under 12 words: 'Priority Pass', 'Amex Platinum card holders', 'Business class on Delta', 'Day pass about $50', 'Oneworld Emerald/Sapphire'. Only ones you are confident of.")
     hours: Optional[str] = Field(description="Typical opening hours like '5:00-22:00', or null if not sure.")
+
+
+Day = date  # the field below is called "date"
+
+
+class CalendarItem(BaseModel):
+    """One dated thing on the calendar: a saved event, a booking, a planned stop, or a trip's span of days."""
+    id: str  # "event:<place id>", "booking:<id>", "stop:<place id>", "trip:<id>"
+    kind: Literal["event", "booking", "stop", "trip"]
+    title: str
+    date: Optional[Day] = None  # None for an event with no date yet
+    end_date: Optional[Day] = None  # last day, for multi-day items
+    time: Optional[str] = None  # "HH:MM" local
+    end_time: Optional[str] = None
+    part_of_day: Optional[str] = None  # a planned stop's time of day when it has no exact time
+    subtitle: Optional[str] = None
+    category: Optional[str] = None  # the place's category, or the booking's kind
+    place_id: Optional[str] = None
+    trip_id: Optional[str] = None
+    booking_id: Optional[str] = None
+    google_url: Optional[str] = None  # opens Google Calendar with this item filled in
+    ics_url: Optional[str] = None  # a signed .ics link for Apple Calendar and others
+
+
+class CalendarFeed(BaseModel):
+    url: str  # https link to the .ics feed
+    webcal_url: str  # opens Apple Calendar's subscribe prompt
+    google_url: str  # opens Google Calendar's "add by URL"
+
+
+class CalendarResult(BaseModel):
+    items: list[CalendarItem]
+    undated: list[CalendarItem]  # saved events with no date yet
+    feed: Optional[CalendarFeed] = None
 
 
 class LoungeList(BaseModel):
@@ -509,7 +555,10 @@ class Place(BaseModel):
     photos: list[PlacePhoto] = []
     photos_checked_at: Optional[datetime] = None
     must_do: bool = False  # shown as a star: starred places rank first everywhere
-    start_time: Optional[str] = None  # "HH:MM" local time, e.g. a reservation
+    start_time: Optional[str] = None  # "HH:MM" local time, e.g. a reservation or an event's start
+    event_date: Optional[date] = None  # for an event: the day it happens (or starts)
+    event_end_date: Optional[date] = None  # for a multi-day event: the last day
+    venue: Optional[str] = None  # for an event: where it happens
     rating: Optional[float] = None  # Google's rating out of 5, when the place was found there
     rating_count: Optional[int] = None
     rating_checked_at: Optional[datetime] = None
@@ -587,6 +636,9 @@ class PlaceUpdate(BaseModel):
     start_time: Optional[str] = Field(default=None, pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
     clear_start_time: bool = False
     website: Optional[str] = Field(default=None, max_length=500)  # "" clears it
+    event_date: Optional[date] = None
+    event_end_date: Optional[date] = None
+    clear_event_date: bool = False
 
 
 class PlanTripRequest(BaseModel):

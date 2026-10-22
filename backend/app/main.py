@@ -25,6 +25,7 @@ from .concierge import Curator
 from .config import Settings, get_settings
 from .db import Database
 from .discover import DiscoverService
+from .calendar import CalendarService
 from .events import EventsService, Ticketmaster
 from .lounges import LoungeService
 from .exports import ExportError, ics, kml, schedule
@@ -42,6 +43,9 @@ from .models import (
     Booking,
     BookingDraft,
     BookingInput,
+    BookingListItem,
+    CalendarFeed,
+    CalendarResult,
     AddPlaceRequest,
     AddPlaceResult,
     BriefingRequest,
@@ -121,6 +125,7 @@ def build_services(app: FastAPI, settings: Settings) -> None:
     app.state.curator = Curator(db, app.state.claude)
     app.state.discover = DiscoverService(db, app.state.claude, app.state.library.geocoder, photos)
     app.state.lounges = LoungeService(db, app.state.claude)
+    app.state.calendar = CalendarService(db, photos)
     app.state.needs = NeedsService(db, app.state.claude)
     app.state.events = EventsService(db, app.state.claude, Ticketmaster(settings), app.state.library)
     app.state.packing = PackingService(db, app.state.claude, Weather(settings), app.state.library)
@@ -560,6 +565,58 @@ def _check_booking_place(request: Request, trip_id: str, place_id: Optional[str]
             raise HTTPException(status_code=422, detail="That place isn't in this trip")
 
 
+def _public_base(request: Request) -> str:
+    """The app's own address as the phone sees it (Fly terminates TLS, so trust its forwarded scheme)."""
+    proto = request.headers.get("x-forwarded-proto") or request.url.scheme
+    return f"{proto}://{request.headers.get('host') or request.url.netloc}"
+
+
+@app.get("/v1/calendar", response_model=CalendarResult, dependencies=[Auth])
+async def calendar(request: Request) -> CalendarResult:
+    """Everything dated: saved events, bookings, planned stops and trips, soonest first, plus events with no date yet."""
+    return request.app.state.calendar.result(_public_base(request))
+
+
+@app.post("/v1/calendar/feed", response_model=CalendarFeed, dependencies=[Auth])
+async def start_calendar_feed(request: Request) -> CalendarFeed:
+    """A private link Google or Apple Calendar can subscribe to. Making a new one turns the old one off."""
+    return request.app.state.calendar.start_feed(_public_base(request))
+
+
+@app.delete("/v1/calendar/feed", status_code=204, dependencies=[Auth])
+async def stop_calendar_feed(request: Request) -> Response:
+    request.app.state.calendar.stop_feed()
+    return Response(status_code=204)
+
+
+@app.get("/v1/calendar/item.ics", include_in_schema=False)
+async def calendar_item_ics(request: Request, id: str = "", sig: str = "") -> Response:
+    """One item as an .ics file, for Apple Calendar's "Add" prompt. Authorized by the signature in the link."""
+    cal = request.app.state.calendar
+    if not id or not cal.check_ics(id, sig):
+        raise HTTPException(status_code=403, detail="Bad calendar link")
+    item = next((i for i in cal.items()[0] if i.id == id), None)
+    if item is None:
+        raise HTTPException(status_code=404, detail="That's no longer on your calendar")
+    return Response(cal.ics([item], name=item.title), media_type="text/calendar; charset=utf-8",
+                    headers={"Content-Disposition": 'inline; filename="event.ics"', "Cache-Control": "no-store"})
+
+
+@app.get("/cal/{token}.ics", include_in_schema=False)
+async def calendar_feed(token: str, request: Request) -> Response:
+    """The subscribed calendar. The token in the address is the only key, so it can be turned off or replaced."""
+    cal = request.app.state.calendar
+    if not cal.feed_token_ok(token):
+        raise HTTPException(status_code=404, detail="Not found")
+    return Response(cal.ics(cal.items()[0]), media_type="text/calendar; charset=utf-8", headers={"Cache-Control": "no-store"})
+
+
+@app.get("/v1/bookings", response_model=list[BookingListItem], dependencies=[Auth])
+async def list_all_bookings(request: Request) -> list[BookingListItem]:
+    """Every booking across trips, soonest first (undated ones last), for the Bookings tab."""
+    return _db(request).list_all_bookings()
+
+
 @app.get("/v1/trips/{trip_id}/bookings/{booking_id}/lounges", response_model=LoungeResult, dependencies=[Auth])
 async def booking_lounges(trip_id: str, booking_id: str, request: Request, refresh: bool = False) -> LoungeResult:
     """Lounges at the airport a flight departs from: name, terminal, and how to get in. From Claude's knowledge, so to be checked."""
@@ -948,6 +1005,11 @@ async def update_place(place_id: str, body: PlaceUpdate, request: Request) -> Pl
         db.update_place(place_id, **simple)
     if "day_number" in fields and body.day_number is not None:
         library.move_place(place, body.day_number or None)
+    if body.clear_event_date:
+        db.update_place(place_id, event_date=None, event_end_date=None)
+    elif "event_date" in fields and body.event_date is not None:
+        end = body.event_end_date if body.event_end_date and body.event_end_date > body.event_date else None
+        db.update_place(place_id, event_date=body.event_date, event_end_date=end)
     if body.clear_start_time:
         db.update_place(place_id, start_time=None)
     if body.clear_time_of_day:

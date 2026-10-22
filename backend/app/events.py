@@ -242,8 +242,8 @@ class EventsService:
             return existing, False
         day_part, _, time_part = event.start_at.partition("T")
         place = self.library.db.add_place(
-            trip_id=trip.id, name=event.name, category="nightlife" if event.category == "music" else "activity",
-            summary=" · ".join(p for p in (event.genre, event.venue) if p), city=trip.city, country=trip.country,
+            trip_id=trip.id, name=event.name, category="event",
+            summary=" · ".join(p for p in (event.genre, event.venue) if p), event_date=date.fromisoformat(day_part), venue=event.venue, city=trip.city, country=trip.country,
             address=event.address, latitude=event.latitude, longitude=event.longitude, website=event.url,
             start_time=time_part or None,
         )

@@ -12,7 +12,7 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterable, Optional
 
-from .models import Booking, ExtractionResult, Job, JobStatus, Place, Reel, ReelMetadata, Trip, TripDetail
+from .models import Booking, BookingListItem, ExtractionResult, Job, JobStatus, Place, Reel, ReelMetadata, Trip, TripDetail
 
 log = logging.getLogger(__name__)
 
@@ -189,6 +189,7 @@ MIGRATIONS = {
         ("website", "TEXT"), ("phone", "TEXT"), ("contact_checked_at", "TEXT"),
         ("reserve_url", "TEXT"), ("reserve_provider", "TEXT"), ("reserve_checked_at", "TEXT"),
         ("booking_kind", "TEXT"), ("booking_need", "TEXT"), ("booking_note", "TEXT"), ("booking_checked_at", "TEXT"),
+        ("event_date", "TEXT"), ("event_end_date", "TEXT"), ("venue", "TEXT"),
     ],
     "trips": [("share_token", "TEXT"), ("kind", "TEXT NOT NULL DEFAULT 'trip'")],
 }
@@ -200,6 +201,7 @@ PLACE_COLUMNS = (
     "opening_hours", "hours_checked_at", "photos", "photos_checked_at", "must_do", "start_time",
     "rating", "rating_count", "rating_checked_at", "website", "phone", "contact_checked_at",
     "reserve_url", "reserve_provider", "reserve_checked_at", "booking_kind", "booking_need", "booking_note", "booking_checked_at",
+    "event_date", "event_end_date", "venue",
 )
 BOOKING_COLUMNS = (
     "kind", "title", "start_at", "end_at", "origin", "destination", "address", "confirmation", "party_size",
@@ -257,6 +259,10 @@ class Database:
             for name, sql_type in columns:
                 if name not in existing:
                     self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {sql_type}")
+        # Events saved from What's on before there was an event category.
+        if not self._conn.execute("SELECT 1 FROM settings WHERE key = 'migrated_event_category'").fetchone():
+            self._conn.execute("UPDATE places SET category = 'event' WHERE website LIKE '%ticketmaster.%' AND category IN ('nightlife', 'activity')")
+            self._conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('migrated_event_category', 'true')")
         # Places saved before mentions were tracked count their first reel.
         self._conn.execute(
             "INSERT OR IGNORE INTO place_mentions (place_id, reel_id) "
@@ -512,6 +518,11 @@ class Database:
     def list_bookings(self, trip_id: str) -> list[Booking]:
         rows = self._rows("SELECT * FROM bookings WHERE trip_id = ? ORDER BY COALESCE(start_at, '9999'), created_at, rowid", (trip_id,))
         return [Booking(**dict(r)) for r in rows]
+
+    def list_all_bookings(self) -> list[BookingListItem]:
+        rows = self._rows("SELECT b.*, t.name AS trip_name, t.kind AS trip_kind FROM bookings b JOIN trips t ON t.id = b.trip_id "
+                          "ORDER BY COALESCE(b.start_at, '9999'), b.created_at, b.rowid")
+        return [BookingListItem(**{**dict(r), "trip_kind": r["trip_kind"] or "trip"}) for r in rows]
 
     def get_booking(self, booking_id: str) -> Optional[Booking]:
         rows = self._rows("SELECT * FROM bookings WHERE id = ?", (booking_id,))

@@ -44,6 +44,8 @@
 	</array>
 	<key>UIStatusBarStyle</key>
 	<string>UIStatusBarStyleDefault</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>AppGroupID</key>
 	<string>$(APP_GROUP_ID)</string>
 	<key>TripItAPIBaseURL</key>

@@ -1,0 +1,132 @@
+name: TestFlight
+
+# Builds the iOS app and uploads it to TestFlight, with no Mac: run it from the Actions tab ("Run workflow").
+# Each run signs with a fresh certificate made through the App Store Connect API and revokes it afterwards.
+# Setup (once): see "Getting it on your phone (TestFlight)" in the README.
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: testflight
+  cancel-in-progress: false
+
+jobs:
+  upload:
+    name: Build and upload to TestFlight
+    runs-on: macos-15
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: ios
+    env:
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+      ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+      TRIPIT_TEAM_ID: ${{ secrets.TRIPIT_TEAM_ID }}
+      TRIPIT_BUNDLE_ID: ${{ secrets.TRIPIT_BUNDLE_ID }}
+      TRIPIT_HOST: ${{ vars.TRIPIT_HOST || 'my-tripit.fly.dev' }}
+      BUILD_NUMBER: ${{ github.run_number }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check setup
+        run: |
+          missing=""
+          for name in ASC_KEY_ID ASC_ISSUER_ID ASC_KEY_P8 TRIPIT_TEAM_ID TRIPIT_BUNDLE_ID; do
+            [ -n "${!name}" ] || missing="$missing $name"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Add these repository secrets (Settings → Secrets and variables → Actions):$missing. See the README's TestFlight steps."
+            exit 1
+          fi
+
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      - name: Install tools
+        run: |
+          brew install xcodegen
+          python3 -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install --quiet cryptography==50.0.1
+
+      - name: Configure
+        run: |
+          cat > Config/Secrets.xcconfig <<CONFIG
+          TRIPIT_TEAM_ID = $TRIPIT_TEAM_ID
+          TRIPIT_BUNDLE_ID = $TRIPIT_BUNDLE_ID
+          TRIPIT_API_BASE_URL = https:/\$()/$TRIPIT_HOST
+          TRIPIT_HOST = $TRIPIT_HOST
+          CONFIG
+          printf '%s' "$ASC_KEY_P8" | sed 's/\\n/\n/g' > "$RUNNER_TEMP/AuthKey.p8"
+          xcodegen generate
+
+      - name: Make signing certificate and profiles
+        run: |
+          "$RUNNER_TEMP/venv/bin/python" scripts/asc_signing.py setup
+          curl -fsSL -o "$RUNNER_TEMP/AppleWWDRCAG3.cer" https://www.apple.com/certificateauthority/AppleWWDRCAG3.cer
+          security import "$RUNNER_TEMP/AppleWWDRCAG3.cer" -k tripit-signing.keychain-db || true
+
+      - name: Archive
+        run: |
+          set -o pipefail
+          xcodebuild archive \
+            -project TripIt.xcodeproj \
+            -scheme TripIt \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/TripIt.xcarchive" \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY="Apple Distribution" \
+            OTHER_CODE_SIGN_FLAGS="--keychain tripit-signing.keychain-db" \
+            TRIPIT_APP_PROFILE="$TRIPIT_APP_PROFILE" \
+            TRIPIT_SHARE_PROFILE="$TRIPIT_SHARE_PROFILE" \
+            APS_ENVIRONMENT=production \
+            CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
+            | tee "$RUNNER_TEMP/archive.log" \
+            | grep -E "error:|warning: .*(deprecated|will never be executed)|ARCHIVE (SUCCEEDED|FAILED)" || true
+          grep -q "ARCHIVE SUCCEEDED" "$RUNNER_TEMP/archive.log"
+
+      - name: Upload to App Store Connect
+        run: |
+          cat > "$RUNNER_TEMP/ExportOptions.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>destination</key><string>upload</string>
+            <key>teamID</key><string>$TRIPIT_TEAM_ID</string>
+            <key>signingStyle</key><string>manual</string>
+            <key>signingCertificate</key><string>Apple Distribution</string>
+            <key>provisioningProfiles</key>
+            <dict>
+              <key>$TRIPIT_BUNDLE_ID</key><string>$TRIPIT_APP_PROFILE</string>
+              <key>$TRIPIT_BUNDLE_ID.share</key><string>$TRIPIT_SHARE_PROFILE</string>
+            </dict>
+            <key>uploadSymbols</key><true/>
+            <key>manageAppVersionAndBuildNumber</key><false/>
+          </dict>
+          </plist>
+          PLIST
+          xcodebuild -exportArchive \
+            -archivePath "$RUNNER_TEMP/TripIt.xcarchive" \
+            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" \
+            -exportPath "$RUNNER_TEMP/export" \
+            -authenticationKeyPath "$RUNNER_TEMP/AuthKey.p8" \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID"
+          echo "Uploaded build $BUILD_NUMBER. It shows in App Store Connect → TestFlight once Apple has processed it (10–30 minutes)." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Revoke this run's certificate
+        if: always()
+        run: |
+          [ -x "$RUNNER_TEMP/venv/bin/python" ] && "$RUNNER_TEMP/venv/bin/python" scripts/asc_signing.py cleanup || true
+          rm -f "$RUNNER_TEMP/AuthKey.p8"
+
+      - name: Upload logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: testflight-logs
+          path: ${{ runner.temp }}/archive.log
+          if-no-files-found: ignore

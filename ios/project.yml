@@ -17,6 +17,8 @@ settings:
     DEVELOPMENT_TEAM: $(TRIPIT_TEAM_ID)
     CODE_SIGN_STYLE: Automatic
     APP_GROUP_ID: group.$(TRIPIT_BUNDLE_ID)
+    # Builds from Xcode use Apple's development push service; the TestFlight workflow sets "production".
+    APS_ENVIRONMENT: development
 
 targets:
   TripIt:
@@ -33,6 +35,8 @@ targets:
         CODE_SIGN_ENTITLEMENTS: TripIt/TripIt.entitlements
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        # Empty for Xcode's automatic signing; the TestFlight workflow names the profiles it makes.
+        PROVISIONING_PROFILE_SPECIFIER: $(TRIPIT_APP_PROFILE)
     dependencies:
       - target: TripItShare
         embed: true
@@ -50,3 +54,4 @@ targets:
         PRODUCT_NAME: TripItShare
         INFOPLIST_FILE: TripItShare/Info.plist
         CODE_SIGN_ENTITLEMENTS: TripItShare/TripItShare.entitlements
+        PROVISIONING_PROFILE_SPECIFIER: $(TRIPIT_SHARE_PROFILE)

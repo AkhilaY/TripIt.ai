@@ -263,26 +263,56 @@ All `/v1` routes need the `X-API-Key` header when `APP_API_KEY` is set.
 - `APNS_TEAM_ID`: your Team ID.
 - `APNS_TOPIC`: the app's bundle ID.
 
-GitHub Actions compiles the app for the simulator on every push.
+GitHub Actions compiles the app for the simulator on every push, and the **TestFlight** workflow (below) uploads it to TestFlight.
 
-### Getting it on your phone (TestFlight)
+### Getting it on your phone (TestFlight), no Mac needed
 
-You need the **Apple Developer Program** ($99 a year, [developer.apple.com/programs](https://developer.apple.com/programs/)) and a Mac with Xcode 16 or later. Enrolling as an individual takes about a day. A company enrollment needs a D-U-N-S number and takes longer.
+The **TestFlight** workflow builds the app on GitHub's Macs, signs it and uploads it to TestFlight.
+- It makes a fresh signing certificate through the App Store Connect API on each run and revokes it afterwards, so there's nothing to keep safe between runs.
+- Builds already on TestFlight keep working after their certificate is revoked.
 
-1. **Config.** Copy `ios/Config/Secrets.example.xcconfig` to `ios/Config/Secrets.xcconfig` and fill in:
-   - your Team ID (developer.apple.com → Membership);
-   - a bundle ID that is yours, e.g. `com.yourname.tripit`;
-   - your server address.
-2. **Icon.** Put a 1024×1024 PNG icon in `ios/TripIt/Assets.xcassets/AppIcon.appiconset` and reference it in that folder's `Contents.json`, or drag it into Xcode.
-3. **Project.** Run `brew install xcodegen`, then `cd ios && xcodegen generate && open TripIt.xcodeproj`.
-4. **Signing.** In Xcode, sign in under **Settings → Accounts**. Signing is automatic: on the first build Xcode registers the app, the `.share` extension and the App Group `group.<bundle id>`. If it asks, turn on **App Groups** for both targets under **Signing & Capabilities** and tick the same group in each.
-5. **Try it on your phone.** Plug in your iPhone, choose it as the run destination and press Run. You'll need to turn on Developer Mode on the phone the first time.
-6. **TestFlight.**
-   1. Create the app in [App Store Connect](https://appstoreconnect.apple.com) → **Apps → +**, using the same bundle ID.
-   2. In Xcode, choose **Product → Archive → Distribute App → App Store Connect**.
-   3. After about 15 minutes of processing, add testers under **TestFlight**. Internal testers (up to 100 people on your team) can install right away. External testers (up to 10,000, by email or public link) need a short beta review first.
+**Once, after Apple approves your Developer Program membership.** Everything is done in a web browser.
 
-Before each upload, raise `CURRENT_PROJECT_VERSION` in `ios/project.yml`. Raise `MARKETING_VERSION` for new releases.
+1. **Identifiers.** Go to [developer.apple.com/account](https://developer.apple.com/account) → **Certificates, IDs & Profiles** → **Identifiers**, and click **+** for each of these:
+   - **App Groups:** `group.com.yourname.tripit`. Use your own reverse domain, the same in all three.
+   - **App IDs → App:**
+     - Bundle ID `com.yourname.tripit`, described as "TripIt".
+     - Tick **App Groups**, then **Configure** and choose the group.
+     - Tick **Push Notifications**.
+   - **App IDs → App:** bundle ID `com.yourname.tripit.share`, described as "TripIt Share". Tick **App Groups** and choose the same group.
+2. **API key.** Go to [App Store Connect](https://appstoreconnect.apple.com) → **Users and Access** → **Integrations** → **App Store Connect API** → **Team Keys**, then click **+**.
+   - Give it the **Admin** role, which can make signing certificates.
+   - Download the `.p8` file. You can only download it once.
+   - Note the **Key ID** and the **Issuer ID** shown above the list.
+3. **The app.** Go to App Store Connect → **Apps** → **+** → **New App**.
+   - Choose iOS, then enter a name, which must be unique on the App Store ("TripIt" is taken).
+   - Choose the bundle ID `com.yourname.tripit` and enter any SKU, e.g. `tripit`.
+4. **Secrets.** In this GitHub repository, go to **Settings** → **Secrets and variables** → **Actions** → **New repository secret**, and add:
+
+   | Secret | Value |
+   |---|---|
+   | `TRIPIT_TEAM_ID` | Your Team ID (developer.apple.com → **Membership details**) |
+   | `TRIPIT_BUNDLE_ID` | `com.yourname.tripit` |
+   | `ASC_KEY_ID` | The API key's Key ID |
+   | `ASC_ISSUER_ID` | The Issuer ID |
+   | `ASC_KEY_P8` | The whole `.p8` file, including the BEGIN and END lines |
+
+   If your server isn't `my-tripit.fly.dev`, also add a repository **variable** `TRIPIT_HOST` with its address.
+
+**Each time you want a new build:**
+1. Go to **Actions** → **TestFlight** → **Run workflow**. It takes about 15 minutes.
+2. Apple then processes the build for 10–30 minutes. It appears under **App Store Connect → your app → TestFlight**.
+3. **Testers.** The first time, under TestFlight → **Internal Testing**, click **+** to make a group and add yourself. Up to 100 people on your App Store Connect team can be added there and install builds right away.
+   - **External testers** are up to 10,000 people, invited by email or a public link.
+   - Each build for external testers needs a short beta review first.
+4. On your iPhone, install **TestFlight** from the App Store, accept the invite, and install TripIt. New builds arrive automatically.
+
+Each run's build number is the workflow's run number. Raise `MARKETING_VERSION` in `ios/project.yml` for a new version (1.1, 2.0…).
+
+**With a Mac (optional).**
+1. Copy `ios/Config/Secrets.example.xcconfig` to `ios/Config/Secrets.xcconfig` and fill it in.
+2. Run `brew install xcodegen`, then `cd ios && xcodegen generate && open TripIt.xcodeproj`.
+3. Sign in under **Xcode → Settings → Accounts** and run it on your phone. Signing is automatic.
 
 ### Before an App Store release
 

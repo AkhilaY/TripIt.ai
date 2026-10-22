@@ -10,7 +10,7 @@ import { clearOfflineData, disablePush, enablePush, pushState, registerServiceWo
 
 const CATS = {
   food: 'Food', cafe: 'Cafés', dessert: 'Sweets', drinks: 'Drinks', nightlife: 'Nightlife', attraction: 'Sights',
-  activity: 'Things to do', nature: 'Outdoors', shopping: 'Shopping', stay: 'Stay', other: 'Other',
+  activity: 'Things to do', event: 'Events', nature: 'Outdoors', shopping: 'Shopping', stay: 'Stay', other: 'Other',
 };
 const CAT_ORDER = Object.keys(CATS);
 const TODS = ['morning', 'lunch', 'afternoon', 'dinner', 'evening'];
@@ -75,6 +75,12 @@ function mapsLinks(p, trip) {
 // ---------- State & cached data ----------
 
 const S = {
+  cal: null,            // everything dated, from /v1/calendar
+  calv: { month: null, day: null, filter: 'all', scrollTo: null },
+  bookingsAll: null,    // every booking across trips
+  bk: { kind: 'all', trip: 'all', past: false },
+  lastTab: 'trips',     // the tab profile and calendar pages go back to
+  lastRoot: '#/',
   disc: { kind: 'restaurants', area: 'home', tripId: null, data: {} },
   homeCity: undefined,  // home city setting (null when unset)
   trips: null,          // list from /v1/trips
@@ -188,22 +194,27 @@ function route() {
   const parts = path.split('/').filter(Boolean);
   const params = new URLSearchParams(query);
   if (!parts.length) return { name: 'trips', params };
+  if (parts[0] === 'trip' && parts[1] && parts[2] === 'bookings') return { name: 'bookings', params: new URLSearchParams(`trip=${parts[1]}`) };
+  if (parts[0] === 'settings') return { name: 'profile', params };
   if (parts[0] === 'trip' && parts[1]) return { name: 'trip', id: parts[1], mode: parts[2] || 'places', params };
   if (parts[0] === 'place' && parts[1]) return { name: 'place', id: parts[1], mode: parts[2] === 'menu' ? 'menu' : 'overview', params };
   if (parts[0] === 'today' && parts[1]) return { name: 'today', id: parts[1], params };
   if (parts[0] === 'packing' && parts[1]) return { name: 'packing', id: parts[1], params };
   if (parts[0] === 'events' && parts[1]) return { name: 'events', id: parts[1], params };
   if (parts[0] === 'edit' && parts[1] && parts[2]) return { name: 'edit', id: parts[1], editId: parts[2], params };
-  if (['map', 'imports', 'settings', 'setup', 'add', 'concierge', 'taste', 'discover'].includes(parts[0])) return { name: parts[0], params };
+  if (['map', 'imports', 'profile', 'setup', 'add', 'concierge', 'taste', 'discover', 'bookings', 'calendar'].includes(parts[0])) return { name: parts[0], params };
   return { name: 'trips', params };
 }
 
 const TAB_FOR = {
   trips: 'trips', trip: 'trips', place: 'trips', today: 'trips', edit: 'trips', packing: 'trips', events: 'trips', map: 'map', concierge: 'concierge',
-  imports: 'settings', discover: 'discover', settings: 'settings', taste: 'settings', add: 'trips',
+  discover: 'discover', bookings: 'bookings', add: 'trips',
 };
-const TAB_INDEX = { trips: 0, map: 1, discover: 2, concierge: 3, settings: 4 };
-const DEPTH = { imports: 1, trip: 1, today: 1, taste: 1, packing: 1, events: 1, edit: 2, place: 2 };
+// Profile, calendar and their pages open over whichever tab you were on.
+const tabOf = (name) => TAB_FOR[name] || S.lastTab || 'trips';
+const TAB_INDEX = { trips: 0, discover: 1, map: 2, bookings: 3, concierge: 4 };
+const TAB_LABEL = { trips: 'Trips', discover: 'Discover', map: 'Map', bookings: 'Bookings', concierge: 'Concierge' };
+const DEPTH = { profile: 1, calendar: 1, imports: 2, taste: 2, trip: 1, today: 1, taste: 1, packing: 1, events: 1, edit: 2, place: 2 };
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
 let renderToken = 0;
 let lastKey = '';
@@ -213,7 +224,7 @@ let lastHtml = '';
 /** How to animate from one screen to the next: iOS-style push/pop within a tab, a crossfade between tabs. */
 function transitionKind(from, to) {
   if (!from || to.name === 'add' || from.name === 'setup' || to.name === 'setup') return 'none';
-  if (TAB_FOR[from.name] !== TAB_FOR[to.name]) return 'fade';
+  if (tabOf(from.name) !== tabOf(to.name)) return 'fade';
   if (from.name === to.name && from.id === to.id) return from.mode !== to.mode ? 'seg' : 'none';
   const a = DEPTH[from.name] || 0;
   const b = DEPTH[to.name] || 0;
@@ -235,6 +246,8 @@ async function render({ quiet = false } = {}) {
   if (quiet && navigating) { quietPending = true; return; }
   if (quiet && editing()) return;
   const r = route();
+  if (TAB_FOR[r.name]) S.lastTab = TAB_FOR[r.name];
+  if (r.name in TAB_INDEX) S.lastRoot = location.hash || '#/';
   const token = ++renderToken;
   const key = location.hash;
   if (!quiet) navigating = token;
@@ -274,7 +287,7 @@ async function paint(r, token, key, quiet) {
   const scrollTo = key === lastKey ? window.scrollY : (S.scroll[key] || 0);
 
   const swap = () => {
-    const tab = TAB_FOR[r.name];
+    const tab = tabOf(r.name);
     const tabbar = $('#tabbar');
     document.querySelectorAll('.tab').forEach((t) => {
       const on = t.dataset.tab === tab;
@@ -377,13 +390,26 @@ document.addEventListener('pointerdown', (ev) => {
 
 // ---------- Shared pieces ----------
 
-function navbar(title, { back, backLabel, right = '' } = {}) {
+function navbar(title, { back, backLabel, right = '', left = '' } = {}) {
   const backHtml = back
     ? `<a class="gbtn" href="${back}" data-act="back" data-fallback="${back}" aria-label="Back to ${esc(backLabel || 'previous screen')}">${ICON.back}</a>`
-    : '';
+    : left;
   return `<header class="navbar"><div class="left">${backHtml}</div>
     <div class="title" aria-hidden="true">${esc(title)}</div><div class="right">${right}</div></header>`;
 }
+
+/** The bar on each tab's main screen: the calendar on the left, your profile on the right. */
+function rootNav(title, { right = '' } = {}) {
+  background(S.cal, 'cal', loadCal);
+  const today = isoDate(new Date());
+  const n = S.cal ? S.cal.items.filter((i) => i.kind !== 'trip' && i.date <= today && (i.end_date || i.date) >= today).length : 0;
+  const cal = `<a class="gbtn calbtn" href="#/calendar" aria-label="Calendar${n ? `, ${plural(n, 'thing')} today` : ''}">
+    <span class="calglyph" aria-hidden="true"><b>${new Date().getDate()}</b></span>${n ? '<i class="caldot"></i>' : ''}</a>`;
+  const me = '<a class="gbtn me" href="#/profile" aria-label="Profile and settings"><span data-icon="person"></span></a>';
+  return navbar(title, { left: cal, right: `${right}${me}` });
+}
+/** Where a page opened from the profile or calendar goes back to. */
+const backToTab = () => ({ back: S.lastRoot || '#/', backLabel: TAB_LABEL[S.lastTab] || 'Trips' });
 
 const tile = (color, icon, cls = '') => `<span class="tile ${cls}" style="--pc: var(--c-${color})">${ICON[icon] || ICON.other}</span>`;
 const catTile = (cat, cls = '') => tile(cat, ICON[cat] ? cat : 'other', cls);
@@ -430,6 +456,7 @@ const GROUPS = [
   { id: 'shopping', label: 'Shopping', cats: ['shopping'] },
   { id: 'sights', label: 'Sights', cats: ['attraction', 'nature'] },
   { id: 'activities', label: 'Activities', cats: ['activity'] },
+  { id: 'events', label: 'Events', cats: ['event'] },
   { id: 'other', label: 'Other', cats: ['other'] },
 ];
 const GROUP_OF = Object.fromEntries(GROUPS.flatMap((g) => g.cats.map((c) => [c, g.id])));
@@ -514,7 +541,7 @@ function placeRow(p, { home = false } = {}) {
     ? `<span class="distchip">${fmtDistance(distanceTo(p))} away</span>` : '';
   const body = `${thumb(p, 56)}
     <span class="main"><span class="t ${p.visited ? 'strike' : ''}">${esc(p.name)}${isNew(p)}${p.latitude == null ? ' <span class="flag" title="Not on the map yet">●</span>' : ''}</span>
-    <span class="s">${esc(sub.join(' · '))}${needChip(p)}${ratingChip(p)}${hotChip(p)}${dayChip(p)}${dist}</span>
+    <span class="s">${esc(sub.join(' · '))}${p.category === 'event' ? `<span class="datechip">${p.event_date ? esc(shortDay(p.event_date)) : 'Date TBC'}</span>` : ''}${needChip(p)}${ratingChip(p)}${hotChip(p)}${dayChip(p)}${dist}</span>
     ${p.recommended_items.length ? `<span class="s clip">Try: ${esc(p.recommended_items.join(', '))}</span>` : ''}
     ${hoursLine(p)}${hereChip(p)}</span>`;
   if (S.sel.on) {
@@ -1029,7 +1056,7 @@ async function placesHome(trips) {
     body = `<div class="section">${group(list)}</div>`;
   }
   const subtitle = `${plural(places.length, 'place')} across ${plural(trips.length, 'trip')}`;
-  return `${navbar('Places', { right: addButton })}<h1 class="largetitle" data-anchor>Places</h1>
+  return `${rootNav('Places', { right: addButton })}<h1 class="largetitle" data-anchor>Places</h1>
     <div class="subtitle"><span>${esc(subtitle)}</span></div>${homeSwitch()}${places.length ? chips + controls : ''}${body}${selBar()}`;
 }
 const CATS_OF_FILTER = () => (S.home.cat === 'all' ? 'More places' : esc(GROUPS.find((g) => g.id === S.home.cat).label));
@@ -1098,8 +1125,8 @@ async function discoverView() {
   let body;
   if (res === undefined || res === null) body = '<div class="empty"><span class="spinner"></span><p>Finding the best nearby…</p></div>';
   else if (res.status === 'disabled') body = emptyState('gray', 'compass', 'Discover isn’t switched on', 'It needs a Google Maps key on the server (GOOGLE_MAPS_API_KEY).');
-  else if (res.status === 'no_area') body = emptyState('gray', 'pin', 'Where should we look?', 'Set your home city in Settings, or choose Near me.',
-    '<a class="btn" href="#/settings">Open Settings</a>');
+  else if (res.status === 'no_area') body = emptyState('gray', 'pin', 'Where should we look?', 'Set your home city in your profile, or choose Near me.',
+    '<a class="btn" href="#/profile">Open your profile</a>');
   else if (res.status === 'error') body = emptyState('gray', 'warn', 'Couldn’t load recommendations', esc(res.message || 'Try again in a moment.'),
     '<button class="btn tint" data-act="discrefresh">Try again</button>');
   else if (!res.items.length) body = emptyState('gray', 'pinslash', 'Nothing well-rated found here', 'Try another kind of place or a wider area.');
@@ -1107,11 +1134,329 @@ async function discoverView() {
     body = `<div class="section"><div class="group thumbs">${res.items.map(discoverCard).join('')}</div>
       <div class="section-f">Ranked by Google ratings and your taste. Awards such as Michelin stars come from Claude’s own knowledge, not a live feed, so check the Michelin Guide before you go.</div></div>`;
   }
-  return `${navbar('Discover', { right: addButton })}<h1 class="largetitle" data-anchor>Discover</h1>
+  return `${rootNav('Discover')}<h1 class="largetitle" data-anchor>Discover</h1>
     <div class="subtitle"><span>Well-rated places${areaLabel ? ` · ${esc(areaLabel)}` : ''}</span></div>${chips}${controls}${body}`;
 }
 
+// ---------- Calendar ----------
+
+const loadCal = () => once('cal', async () => { S.cal = await api('/v1/calendar'); fetchedAt.cal = Date.now(); return S.cal; });
+const cachedCal = () => { if (!S.cal) return loadCal(); revalidate('cal', loadCal); return S.cal; };
+const CAL_FILTERS = [['all', 'All'], ['event', 'Events'], ['booking', 'Bookings'], ['stop', 'Plans']];
+const CAL_KIND = { event: 'Event', booking: 'Booking', stop: 'Plan', trip: 'Trip' };
+const isoOf = (d) => isoDate(d);
+const dayOf = (iso) => { const [y, m, d] = iso.split('-').map(Number); return new Date(y, m - 1, d); };
+const shortDay = (iso) => dayOf(iso).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+
+function weekStartsSunday() {
+  try {
+    const info = new Intl.Locale(navigator.language).weekInfo || new Intl.Locale(navigator.language).getWeekInfo?.();
+    if (info && info.firstDay) return info.firstDay === 7;
+  } catch { /* older browsers */ }
+  return /^en-(US|CA)|^ja|^ko|^zh-TW|^he|^pt-BR/i.test(navigator.language || 'en-US');
+}
+
+/** Each item on every day it covers (a hotel stay or a week-long pop-up shows on all its days). */
+function calByDay(items) {
+  const map = {};
+  for (const it of items) {
+    if (!it.date) continue;
+    const end = it.end_date || it.date;
+    for (let d = dayOf(it.date); isoOf(d) <= end; d.setDate(d.getDate() + 1)) (map[isoOf(d)] ||= []).push(it);
+  }
+  return map;
+}
+
+function calWhen(it, iso) {
+  if (it.kind === 'trip') return 'Trip';
+  if (it.end_date && iso !== it.date) return iso === it.end_date ? 'Last day' : 'Ongoing';
+  if (it.time) return fmtClock(it.time);
+  return it.part_of_day ? cap(it.part_of_day) : 'All day';
+}
+
+function calRow(it, iso) {
+  const dest = it.kind === 'booking' ? `data-act="calbooking" data-id="${it.booking_id}"`
+    : it.kind === 'trip' ? `data-href="#/trip/${it.trip_id}"` : `data-href="#/place/${it.place_id}"`;
+  const add = it.kind === 'event' || it.kind === 'booking'
+    ? `<button class="gbtn small caladd" data-act="caladd" data-id="${esc(it.id)}" aria-label="Add ${esc(it.title)} to your calendar app">${ICON.calendarPlus}</button>` : '';
+  return `<div class="calrow k-${it.kind}">
+    <button class="calrow-main" ${dest} ${dest.startsWith('data-href') ? 'data-act="calopen"' : ''}>
+      <span class="when">${esc(calWhen(it, iso))}</span><span class="bar" aria-hidden="true"></span>
+      <span class="main"><span class="t">${esc(it.title)}</span>${it.subtitle ? `<span class="s">${esc(it.subtitle)}</span>` : ''}</span>
+    </button>${add}</div>`;
+}
+
+async function calendarView() {
+  const cal = await cachedCal();
+  const c = S.calv;
+  const today = isoOf(new Date());
+  if (!c.month) c.month = today.slice(0, 7);
+  const items = c.filter === 'all' ? cal.items : cal.items.filter((i) => i.kind === c.filter || (c.filter !== 'trip' && i.kind === 'trip' && c.filter === 'stop'));
+  const byDay = calByDay(items);
+  const trips = calByDay(cal.items.filter((i) => i.kind === 'trip'));
+  const [y, m] = c.month.split('-').map(Number);
+  const first = new Date(y, m - 1, 1);
+  const days = new Date(y, m, 0).getDate();
+  const sunday = weekStartsSunday();
+  const lead = (first.getDay() + (sunday ? 0 : 6)) % 7;
+  const names = Array.from({ length: 7 }, (_, i) => new Date(2024, 0, (sunday ? 7 : 1) + i).toLocaleDateString(undefined, { weekday: 'narrow' }));
+  const cells = [];
+  for (let i = 0; i < lead; i++) cells.push('<span class="cday out"></span>');
+  for (let d = 1; d <= days; d++) {
+    const iso = `${c.month}-${String(d).padStart(2, '0')}`;
+    const kinds = [...new Set((byDay[iso] || []).filter((x) => x.kind !== 'trip').map((x) => x.kind))].slice(0, 3);
+    const trip = trips[iso] ? trips[iso][0] : null;
+    const cls = ['cday', iso === today ? 'today' : '', iso === c.day ? 'sel' : '', iso < today ? 'past' : '',
+      trip ? 'intrip' : '', trip && trip.date === iso ? 'tstart' : '', trip && (trip.end_date || trip.date) === iso ? 'tend' : ''].filter(Boolean).join(' ');
+    const n = (byDay[iso] || []).filter((x) => x.kind !== 'trip').length;
+    cells.push(`<button class="${cls}" data-act="calday" data-date="${iso}" aria-pressed="${iso === c.day}"
+      aria-label="${esc(shortDay(iso))}${n ? `, ${plural(n, 'item')}` : ''}${trip ? `, ${esc(trip.title)} trip` : ''}"><span class="num">${d}</span>
+      <span class="cdots" aria-hidden="true">${kinds.map((k) => `<i class="k-${k}"></i>`).join('')}</span></button>`);
+  }
+  const monthName = first.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+  const isThisMonth = c.month === today.slice(0, 7);
+  const grid = `<div class="calcard">
+    <div class="calhead"><button class="gbtn small" data-act="calmonth" data-step="-1" aria-label="Previous month">${ICON.back}</button>
+      <h2>${esc(monthName)}</h2>
+      ${isThisMonth ? '<span class="calhead-gap"></span>' : '<button class="linkbtn" data-act="caltoday">Today</button>'}
+      <button class="gbtn small flip" data-act="calmonth" data-step="1" aria-label="Next month">${ICON.back}</button></div>
+    <div class="cgrid wk" aria-hidden="true">${names.map((n) => `<span>${esc(n)}</span>`).join('')}</div>
+    <div class="cgrid">${cells.join('')}</div>
+    <div class="legend" aria-hidden="true"><span><i class="k-event"></i>Events</span><span><i class="k-booking"></i>Bookings</span><span><i class="k-stop"></i>Plans</span><span><i class="k-trip"></i>Trips</span></div></div>`;
+
+  // The agenda: from the chosen day (or today) to the end of the month.
+  const start = c.day && c.day.startsWith(c.month) ? c.day : (isThisMonth ? today : `${c.month}-01`);
+  const end = `${c.month}-${String(days).padStart(2, '0')}`;
+  const agendaDays = Object.keys(byDay).filter((d) => d >= start && d <= end).sort();
+  let agenda = agendaDays.map((iso) => {
+    // Something lasting several days (a pop-up, a hotel stay) is listed once: on its first day, or as
+    // "Ongoing" at the top when it began earlier, and again on any day you tap.
+    const list = byDay[iso].filter((it) => (it.kind === 'trip' ? it.date === iso
+      : !it.end_date || it.date === iso || iso === c.day || (iso === agendaDays[0] && it.date < iso)));
+    if (!list.length) return '';
+    let rows = list.map((it) => calRow(it, iso));
+    if (c.filter === 'all') { // a day of a planned trip shows as one row; Plans shows every stop
+      rows = [];
+      const done = new Set();
+      for (const it of list) {
+        if (it.kind !== 'stop') { rows.push(calRow(it, iso)); continue; }
+        if (done.has(it.trip_id)) continue;
+        done.add(it.trip_id);
+        const same = list.filter((x) => x.kind === 'stop' && x.trip_id === it.trip_id);
+        const trip = cal.items.find((x) => x.kind === 'trip' && x.trip_id === it.trip_id);
+        const n = trip ? Math.round((dayOf(iso) - dayOf(trip.date)) / 86400000) + 1 : null;
+        const names = same.slice(0, 3).map((x) => x.title).join(', ') + (same.length > 3 ? ` + ${same.length - 3} more` : '');
+        rows.push(`<div class="calrow k-stop"><button class="calrow-main" data-act="calopen" data-href="#/today/${it.trip_id}${n ? `?day=${n}` : ''}">
+          <span class="when">${n ? `Day ${n}` : 'Plan'}</span><span class="bar" aria-hidden="true"></span>
+          <span class="main"><span class="t">${esc(trip ? `${trip.title} plan` : 'Your plan')} · ${plural(same.length, 'stop')}</span><span class="s">${esc(names)}</span></span>
+          </button></div>`);
+      }
+    }
+    return `<div class="agday${iso === c.day ? ' sel' : ''}" id="ag-${iso}"><div class="datehead">${iso === today ? 'Today · ' : ''}${esc(shortDay(iso))}</div>
+      <div class="group">${rows.join('')}</div></div>`;
+  }).join('');
+  if (!agenda) {
+    agenda = `<div class="calempty">${c.day && byDay[c.day] === undefined ? `Nothing on ${esc(shortDay(c.day))}.` : `Nothing else in ${esc(first.toLocaleDateString(undefined, { month: 'long' }))}.`}
+      ${cal.items.some((i) => i.date > end) ? '<button class="linkbtn" data-act="calnext">Show what’s next</button>' : ''}</div>`;
+  }
+  const undated = c.filter === 'all' || c.filter === 'event' ? cal.undated : [];
+  const undatedHtml = undated.length ? `<div class="section"><div class="section-h">Saved events without a date</div><div class="group tiles">
+    ${undated.map((it) => `<div class="row"><a class="rowlink" href="#/place/${it.place_id}">${tile('event', 'event')}<span class="main"><span class="t">${esc(it.title)}</span>
+      ${it.subtitle ? `<span class="s">${esc(it.subtitle)}</span>` : ''}</span></a>
+      <button class="btn tint small" data-act="eventdate" data-id="${it.place_id}">Set date</button></div>`).join('')}</div>
+    <div class="section-f">Add a date and they appear on the calendar.</div></div>` : '';
+
+  const counts = { all: cal.items.filter((i) => i.kind !== 'trip').length };
+  ['event', 'booking', 'stop'].forEach((k) => { counts[k] = cal.items.filter((i) => i.kind === k).length; });
+  const chips = `<div class="fchips" role="group" aria-label="Show">${CAL_FILTERS.map(([k, label]) =>
+    `<button class="fchip${c.filter === k ? ' on' : ''}" data-act="calfilter" data-f="${k}" aria-pressed="${c.filter === k}">${label}<span class="n">${counts[k] + (k === 'event' ? cal.undated.length : 0)}</span></button>`).join('')}</div>`;
+  const weekEnd = isoOf(new Date(Date.now() + 6 * 86400000));
+  const soon = cal.items.filter((i) => i.date >= today && i.date <= weekEnd);
+  const ev = soon.filter((i) => i.kind === 'event').length;
+  const bk = soon.filter((i) => i.kind === 'booking').length;
+  const thisWeek = [ev ? plural(ev, 'event') : '', bk ? plural(bk, 'booking') : ''].filter(Boolean).join(' and ');
+  const sync = `<button class="gbtn wide" data-act="calsync" aria-label="Sync with Google or Apple Calendar">${ICON.calendarPlus}Sync</button>`;
+  if (!cal.items.length && !cal.undated.length) {
+    return `${navbar('Calendar', { ...backToTab(), right: sync })}<h1 class="largetitle" data-anchor>Calendar</h1>
+      ${emptyState('event', 'calendar', 'Nothing on your calendar yet',
+        'Save a reel about a pop-up, a class or a show and it lands here on its date. Bookings and planned trip days appear too.')}`;
+  }
+  return {
+    html: `${navbar('Calendar', { ...backToTab(), right: sync })}<h1 class="largetitle" data-anchor>Calendar</h1>
+      <div class="subtitle"><span>${thisWeek ? `${thisWeek} in the next 7 days` : 'No events or bookings in the next 7 days'}</span></div>
+      ${chips}${grid}<div class="agenda">${agenda}</div>${undatedHtml}`,
+    after: () => { if (c.scrollTo) { const el = document.getElementById(`ag-${c.scrollTo}`); c.scrollTo = null; if (el) el.scrollIntoView({ block: 'start', behavior: reducedMotion.matches ? 'auto' : 'smooth' }); } },
+  };
+}
+
+function calItem(id) {
+  return S.cal && S.cal.items.find((i) => i.id === id);
+}
+
+function addToCalendarSheet(it) {
+  const abs = (u) => new URL(u, location.origin).href;
+  openSheet({ type: 'actions', title: `Add “${it.title}” to`, actions: [
+    { label: 'Google Calendar', run: () => window.open(it.google_url, '_blank', 'noopener') },
+    { label: 'Apple Calendar', run: () => { location.href = abs(it.ics_url); } },
+    { label: 'Outlook or another app (.ics)', run: () => window.open(abs(it.ics_url), '_blank', 'noopener') },
+  ] });
+}
+
+async function calSyncSheet() {
+  const cal = await loadCal();
+  const st = { feed: cal.feed };
+  openSheet({
+    type: 'form', title: 'Sync your calendar', st,
+    body: () => st.feed ? `<div class="section"><div class="group tiles">
+        <a class="row" href="${esc(st.feed.webcal_url)}">${tile('red', 'calendar')}<span class="main"><span class="t">Apple Calendar</span><span class="s">Subscribe on this iPhone or Mac</span></span>${ICON.chev}</a>
+        <a class="row" href="${esc(st.feed.google_url)}" target="_blank" rel="noopener">${tile('blue', 'calendar')}<span class="main"><span class="t">Google Calendar</span><span class="s">Adds it under “Other calendars”</span></span>${ICON.chev}</a>
+        <button class="row" data-act="copy" data-value="${esc(st.feed.url)}">${tile('gray', 'link')}<span class="main"><span class="t">Copy link</span><span class="s">For Outlook or any calendar app</span></span></button>
+      </div><div class="section-f">New events, bookings and plans keep flowing in. Apple Calendar refreshes on its own schedule; Google can take a few hours. This link is private: anyone who has it can see your calendar.</div></div>
+      <div class="section"><div class="group"><button class="row" data-act="calfeedoff"><span class="main"><span class="t" style="color:var(--warn)">Turn off this link</span></span></button></div></div>`
+      : `<div class="section"><div class="group tiles"><div class="row">${tile('event', 'calendar')}<span class="main"><span class="t">See TripIt in your calendar</span>
+        <span class="s">Events, bookings and planned days show up in Google or Apple Calendar and stay up to date.</span></span></div></div>
+        <div class="section"><button class="btn wide" data-act="calfeedon">Turn on calendar sync</button></div>
+        <div class="section-f">To add just one event, tap the calendar button next to it instead.</div></div>`,
+  });
+}
+
+function eventDateSheet(p) {
+  const st = { date: p.event_date || '', end: p.event_end_date || '', time: p.start_time || '' };
+  openSheet({
+    type: 'form', title: p.event_date ? 'Change date' : 'When is it?', confirm: 'Save', st,
+    body: () => `<div class="section"><div class="group tiles">
+      <label class="row">${tile('event', 'calendar')}<span class="main"><span class="t">Date</span></span><input class="datefield" type="date" id="ev-date" value="${esc(st.date)}"></label>
+      <label class="row">${tile('indigo', 'clock')}<span class="main"><span class="t">Starts at</span><span class="s">Optional</span></span><input class="datefield" type="time" id="ev-time" value="${esc(st.time)}"></label>
+      <label class="row">${tile('gray', 'calendar')}<span class="main"><span class="t">Ends on</span><span class="s">For a pop-up that runs several days</span></span><input class="datefield" type="date" id="ev-end" value="${esc(st.end)}"></label>
+      </div></div>
+      ${p.event_date ? `<div class="section"><div class="group"><button class="row" data-act="eventdateclear" data-id="${p.id}"><span class="main"><span class="t" style="color:var(--warn)">Remove the date</span></span></button></div></div>` : ''}`,
+    async ok() {
+      const date = $('#ev-date').value;
+      if (!date) { toast('Pick a date first', true); return; }
+      const end = $('#ev-end').value;
+      const time = $('#ev-time').value;
+      const fresh = await api(`/v1/places/${p.id}`, { method: 'PATCH', body: {
+        event_date: date, event_end_date: end && end > date ? end : null, ...(time ? { start_time: time } : { clear_start_time: true }) } });
+      afterPlaceChange(fresh);
+      closeSheet();
+      toast(`On your calendar for ${shortDay(date)}`);
+      render();
+    },
+  });
+}
+
+function afterPlaceChange(fresh) {
+  const trip = S.trip[fresh.trip_id];
+  if (trip) trip.places = trip.places.map((x) => (x.id === fresh.id ? fresh : x));
+  if (S.places) S.places = S.places.map((x) => (x.id === fresh.id ? fresh : x));
+  fetchedAt.cal = 0;
+  loadCal().then(() => render({ quiet: true })).catch(() => {});
+}
+
+/** On an event's page: when it is, with a way to set the date or add it to a calendar app. */
+function eventWhen(p) {
+  if (p.category !== 'event') return '';
+  const when = p.event_date
+    ? `${shortDay(p.event_date)}${p.event_end_date ? ` – ${shortDay(p.event_end_date)}` : ''}${p.start_time ? ` · ${fmtClock(p.start_time)}` : ''}`
+    : 'No date yet';
+  return `<div class="section"><div class="group tiles"><div class="row">${tile('event', 'calendar')}
+    <span class="main"><span class="s">When</span><span class="t">${esc(when)}</span>${p.venue ? `<span class="s">${esc(p.venue)}</span>` : ''}</span>
+    <button class="linkbtn" data-act="eventdate" data-id="${p.id}">${p.event_date ? 'Change' : 'Set date'}</button></div>
+    ${p.event_date ? `<button class="row" data-act="eventcal" data-id="${p.id}">${tile('red', 'calendarPlus')}<span class="main"><span class="t link">Add to Google or Apple Calendar</span></span>${ICON.chev}</button>` : ''}
+  </div></div>`;
+}
+
+// ---------- Bookings tab ----------
+
+const loadAllBookings = () => once('allbookings', async () => { S.bookingsAll = await api('/v1/bookings'); fetchedAt.allbookings = Date.now(); return S.bookingsAll; });
+const cachedAllBookings = () => { if (!S.bookingsAll) return loadAllBookings(); revalidate('allbookings', loadAllBookings); return S.bookingsAll; };
+const BK_FILTERS = [['all', 'All'], ['flight', 'Flights'], ['hotel', 'Stays'], ['reservation', 'Tables'], ['car', 'Cars'], ['other', 'Other']];
+const bookingEnd = (b) => (b.end_at || b.start_at || '').slice(0, 10);
+
+/** The trip a new booking most likely belongs to: the one happening now, else the next one, else the newest. */
+function likelyTrip(trips) {
+  const list = trips.filter((t) => t.kind !== 'local');
+  const active = activeTrip(list);
+  if (active) return active.trip;
+  const today = isoDate(new Date());
+  const next = list.filter((t) => t.start_date && t.start_date >= today).sort((a, b) => a.start_date.localeCompare(b.start_date))[0];
+  return next || list[0] || trips[0] || null;
+}
+
+async function bookingsTab(r) {
+  const [all, trips] = await Promise.all([cachedAllBookings(), cachedTrips()]);
+  const b = S.bk;
+  if (r.params.get('trip')) b.trip = r.params.get('trip');
+  if (b.trip !== 'all' && !trips.some((t) => t.id === b.trip)) b.trip = 'all';
+  const inTrip = all.filter((x) => b.trip === 'all' || x.trip_id === b.trip);
+  const present = new Set(inTrip.map((x) => x.kind));
+  if (b.kind !== 'all' && !present.has(b.kind)) b.kind = 'all';
+  const list = inTrip.filter((x) => b.kind === 'all' || x.kind === b.kind);
+  const today = isoDate(new Date());
+  const upcoming = list.filter((x) => x.start_at && bookingEnd(x) >= today);
+  const undated = list.filter((x) => !x.start_at);
+  const past = list.filter((x) => x.start_at && bookingEnd(x) < today).reverse();
+  const tripName = Object.fromEntries(trips.map((t) => [t.id, t.name]));
+  const card = (x) => bookingCard(x, { trip: b.trip === 'all' ? tripName[x.trip_id] || x.trip_name : null });
+  const byDate = (rows) => {
+    const groups = [];
+    rows.forEach((x) => {
+      const key = x.start_at.slice(0, 10);
+      const last = groups[groups.length - 1];
+      if (last && last.key === key) last.items.push(x); else groups.push({ key, items: [x] });
+    });
+    return groups.map((g) => `<div class="datehead">${g.key === today ? 'Today · ' : ''}${esc(fmtDay(parseWhen(g.key).day))}</div>${g.items.map(card).join('')}`).join('');
+  };
+  const add = `<button class="gbtn tint" data-act="addbookingany" aria-label="Add a booking">${ICON.plus}</button>`;
+  const head = `${rootNav('Bookings', { right: add })}<h1 class="largetitle" data-anchor>Bookings</h1>`;
+  if (!all.length) {
+    return head + emptyState('blue', 'bookings', 'No bookings yet',
+      'Keep flights, stays, tables and car rentals in one place. Add one from a screenshot, the confirmation email, or type it in.',
+      `<button class="btn" data-act="addbookingany">${ICON.plus}Add a booking</button>`);
+  }
+  const next = upcoming[0];
+  const subtitle = next ? `Next: ${next.title} · ${next.start_at.slice(0, 10) === today ? 'today' : shortDay(next.start_at.slice(0, 10))}` : 'Nothing coming up';
+  const tripsWith = trips.filter((t) => all.some((x) => x.trip_id === t.id));
+  const chips = present.size > 1 ? `<div class="fchips" role="group" aria-label="Type">${BK_FILTERS.filter(([k]) => k === 'all' || present.has(k)).map(([k, label]) =>
+    `<button class="fchip${b.kind === k ? ' on' : ''}" data-act="bkkind" data-k="${k}" aria-pressed="${b.kind === k}">${label}</button>`).join('')}</div>` : '';
+  const ctl = tripsWith.length > 1 || b.trip !== 'all' ? `<div class="homectl"><button class="pillbtn" data-act="bktrip">${esc(b.trip === 'all' ? 'All trips' : tripName[b.trip])}</button></div>` : '';
+  const body = `${upcoming.length ? byDate(upcoming) : `<div class="calempty">Nothing coming up${b.kind !== 'all' || b.trip !== 'all' ? ' here' : ''}.</div>`}
+    ${undated.length ? `<div class="datehead">No date</div>${undated.map(card).join('')}` : ''}
+    ${past.length ? `<div class="section"><button class="btn tint wide" data-act="bkpast" aria-expanded="${b.past}">${b.past ? 'Hide' : 'Show'} past bookings (${past.length})</button></div>
+      ${b.past ? byDate(past) : ''}` : ''}
+    <div class="section-f bkfoot">Bookings stay private: shared trip links never include them.</div>`;
+  return `${head}<div class="subtitle"><span>${esc(subtitle)}</span></div>${chips}${ctl}${body}`;
+}
+
+/** What you can do with a booking: lounges for a flight, edit, copy the reference, delete. */
+function bookingActions(trip, b) {
+  const actions = [{ label: 'Edit', run: () => bookingForm(trip, b, { id: b.id }) }];
+  if (b.kind === 'flight' && b.origin) actions.unshift({ label: `Airport lounges at ${b.origin}`, run: () => loungeSheet(trip, b) });
+  if (b.place_id) actions.push({ label: 'Open place', run: () => go(`#/place/${b.place_id}`) });
+  if (b.confirmation) actions.push({ label: 'Copy confirmation number', run: async () => { try { await navigator.clipboard.writeText(b.confirmation); toast('Copied'); } catch { toast(b.confirmation); } } });
+  actions.push({ label: 'Delete booking', destructive: true, run: async () => {
+    syncTrip(await api(`/v1/trips/${trip.id}/bookings/${b.id}`, { method: 'DELETE' }));
+    toast('Booking deleted');
+    render();
+  } });
+  return actions;
+}
+
+async function bookingWithTrip(id) {
+  let trip = Object.values(S.trip).find((t) => (t.bookings || []).some((x) => x.id === id));
+  if (!trip) {
+    const row = (S.bookingsAll || []).find((x) => x.id === id);
+    if (row) trip = await loadTrip(row.trip_id);
+  }
+  const b = trip && trip.bookings.find((x) => x.id === id);
+  return b ? { trip, b } : {};
+}
+
 const VIEWS = {
+  async calendar() { return calendarView(); },
+
+  async bookings(r) { return bookingsTab(r); },
+
   async discover() { return discoverView(); },
 
   async trips() {
@@ -1127,7 +1472,7 @@ const VIEWS = {
     const active = activeTrip(trips);
     if (active && !S.trip[active.trip.id]) loadTrip(active.trip.id).then(() => render({ quiet: true })).catch(() => {});
     return {
-      html: `${navbar('Trips', { right: addButton })}<h1 class="largetitle" data-anchor>Trips</h1>${homeSwitch()}${active ? todayCard(active) : ''}
+      html: `${rootNav('Trips', { right: addButton })}<h1 class="largetitle" data-anchor>Trips</h1>${homeSwitch()}${active ? todayCard(active) : ''}
         ${tasteInvite()}${homeEdits(trips.length)}${body}`,
       // Warm the cache so opening a trip is instant.
       after: () => setTimeout(() => trips.slice(0, 8).forEach((t) => { if (!S.trip[t.id]) loadTrip(t.id).catch(() => {}); }), 400),
@@ -1138,7 +1483,7 @@ const VIEWS = {
     const trip = await cachedTrip(r.id);
     if (trip.kind !== 'local' && trip.places.some((p) => !p.booking_checked_at)) ensureNeeds([trip.id]);
     const local = trip.kind === 'local';
-    const modes = local ? ['places', 'map'] : ['places', 'itinerary', 'bookings', 'map'];
+    const modes = local ? ['places', 'map'] : ['places', 'itinerary', 'map'];
     const mode = modes.includes(r.mode) ? r.mode : 'places';
     const right = `<span class="gcluster">${r.mode === 'bookings' ? `<button class="gbtn" data-act="addbooking" data-id="${trip.id}" aria-label="Add a booking">${ICON.plus}</button>` : ''}<button class="gbtn" data-act="sharetrip" data-id="${trip.id}" aria-label="Share trip">${ICON.share}</button>
       <button class="gbtn" data-act="tripmenu" data-id="${trip.id}" aria-label="More">${ICON.more}</button></span>`;
@@ -1160,10 +1505,9 @@ const VIEWS = {
         api(`/v1/trips/${trip.id}/packing`).then((list) => { S.packing[trip.id] = list; render({ quiet: true }); }).catch(() => { delete S.packing[trip.id]; });
       }
       loadEvents(trip.id);
-      return head + packingCard(trip) + eventsCard(trip) + editsSection(trip) + placesList(trip);
+      return head + bookingsCard(trip) + packingCard(trip) + eventsCard(trip) + editsSection(trip) + placesList(trip);
     }
     if (mode === 'itinerary') return { html: head + itinerary(trip), after: () => loadLegs(trip) };
-    if (mode === 'bookings') return head + bookingsView(trip);
 
     const day = S.mapDay[trip.id] || 0;
     const shown = day ? stops(trip, day) : trip.places;
@@ -1318,6 +1662,7 @@ const VIEWS = {
         <button class="qbtn" data-act="directions" data-id="${p.id}">${tile('orange', 'route')}Directions</button>
       </div>
 
+      ${eventWhen(p)}
       ${reservationSection(p, trip)}
 
       ${isLocated ? '' : `<div class="section"><div class="section-h">Not on the map yet</div><div class="group">
@@ -1402,7 +1747,7 @@ const VIEWS = {
     const chips = trips.length ? `<div class="daypills">${[...trips.map((t) => ({ id: t.id, name: t.name })), { id: '', name: 'All trips' }].map((t) =>
       `<button class="daypill${(t.id || null) === tripId ? ' on' : ''}" data-act="chattrip" data-id="${t.id}">${esc(t.name)}</button>`).join('')}</div>` : '';
     return {
-      html: `${navbar('Concierge', { right: msgs.length ? `<button class="gbtn" data-act="chatnew" aria-label="New conversation">${ICON.plus}</button>` : '' })}
+      html: `${rootNav('Concierge', { right: msgs.length ? `<button class="gbtn" data-act="chatnew" aria-label="New conversation">${ICON.plus}</button>` : '' })}
         <h1 class="largetitle" data-anchor>Concierge</h1>
         <div class="subtitle"><span>Your personal travel assistant</span></div>${chips}
         <div class="chatlog" id="chatlog">${msgs.length ? msgs.map((m, i) => chatMessage(m, i, tripId)).join('') : chatWelcome()}</div>
@@ -1452,14 +1797,14 @@ const VIEWS = {
   async imports() {
     revalidate('jobs', loadJobs);
     schedulePoll();
-    return `${navbar('Imports', { back: '#/settings', backLabel: 'Settings', right: addButton })}
+    return `${navbar('Imports', { back: '#/profile', backLabel: 'Profile', right: addButton })}
       <h1 class="largetitle" data-anchor>Imports</h1>
       ${S.jobs.length ? `<div class="section"><div class="group tiles">${S.jobs.map(jobRow).join('')}</div>
         <div class="section-f">Tap a finished import to open its trip.</div></div>`
         : emptyState('blue', 'tray', 'Nothing imported yet', 'Reels you share to TripIt show up here while they’re processed.')}`;
   },
 
-  async settings() {
+  async profile() {
     if (!S.config) { S.config = await api('/v1/config'); configureMaps({ googleMapsKey: S.config.google_maps_key }); }
     if (!S.profile) await loadProfile().catch(() => {});
     if (S.homeCity === undefined) S.homeCity = await api('/v1/home').catch(() => null);
@@ -1475,9 +1820,10 @@ const VIEWS = {
       off: 'Get a notification when a reel you shared has been turned into places, or if it couldn’t be read.',
       on: 'You’ll get a notification when each shared reel’s places are saved.',
     }[push];
-    return `${navbar('Settings')}<h1 class="largetitle" data-anchor>Settings</h1>
+    return `${navbar('Profile', backToTab())}<h1 class="largetitle" data-anchor>Profile</h1>
+      <div class="subtitle"><span>Your taste, home city and app settings</span></div>
 
-      <div class="section"><div class="section-h">Personal</div><div class="group tiles">
+      <div class="section"><div class="section-h">You</div><div class="group tiles">
         <button class="row" data-act="homecity">${tile('green', 'pin')}<span class="main"><span class="t">Home city</span>
           <span class="s">${esc(S.homeCity ? [S.homeCity.city, S.homeCity.country].filter(Boolean).join(', ') : 'Places here are saved as local favourites, not trips')}</span></span>${ICON.chev}</button>
         <a class="row" href="#/imports">${tile('blue', 'tray')}<span class="main"><span class="t">Imports</span>
@@ -2096,9 +2442,10 @@ function bookingDetails(b) {
   return { sub, meta };
 }
 
-function bookingCard(b) {
+function bookingCard(b, { trip = null } = {}) {
   const [label, color, icon] = BOOKING_KINDS[b.kind] || BOOKING_KINDS.other;
   const { sub, meta } = bookingDetails(b);
+  const tripChip = trip ? `<a class="tripchip" href="#/trip/${b.trip_id}" data-act="link">${ICON.trips}${esc(trip)}</a>` : '';
   const route = b.kind === 'flight' && b.origin && b.destination
     ? `<div class="route"><span>${esc(b.origin)}</span><span class="line">${ICON.plane}</span><span>${esc(b.destination)}</span></div>` : '';
   const place = b.place_id ? `<a class="linkbtn pl" href="#/place/${b.place_id}" data-act="link">Open place</a>` : '';
@@ -2110,7 +2457,7 @@ function bookingCard(b) {
     <div class="top">${tile(color, icon)}<span class="main"><span class="t">${esc(b.title)}</span><span class="s">${esc(sub)}</span></span><span class="pill2">${esc(label)}</span></div>
     ${route}
     ${meta || b.confirmation ? `<div class="meta"><span>${esc(meta)}</span>${b.confirmation ? `<span class="conf">${esc(b.confirmation)}</span>` : ''}</div>` : ''}
-    ${place || directions || lounges ? `<div class="bactions">${directions}${place}${lounges}</div>` : ''}</div>`;
+    ${place || directions || lounges || tripChip ? `<div class="bactions">${tripChip}${directions}${place}${lounges}</div>` : ''}</div>`;
 }
 
 /** Lounges at the airport a flight leaves from: name, terminal, how to get in. */
@@ -2137,6 +2484,14 @@ async function loungeSheet(trip, b, refresh = false) {
   try { st.res = await api(`/v1/trips/${trip.id}/bookings/${b.id}/lounges${refresh ? '?refresh=true' : ''}`); }
   catch (e) { st.error = e.message; }
   draw();
+}
+
+/** On a trip's page: a way into its bookings on the Bookings tab. */
+function bookingsCard(trip) {
+  const n = (trip.bookings || []).length;
+  if (!n || trip.kind === 'local') return '';
+  return `<div class="section"><a class="group tiles packcard" href="#/bookings?trip=${trip.id}"><span class="row">${tile('blue', 'bookings')}<span class="main"><span class="t">Bookings</span>
+    <span class="s">${plural(n, 'booking')} for this trip</span></span>${ICON.chev}</span></a></div>`;
 }
 
 function bookingsView(trip) {
@@ -2174,12 +2529,16 @@ function bookingRows(list) {
   }).join('')}</div>`;
 }
 
-function addBookingSheet(trip) {
+function addBookingSheet(trip, { choose = false } = {}) {
   S.bkflow = null;
-  const opt = (act, color, icon, title, sub) => `<button class="row" data-act="${act}" data-id="${trip.id}">${tile(color, icon)}<span class="main"><span class="t">${title}</span><span class="s">${sub}</span></span>${ICON.chev}</button>`;
+  const st = { tripId: trip.id };
+  const opt = (act, color, icon, title, sub) => `<button class="row" data-act="${act}" data-id="${st.tripId}">${tile(color, icon)}<span class="main"><span class="t">${title}</span><span class="s">${sub}</span></span>${ICON.chev}</button>`;
+  const trips = (S.trips || []).filter((t) => t.kind !== 'local' || t.id === trip.id);
+  const picker = choose && trips.length > 1 ? `<div class="section"><div class="group tiles"><label class="row" for="bk-trip">${tile('blue', 'trips')}<span class="main"><span class="t">For</span></span>
+      <select class="select" id="bk-trip" data-act="bktripsel">${trips.map((t) => `<option value="${t.id}" ${t.id === st.tripId ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}</select></label></div></div>` : '';
   openSheet({
-    type: 'form', title: 'Add a booking', st: {},
-    body: () => `<div class="section"><div class="group tiles">
+    type: 'form', title: 'Add a booking', st,
+    body: () => `${picker}<div class="section"><div class="group tiles">
       ${opt('bkshot', 'green', 'photo', 'Screenshot or photo', 'Of a confirmation, e-ticket or itinerary')}
       ${opt('bktext', 'orange', 'note', 'Paste the email text', 'Claude reads flight, hotel and reservation details')}
       ${opt('bkmanual', 'gray', 'plus', 'Enter it yourself', 'Flight, stay, car or table')}
@@ -2574,6 +2933,12 @@ function chatgptSheet(p, trip) {
 /** Brings a trip's places into the caches after the itinerary changed on the server. */
 function syncTrip(res) {
   S.trip[res.id] = res;
+  if (S.bookingsAll && res.bookings) { // the Bookings tab, kept in step without a reload
+    const mine = res.bookings.map((b) => ({ ...b, trip_name: res.name, trip_kind: res.kind }));
+    S.bookingsAll = [...S.bookingsAll.filter((b) => b.trip_id !== res.id), ...mine]
+      .sort((a, b) => (a.start_at || '9999').localeCompare(b.start_at || '9999'));
+  }
+  fetchedAt.cal = 0;
   if (S.places) {
     const fresh = new Map(res.places.map((p) => [p.id, p]));
     S.places = S.places.map((p) => fresh.get(p.id) || p);
@@ -2948,6 +3313,7 @@ async function onAction(act, el) {
       const actions = [
         ...(t.kind === 'local' ? [] : [{ label: t.day_count ? 'Re-plan trip' : 'Plan my trip', run: () => planSheet(t) }]),
         { label: 'Add a place', run: () => addSheet({ tripId: t.id }) },
+        ...(t.kind === 'local' ? [] : [{ label: 'Add a booking', run: () => addBookingSheet(t) }]),
         ...(t.kind === 'local' ? [{ label: 'Turn into a trip', run: setKind('trip') }] : [{ label: 'Mark as near home', run: setKind('local') }]),
         ...(t.kind === 'local' ? [] : [{ label: 'Packing list', run: () => go(`#/packing/${t.id}`) }]),
         { label: 'Save for offline', run: () => saveOffline(t.id) },
@@ -3015,7 +3381,7 @@ async function onAction(act, el) {
     case 'tasteback':
       if (S.taste && S.taste.step > 0) { S.taste.step--; S.taste.dir = -1; render(); return; }
       S.taste = null;
-      if (S.navigations > 0) history.back(); else go('#/settings');
+      if (S.navigations > 0) history.back(); else go('#/profile');
       return;
     case 'tastenext': {
       if (S.taste.step < TASTE_STEPS.length - 1) { S.taste.step++; S.taste.dir = 1; render(); return; }
@@ -3195,25 +3561,94 @@ async function onAction(act, el) {
       return;
     }
     case 'lounges': {
-      const trip = Object.values(S.trip).find((t) => (t.bookings || []).some((x) => x.id === el.dataset.id));
-      const b = trip && trip.bookings.find((x) => x.id === el.dataset.id);
+      const { trip, b } = await bookingWithTrip(el.dataset.id);
       if (b) loungeSheet(trip, b);
       return;
     }
+    case 'calday': {
+      const d = el.dataset.date;
+      S.calv.day = S.calv.day === d ? null : d;
+      S.calv.scrollTo = S.calv.day;
+      render({ quiet: true });
+      return;
+    }
+    case 'calmonth': {
+      const [y, m] = S.calv.month.split('-').map(Number);
+      const d = new Date(y, m - 1 + Number(el.dataset.step), 1);
+      S.calv.month = isoDate(d).slice(0, 7); S.calv.day = null;
+      render({ quiet: true });
+      return;
+    }
+    case 'caltoday': S.calv.month = isoDate(new Date()).slice(0, 7); S.calv.day = null; render({ quiet: true }); return;
+    case 'calnext': {
+      const end = `${S.calv.month}-31`;
+      const next = S.cal.items.find((i) => i.date > end && (S.calv.filter === 'all' || i.kind === S.calv.filter));
+      if (next) { S.calv.month = next.date.slice(0, 7); S.calv.day = next.date; S.calv.scrollTo = next.date; render({ quiet: true }); }
+      return;
+    }
+    case 'calfilter': S.calv.filter = el.dataset.f; render({ quiet: true }); return;
+    case 'calopen': go(el.dataset.href); return;
+    case 'calbooking': {
+      const { trip, b } = await bookingWithTrip(el.dataset.id);
+      if (b) openSheet({ type: 'actions', title: b.title, actions: bookingActions(trip, b) });
+      return;
+    }
+    case 'caladd': { const it = calItem(el.dataset.id); if (it) addToCalendarSheet(it); return; }
+    case 'calsync': await calSyncSheet(); return;
+    case 'calfeedon': {
+      S.sheet.busy = true; renderOverlay();
+      try {
+        const feed = await api('/v1/calendar/feed', { method: 'POST' });
+        if (S.cal) S.cal.feed = feed;
+        S.sheet.st.feed = feed;
+      } catch (e) { toast(e.message, true); }
+      if (S.sheet) { S.sheet.busy = false; renderOverlay(); }
+      return;
+    }
+    case 'calfeedoff':
+      await api('/v1/calendar/feed', { method: 'DELETE' });
+      if (S.cal) S.cal.feed = null;
+      closeSheet(); toast('Calendar link turned off. Subscribed calendars stop updating.');
+      return;
+    case 'eventdate': { const p = findAnyPlace(el.dataset.id); if (p) { if (S.sheet) closeSheet(); eventDateSheet(p); } return; }
+    case 'eventdateclear': {
+      const fresh = await api(`/v1/places/${el.dataset.id}`, { method: 'PATCH', body: { clear_event_date: true } });
+      afterPlaceChange(fresh); closeSheet(); toast('Date removed'); render();
+      return;
+    }
+    case 'eventcal': {
+      const cal = await loadCal();
+      const it = cal.items.find((i) => i.id === `event:${el.dataset.id}`);
+      if (it) addToCalendarSheet(it);
+      return;
+    }
+    case 'bkkind': S.bk.kind = el.dataset.k; render({ quiet: true }); return;
+    case 'bkpast': S.bk.past = !S.bk.past; render({ quiet: true }); return;
+    case 'bktrip': {
+      const mark = (on) => (on ? '✓ ' : '');
+      const trips = (S.trips || []).filter((t) => (S.bookingsAll || []).some((x) => x.trip_id === t.id));
+      openSheet({ type: 'actions', title: 'Show bookings for', actions: [
+        { label: `${mark(S.bk.trip === 'all')}All trips`, run: () => { S.bk.trip = 'all'; go('#/bookings'); } },
+        ...trips.map((t) => ({ label: `${mark(S.bk.trip === t.id)}${t.name}`, run: () => { S.bk.trip = t.id; go(`#/bookings?trip=${t.id}`); } })),
+      ] });
+      return;
+    }
+    case 'addbookingany': {
+      const trips = await cachedTrips();
+      const pick = (S.bk.trip !== 'all' && trips.find((t) => t.id === S.bk.trip)) || likelyTrip(trips);
+      if (!pick) { toast('Save a trip first, then add its bookings', true); return; }
+      addBookingSheet(await loadTrip(pick.id), { choose: true });
+      return;
+    }
     case 'bookingmenu': {
-      const trip = Object.values(S.trip).find((t) => (t.bookings || []).some((b) => b.id === el.dataset.id));
-      const b = trip && trip.bookings.find((x) => x.id === el.dataset.id);
-      if (!b) return;
-      const actions = [{ label: 'Edit', run: () => bookingForm(trip, b, { id: b.id }) }];
-      if (b.kind === 'flight' && b.origin) actions.unshift({ label: `Airport lounges at ${b.origin}`, run: () => loungeSheet(trip, b) });
-      if (b.place_id) actions.push({ label: 'Open place', run: () => go(`#/place/${b.place_id}`) });
-      if (b.confirmation) actions.push({ label: 'Copy confirmation number', run: async () => { try { await navigator.clipboard.writeText(b.confirmation); toast('Copied'); } catch { toast(b.confirmation); } } });
-      actions.push({ label: 'Delete booking', destructive: true, run: async () => {
-        syncTrip(await api(`/v1/trips/${trip.id}/bookings/${b.id}`, { method: 'DELETE' }));
-        toast('Booking deleted');
-        render();
-      } });
-      openSheet({ type: 'actions', title: b.title, actions });
+      const { trip, b } = await bookingWithTrip(el.dataset.id);
+      if (b) openSheet({ type: 'actions', title: b.title, actions: bookingActions(trip, b) });
+      return;
+    }
+    case 'bktripsel': {
+      await loadTrip(el.value);
+      S.sheet.st.tripId = el.value;
+      renderOverlay();
       return;
     }
     case 'findmenu': await runFindMenu(el.dataset.id, el.dataset.refresh === '1'); return;

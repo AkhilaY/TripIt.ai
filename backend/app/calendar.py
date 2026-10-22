@@ -37,9 +37,11 @@ class CalendarService:
     # ---------- Items ----------
 
     def _event(self, p: Place, trip_name: str) -> CalendarItem:
-        where = p.venue or p.resolved_name or p.address or p.city
+        where = p.venue or p.neighborhood or p.address or p.city
+        parts = [x for x in (where, trip_name) if x]
+        subtitle = " · ".join(dict.fromkeys(parts)) or None  # "Soho · New York", never "New York · New York"
         return CalendarItem(id=f"event:{p.id}", kind="event", title=p.name, date=p.event_date, end_date=p.event_end_date,
-                            time=p.start_time if p.event_date else None, subtitle=" · ".join(x for x in (where, trip_name) if x) or None,
+                            time=p.start_time if p.event_date else None, subtitle=subtitle,
                             category="event", place_id=p.id, trip_id=p.trip_id)
 
     def items(self) -> tuple[list[CalendarItem], list[CalendarItem]]:
@@ -63,7 +65,7 @@ class CalendarService:
                     dated.append(CalendarItem(
                         id=f"stop:{p.id}", kind="stop", title=p.name, date=detail.start_date + timedelta(days=p.day_number - 1),
                         time=p.start_time, part_of_day=(p.time_of_day.value if p.time_of_day else "afternoon") if not p.start_time else None,
-                        subtitle=" · ".join(x for x in (p.neighborhood or p.city, detail.name) if x) or None,
+                        subtitle=p.neighborhood or None,
                         category=p.category.value, place_id=p.id, trip_id=detail.id,
                     ))
         for b in self.db.list_all_bookings():

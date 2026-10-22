@@ -38,6 +38,7 @@
   /* Muted, earthy category colors (tinted tiles and map pins) */
   --c-food: #B0644A; --c-cafe: #8A6A4E; --c-dessert: #B2707A; --c-drinks: #7E5B78; --c-nightlife: #4F5878;
   --c-attraction: #557189; --c-activity: #5B827C; --c-nature: #6C875B; --c-shopping: #8E8455; --c-stay: #6A869C; --c-other: #8A7F73;
+  --c-event: #A4537C; --c-booking: #4E78A6; --c-plan: #5B827C; --c-trip: #B08A4E;
   --c-walk: #6C875B; --c-transit: #557189; --c-drive: #A9762E; --c-bike: #5B827C;
   --c-gold: #A07A50; --c-accent: #2B2019; --c-red: #A4473C; --c-orange: #A9762E; --c-green: #5D7B53; --c-blue: #557189; --c-indigo: #5E5A7E; --c-pink: #B2707A; --c-gray: #8A7F73; --c-teal: #5B827C;
 
@@ -72,6 +73,7 @@
     --danger: #D27A6E; --ok: #93B087; --warn: #D4A15A;
     --c-food: #C98063; --c-cafe: #AD8C6E; --c-dessert: #C98C95; --c-drinks: #A383A0; --c-nightlife: #8590B4;
     --c-attraction: #86A2BA; --c-activity: #86AFA8; --c-nature: #97B084; --c-shopping: #B5AB7C; --c-stay: #96B0C4; --c-other: #A99D90;
+    --c-event: #D08AB0; --c-booking: #8AAFD8; --c-plan: #86AFA8; --c-trip: #D2B07A;
     --c-walk: #97B084; --c-transit: #86A2BA; --c-drive: #D4A15A; --c-bike: #86AFA8;
     --c-gold: #C9A47A; --c-accent: #EADFCF; --c-red: #D27A6E; --c-orange: #D4A15A; --c-green: #93B087; --c-blue: #86A2BA; --c-indigo: #9C97C0; --c-pink: #C98C95; --c-gray: #A99D90; --c-teal: #86AFA8;
     --glass: rgba(38, 30, 24, 0.62);
@@ -845,3 +847,62 @@ button.row.sel { cursor: pointer; }
 .bactions .linkbtn { display: inline-flex; align-items: center; gap: 6px; }
 .bactions .linkbtn svg { width: 16px; height: 16px; }
 .lounge .main { gap: 3px; }
+
+/* ---------- Header: calendar (left) and profile (right) ---------- */
+.calbtn { position: relative; }
+.calglyph { width: 22px; height: 22px; border: 1.7px solid currentColor; border-top-width: 5px; border-radius: 5px; display: grid; place-items: center; }
+.calglyph b { font-size: 11px; font-weight: 700; line-height: 1; margin-top: -1px; font-variant-numeric: tabular-nums; }
+.caldot { position: absolute; top: 7px; right: 7px; width: 9px; height: 9px; border-radius: 50%; background: var(--c-event); box-shadow: 0 0 0 2px var(--bg); }
+.gbtn.me svg { width: 22px; height: 22px; }
+.gbtn.small { width: 36px; height: 36px; border-radius: 18px; }
+.gbtn.small svg { width: 17px; height: 17px; }
+.gbtn.flip svg { transform: scaleX(-1); }
+.gbtn.wide svg { width: 18px; height: 18px; }
+
+/* ---------- Calendar ---------- */
+.calcard { margin: 4px 16px 18px; padding: 14px 12px 12px; border-radius: 22px; background: var(--cell); }
+.calhead { display: grid; grid-template-columns: auto 1fr auto auto; align-items: center; gap: 8px; padding: 0 2px 10px; }
+.calhead h2 { margin: 0; font-family: var(--serif); font-size: 24px; font-weight: 500; text-align: center; }
+.calhead-gap { width: 0; }
+.cgrid { display: grid; grid-template-columns: repeat(7, 1fr); row-gap: 2px; }
+.cgrid.wk span { text-align: center; font-size: 12px; font-weight: 600; color: var(--secondary); padding-bottom: 6px; letter-spacing: .04em; }
+.cday { position: relative; border: 0; background: none; font: inherit; color: var(--label); min-height: 46px; padding: 4px 0 6px; display: flex; flex-direction: column; align-items: center; gap: 3px; cursor: pointer; }
+.cday.out { cursor: default; }
+.cday .num { width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; font-size: 16px; font-variant-numeric: tabular-nums; }
+.cday.past .num { color: var(--tertiary, var(--secondary)); }
+.cday.today .num { box-shadow: inset 0 0 0 1.5px var(--accent); font-weight: 700; }
+.cday.sel .num { background: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.cday .cdots { display: flex; gap: 3px; height: 6px; }
+.cday .cdots i, .legend i { width: 6px; height: 6px; border-radius: 50%; display: inline-block; }
+.cday.intrip::before { content: ""; position: absolute; inset: 5px 0 auto; height: 32px; background: color-mix(in srgb, var(--c-trip) 16%, transparent); z-index: -1; }
+.cday.intrip { z-index: 0; }
+.cday.tstart::before { left: 4px; border-radius: 16px 0 0 16px; }
+.cday.tend::before { right: 4px; border-radius: 0 16px 16px 0; }
+.cday.tstart.tend::before { border-radius: 16px; }
+.k-event { --k: var(--c-event); } .k-booking { --k: var(--c-booking); } .k-stop { --k: var(--c-plan); } .k-trip { --k: var(--c-trip); }
+.cdots i, .legend i { background: var(--k); }
+.legend { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px 14px; padding-top: 10px; font-size: 12px; color: var(--secondary); }
+.legend span { display: inline-flex; align-items: center; gap: 5px; }
+.legend .k-trip { border-radius: 2px; width: 12px; opacity: .5; }
+.agenda .datehead { scroll-margin-top: 80px; }
+.agday.sel .datehead { color: var(--accent); }
+.agenda .group { margin: 0 16px 8px; }
+.calrow { display: flex; align-items: center; gap: 4px; padding-right: 10px; }
+.calrow + .calrow { border-top: 0.5px solid var(--sep); }
+.calrow-main { flex: 1; min-width: 0; display: flex; align-items: center; gap: 12px; padding: 12px 6px 12px 14px; border: 0; background: none; font: inherit; color: inherit; text-align: left; cursor: pointer; }
+.calrow .when { flex: 0 0 64px; font-size: 13px; font-weight: 600; color: var(--secondary); font-variant-numeric: tabular-nums; }
+.calrow .bar { flex: 0 0 4px; align-self: stretch; border-radius: 2px; background: var(--k); }
+.calrow.k-trip .bar { opacity: .5; }
+.calrow .main { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.calrow .t { font-size: 16px; font-weight: 500; }
+.calrow .s { font-size: 13px; color: var(--secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.caladd { flex-shrink: 0; box-shadow: none; background: color-mix(in srgb, var(--k) 14%, transparent); color: var(--label); }
+.calempty { margin: 6px 20px 18px; color: var(--secondary); font-size: 15px; display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
+
+/* ---------- Bookings tab & events ---------- */
+.tripchip { display: inline-flex; align-items: center; gap: 5px; padding: 4px 10px; border-radius: 999px; font-size: 13px; font-weight: 600; text-decoration: none;
+  color: var(--label); background: color-mix(in srgb, var(--label) 7%, transparent); }
+.tripchip svg { width: 14px; height: 14px; }
+.bkfoot { margin: 6px 20px 24px; }
+.datechip { display: inline-block; margin-left: 6px; padding: 1px 7px; border-radius: 999px; font-size: 12px; font-weight: 600;
+  color: var(--c-event); background: color-mix(in srgb, var(--c-event) 13%, transparent); }

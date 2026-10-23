@@ -41,8 +41,8 @@ if [ ! -f "$DB" ]; then
   rclone copy "$FILES" "$DATA_DIR" --ignore-existing --quiet || echo "No files to restore"
 fi
 
-# Photos and keys, every 15 minutes.
-( while sleep 900; do sync_files; done ) &
+# Photos and keys: a minute after starting, then every 15 minutes.
+( sleep 60; sync_files; while sleep 900; do sync_files; done ) &
 LOOP=$!
 
 # The server runs under Litestream, which streams every change. On stop (Fly sends SIGINT), let it finish

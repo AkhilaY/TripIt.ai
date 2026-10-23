@@ -13,6 +13,10 @@ enum Route: Hashable {
     case imports
     /// The places saved from one post.
     case reel(id: String)
+    /// A restaurant's menu.
+    case menu(placeId: String)
+    /// A place from an edit that isn't saved yet: a preview with Save.
+    case editPlace(tripId: String, editId: String, entryId: String)
     /// A screen of the web app that isn't native yet, by its address inside the app (e.g. "#/packing/<trip id>").
     case web(hash: String)
 }
@@ -65,11 +69,13 @@ final class Router {
             tab = .library
             library = param("reel").map { [.reel(id: $0)] } ?? []
         case "place" where parts.count > 1:
-            if parts.count > 2, parts[2] == "menu" { push(.web(hash: "#/" + parts.joined(separator: "/"))) }
+            if parts.count > 2, parts[2] == "menu" { push(.menu(placeId: parts[1])) }
             else { push(.place(id: parts[1], tripId: param("trip"))) }
         case "trip" where parts.count > 1:
             if parts.count > 2, parts[2] == "bookings" { push(.web(hash: "#/trip/\(parts[1])/bookings")) }
             else { push(.trip(id: parts[1])) }
+        case "editplace" where parts.count > 3:
+            push(.editPlace(tripId: parts[1], editId: parts[2], entryId: parts[3]))
         case "folder" where parts.count > 1:
             push(.folder(id: parts[1]))
         case "map":

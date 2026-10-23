@@ -208,19 +208,20 @@ function route() {
   if (parts[0] === 'packing' && parts[1]) return { name: 'packing', id: parts[1], params };
   if (parts[0] === 'events' && parts[1]) return { name: 'events', id: parts[1], params };
   if (parts[0] === 'edit' && parts[1] && parts[2]) return { name: 'edit', id: parts[1], editId: parts[2], params };
+  if (parts[0] === 'editplace' && parts[3]) return { name: 'editplace', id: parts[1], editId: parts[2], entryId: parts[3], params };
   if (['map', 'imports', 'profile', 'signin', 'add', 'concierge', 'taste', 'discover', 'bookings', 'calendar'].includes(parts[0])) return { name: parts[0], params };
   return { name: 'trips', params };
 }
 
 const TAB_FOR = {
-  trips: 'trips', folder: 'trips', trip: 'trips', place: 'trips', today: 'trips', edit: 'trips', packing: 'trips', events: 'trips', map: 'map', concierge: 'concierge',
+  trips: 'trips', folder: 'trips', trip: 'trips', place: 'trips', today: 'trips', edit: 'trips', editplace: 'trips', packing: 'trips', events: 'trips', map: 'map', concierge: 'concierge',
   discover: 'discover', bookings: 'bookings', add: 'trips',
 };
 // Profile, calendar and their pages open over whichever tab you were on.
 const tabOf = (name) => TAB_FOR[name] || S.lastTab || 'trips';
 const TAB_INDEX = { trips: 0, discover: 1, map: 2, bookings: 3, concierge: 4 };
 const TAB_LABEL = { trips: 'Library', discover: 'Discover', map: 'Map', bookings: 'Bookings', concierge: 'Concierge' };
-const DEPTH = { profile: 1, calendar: 1, imports: 2, taste: 2, folder: 1, trip: 1, today: 1, taste: 1, packing: 1, events: 1, edit: 2, place: 2 };
+const DEPTH = { profile: 1, calendar: 1, imports: 2, taste: 2, folder: 1, trip: 1, today: 1, taste: 1, packing: 1, events: 1, edit: 2, editplace: 3, place: 2 };
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
 let renderToken = 0;
 let lastKey = '';
@@ -248,8 +249,15 @@ let navigating = 0; // token of a navigation render still loading its data
 let quietPending = false; // a background refresh arrived mid-navigation; repaint once it's done
 
 /** Screens the iOS app shows natively: opening one from an embedded web screen hands it to the app. */
-const nativeRoute = (r) => ['trips', 'folder', 'trip', 'map', 'profile', 'signin', 'imports', 'add'].includes(r.name)
-  || (r.name === 'place' && r.mode !== 'menu');
+const nativeRoute = (r) => ['trips', 'folder', 'trip', 'map', 'profile', 'signin', 'imports', 'add', 'editplace', 'place'].includes(r.name);
+
+/** Leaves a screen: inside the iOS app the first web screen hands back to the app's own navigation. */
+function leave(fallback) {
+  if (EMBED) {
+    if (embedDepth > 0) history.back(); else toNative({ back: true });
+  } else if (S.navigations > 0) history.back();
+  else go(fallback);
+}
 let embedDepth = -1; // how many screens deep this embedded web view is, so Back at the first one returns to the app
 
 async function render({ quiet = false } = {}) {
@@ -2096,7 +2104,7 @@ const VIEWS = {
           · ${plural(e.entries.length, 'place')}${e.new_count ? ` · ${e.new_count} new to you` : ''}</div>
         <div class="editsave">${saveEdit}<span class="s">${e.folder_id ? 'Kept as a folder, even after the edits refresh.' : 'Edits refresh daily. Save this one to keep it as a folder.'}</span></div></header>
       <ol class="editlist">${e.entries.map((it, i) => {
-        const href = it.saved ? `#/place/${it.place_id}${onTrip.has(it.place_id) ? `?trip=${trip.id}` : ''}` : null;
+        const href = it.saved ? `#/place/${it.place_id}${onTrip.has(it.place_id) ? `?trip=${trip.id}` : ''}` : `#/editplace/${trip.id}/${e.id}/${it.id}`;
         const p = it.saved ? (trip.places.find((x) => x.id === it.place_id) || {}) : {};
         const st = p.opening_hours ? openStatus(p.opening_hours) : null;
         const src = it.source ? `<span class="ee-source">${it.saved && !it.source.url ? '' : 'via '}${safeUrl(it.source.url)
@@ -2116,6 +2124,39 @@ const VIEWS = {
       }).join('')}</ol>
       <div class="section"><a class="btn tint wide" href="#/trip/${trip.id}/map">${ICON.map}See your trip on the map</a></div>`;
     return html;
+  },
+
+  /** A place from an edit that isn't saved yet (a publication's pick): what we know, where it's from, and Save. */
+  async editplace(r) {
+    const trip = await cachedTrip(r.id);
+    const te = S.edits[r.id] || await loadEdits(r.id);
+    const e = te.edits.find((x) => x.id === r.editId);
+    const it = e && e.entries.find((x) => x.id === r.entryId);
+    if (!it) throw new ApiError('This edit was refreshed. Open the trip to see the latest ones.', 404);
+    if (it.saved && it.place_id) { location.replace(`#/place/${it.place_id}`); return ''; }
+    const hasCoords = it.latitude != null && it.longitude != null;
+    const where = [it.name, it.neighborhood, it.city || trip.city].filter(Boolean).join(', ');
+    const apple = hasCoords ? `https://maps.apple.com/?daddr=${it.latitude},${it.longitude}` : `https://maps.apple.com/?daddr=${encodeURIComponent(where)}`;
+    const google = `https://www.google.com/maps/dir/?api=1&destination=${hasCoords ? `${it.latitude},${it.longitude}` : encodeURIComponent(where)}`;
+    const src = it.source;
+    return `${navbar(it.name, { back: `#/edit/${trip.id}/${e.id}`, backLabel: e.title })}
+      ${it.photo ? `<div class="hero"><div class="gallery"><div class="gimg"><img src="${esc(photoUrl(it.photo, 1000))}" alt="${esc(it.name)}" decoding="async" onerror="this.closest('.hero').remove()"></div></div></div>` : ''}
+      <div class="ph" style="${cvar(it.category)}">
+        <span class="cat">${catTile(it.category, 'sm')}${CATS[it.category] || 'Place'}</span>
+        <h1 data-anchor>${esc(it.name)}</h1>
+        <span class="loc">${esc([it.neighborhood, it.city || trip.city].filter(Boolean).join(' · '))}</span>
+        ${it.rating ? `<span class="s">★ ${it.rating.toFixed(1)}${it.rating_count ? ` · ${fmtCount(it.rating_count)} reviews` : ''}</span>` : ''}
+      </div>
+      <div class="section"><button class="btn wide" data-act="saveeditentry" data-trip="${trip.id}" data-edit="${e.id}" data-id="${it.id}">${ICON.bookmark}Save to your library</button></div>
+      ${it.note ? `<div class="section"><div class="section-h">Why it’s in ${esc(e.title)}</div><div class="group"><div class="notecard">${esc(it.note)}</div></div></div>` : ''}
+      ${src ? `<div class="section"><div class="section-h">Recommended by</div><div class="group tiles">
+        ${safeUrl(src.url) ? `<a class="row" href="${esc(src.url)}" target="_blank" rel="noopener">` : '<div class="row">'}${tile('indigo', 'book')}
+        <span class="main"><span class="t">${esc(src.name)}</span>${src.title ? `<span class="s">${esc(src.title)}</span>` : ''}</span>${safeUrl(src.url) ? `${ICON.chev}</a>` : '</div>'}</div></div>` : ''}
+      <div class="section"><div class="section-h">Getting there</div><div class="group tiles">
+        <a class="row" href="${esc(apple)}" target="_blank" rel="noopener">${tile('green', 'map')}<span class="main"><span class="t">Directions in Apple Maps</span></span>${ICON.chev}</a>
+        <a class="row" href="${esc(google)}" target="_blank" rel="noopener">${tile('blue', 'globe')}<span class="main"><span class="t">Directions in Google Maps</span></span>${ICON.chev}</a>
+        ${safeUrl(it.maps_url) ? `<a class="row" href="${esc(it.maps_url)}" target="_blank" rel="noopener">${tile('gray', 'pin')}<span class="main"><span class="t">Open in Google Maps</span><span class="s">Hours, photos and reviews</span></span>${ICON.chev}</a>` : ''}
+      </div><div class="section-f">Save it to see opening hours, the menu, and to add it to folders and trips.</div></div>`;
   },
 
   async concierge() {
@@ -3822,6 +3863,7 @@ async function onAction(act, el) {
         S.edits[el.dataset.trip] = await api(`/v1/trips/${el.dataset.trip}/edits`);
         await afterLibraryChange();
         toast(`Saved ${place.name} to your library`);
+        if (route().name === 'editplace') { location.replace(`#/place/${place.id}`); return; }
       } catch (e) { el.disabled = false; toast(e.message, true); }
       render({ quiet: true });
       return;
@@ -3861,6 +3903,7 @@ async function onAction(act, el) {
       return;
     }
     case 'tastepick': {
+      if (!S.taste) { render(); return; }
       const { p, step } = S.taste;
       const q = TASTE_STEPS[step];
       const v = el.dataset.value;
@@ -3872,9 +3915,10 @@ async function onAction(act, el) {
     case 'tasteback':
       if (S.taste && S.taste.step > 0) { S.taste.step--; S.taste.dir = -1; render(); return; }
       S.taste = null;
-      if (S.navigations > 0) history.back(); else go('#/profile');
+      leave('#/profile');
       return;
     case 'tastenext': {
+      if (!S.taste) { render(); return; }
       if (S.taste.step < TASTE_STEPS.length - 1) { S.taste.step++; S.taste.dir = 1; render(); return; }
       const notes = $('#taste-notes');
       if (notes) S.taste.p.notes = notes.value.trim() || null;
@@ -3883,7 +3927,7 @@ async function onAction(act, el) {
       fetchedAt.profile = Date.now();
       S.taste = null;
       toast('Your taste is saved');
-      if (S.navigations > 0) history.back(); else go('#/');
+      leave('#/');
       return;
     }
     case 'star': {

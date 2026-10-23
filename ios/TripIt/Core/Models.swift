@@ -246,13 +246,28 @@ struct DayLegs: Codable {
     var legs: [Leg]
 }
 
+struct EditSource: Codable, Hashable {
+    var name: String
+    var title: String?
+    var url: String?
+}
+
 struct EditItem: Codable, Identifiable, Hashable {
     var id: String
     var placeId: String?
     var saved: Bool
     var name: String
     var category: String
+    var neighborhood: String?
+    var city: String?
+    var note: String
+    var source: EditSource?
     var photo: PlacePhoto?
+    var rating: Double?
+    var ratingCount: Int?
+    var latitude: Double?
+    var longitude: Double?
+    var mapsUrl: String?
 }
 
 struct TripEdit: Codable, Identifiable, Hashable {
@@ -263,6 +278,30 @@ struct TripEdit: Codable, Identifiable, Hashable {
     var coverPhoto: PlacePhoto?
     var folderId: String?
     var newCount: Int
+}
+
+struct MenuItem: Codable, Hashable {
+    var name: String
+    var description: String?
+    var price: String?
+    var tags: [String]
+}
+
+struct MenuSection: Codable, Hashable {
+    var title: String
+    var note: String?
+    var items: [MenuItem]
+}
+
+/// A place's menu: status "unknown" until someone looks, "found" or "none".
+struct PlaceMenu: Codable {
+    var status: String
+    var sections: [MenuSection]
+    var notes: String?
+    var sourceKind: String?
+    var sourceUrl: String?
+    var fetchedAt: String?
+    var trace: [String]
 }
 
 struct TripEdits: Codable {

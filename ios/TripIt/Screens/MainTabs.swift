@@ -80,6 +80,8 @@ struct RouteView: View {
         case .folder(let id): FolderView(folderId: id)
         case .imports: ImportsView()
         case .reel(let id): ReelPlacesView(reelId: id)
+        case .menu(let placeId): MenuView(placeId: placeId)
+        case .editPlace(let tripId, let editId, let entryId): EditPlaceView(tripId: tripId, editId: editId, entryId: entryId)
         case .web(let hash): WebScreen(hash: hash)
         }
     }

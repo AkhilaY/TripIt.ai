@@ -84,42 +84,44 @@ struct TripCard: View {
     var body: some View {
         let categories = trip.categories.map(Category.init)
         let main = categories.first ?? .other
-        ZStack(alignment: .bottomLeading) {
-            LinearGradient(colors: [main.color, (categories.dropFirst().first ?? .stay).color],
-                           startPoint: .topLeading, endPoint: .bottomTrailing)
-            Image(systemName: main.symbol)
-                .font(.system(size: 90, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.14))
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-                .padding(18)
-            if let cover = trip.coverPhoto {
-                RemoteImage(url: cover.url(width: 900)) { Color.clear }
+        let second = categories.dropFirst().first ?? .stay
+        // A fixed-size card: the photo fills it and is clipped, so it can never push the name out of view.
+        LinearGradient(colors: [main.color, second.color], startPoint: .topLeading, endPoint: .bottomTrailing)
+            .frame(maxWidth: .infinity)
+            .frame(height: 200)
+            .overlay(alignment: .topTrailing) {
+                Image(systemName: main.symbol)
+                    .font(.system(size: 90, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.14))
+                    .padding(18)
             }
-            LinearGradient(colors: [.clear, .black.opacity(0.62)], startPoint: .center, endPoint: .bottom)
-            VStack(alignment: .leading, spacing: 4) {
-                Spacer()
-                Text(trip.name).font(Theme.serif(28)).foregroundStyle(.white).lineLimit(2)
-                Text(meta).font(.subheadline.weight(.medium)).foregroundStyle(.white.opacity(0.85))
-            }
-            .padding(18)
-            VStack {
-                HStack {
-                    if trip.dayCount > 0 {
-                        Label(Fmt.plural(trip.dayCount, "day"), systemImage: "calendar")
-                            .font(.caption.weight(.semibold)).foregroundStyle(.white)
-                            .padding(.horizontal, 10).padding(.vertical, 5)
-                            .background(.ultraThinMaterial.opacity(0.9), in: Capsule())
-                            .environment(\.colorScheme, .dark)
-                    }
-                    Spacer()
+            .overlay {
+                if let cover = trip.coverPhoto {
+                    RemoteImage(url: cover.url(width: 900)) { Color.clear }
                 }
-                Spacer()
             }
-            .padding(14)
-        }
-        .frame(height: 200)
-        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-        .shadow(color: .black.opacity(0.12), radius: 16, y: 10)
+            .overlay {
+                LinearGradient(colors: [.clear, .black.opacity(0.65)], startPoint: .center, endPoint: .bottom)
+            }
+            .overlay(alignment: .bottomLeading) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(trip.name).font(Theme.serif(28)).foregroundStyle(.white).lineLimit(2)
+                    Text(meta).font(.subheadline.weight(.medium)).foregroundStyle(.white.opacity(0.85)).lineLimit(1)
+                }
+                .padding(18)
+            }
+            .overlay(alignment: .topLeading) {
+                if trip.dayCount > 0 {
+                    Label(Fmt.plural(trip.dayCount, "day"), systemImage: "calendar")
+                        .font(.caption.weight(.semibold)).foregroundStyle(.white)
+                        .padding(.horizontal, 10).padding(.vertical, 5)
+                        .background(.black.opacity(0.35), in: Capsule())
+                        .padding(14)
+                }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .shadow(color: .black.opacity(0.12), radius: 16, y: 10)
     }
 
     private var meta: String {

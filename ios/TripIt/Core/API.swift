@@ -18,8 +18,8 @@ final class API: @unchecked Sendable {
 
     init() {
         let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 30
-        config.timeoutIntervalForResource = 240  // AI planning can take a while
+        config.timeoutIntervalForRequest = 150  // AI planning and menu reading can take a minute or two
+        config.timeoutIntervalForResource = 300
         config.httpCookieAcceptPolicy = .never  // the session goes in the Authorization header instead
         session = URLSession(configuration: config)
         decoder = JSONDecoder()

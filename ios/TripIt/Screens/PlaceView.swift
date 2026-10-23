@@ -17,7 +17,6 @@ struct PlaceView: View {
     @State private var confirmDelete = false
     @State private var locating = false
     @State private var locateQuery = ""
-    @State private var showDirections = false
 
     private var trip: TripDetail? { tripId.flatMap { store.tripDetails[$0] } }
 
@@ -116,15 +115,6 @@ struct PlaceView: View {
                 Task { if await store.delete(p) { dismiss() } }
             }
         }
-        .confirmationDialog("Directions to \(p.name)", isPresented: $showDirections, titleVisibility: .visible) {
-            Button("Apple Maps") { Links.open(p.directionsURL) }
-            Button("Google Maps") {
-                var c = URLComponents(string: "https://www.google.com/maps/dir/")!
-                c.queryItems = [.init(name: "api", value: "1"),
-                                .init(name: "destination", value: p.coordinate.map { "\($0.latitude),\($0.longitude)" } ?? "\(p.name), \(p.city)")]
-                Links.open(c.url)
-            }
-        }
         .alert("Find on the map", isPresented: $locating) {
             TextField("Search, e.g. \(p.name), \(p.city)", text: $locateQuery)
             Button("Cancel", role: .cancel) {}
@@ -180,18 +170,36 @@ struct PlaceView: View {
         return text
     }
 
+    /// Reserve (when the restaurant books online), Directions, Menu, then Call and Website: at most four.
     private func quickActions(_ p: Place, _ category: Category) -> some View {
         let booked = trip?.bookings.contains { $0.placeId == p.id && $0.kind == "reservation" } ?? false
         let reserve: URL? = booked ? nil : p.reserveUrl.flatMap { URL(string: $0) }
+        let phone = p.phone.flatMap { URL(string: "tel:" + $0.filter { $0.isNumber || $0 == "+" }) }
+        let site = p.website.flatMap { URL(string: $0) }
+        var extras = 0
+        let room = { (needed: Bool) -> Bool in
+            guard needed else { return false }
+            extras += 1
+            return extras <= 4
+        }
+        let showReserve = room(reserve != nil)
+        _ = room(true)  // Directions is always there
+        let showMenu = room(category.hasMenu)
+        let showCall = room(phone != nil)
+        let showSite = room(site != nil)
         return HStack(spacing: 10) {
-            if let reserve {
+            if showReserve, let reserve {
                 QuickButton(symbol: "calendar.badge.plus", color: Theme.gold, title: "Reserve") { Links.open(reserve) }
             }
-            QuickButton(symbol: "map.fill", color: Theme.green, title: "Apple Maps") { Links.open(p.appleMapsURL) }
-            QuickButton(symbol: "globe", color: Theme.blue, title: "Google") { Links.open(p.googleMapsURL) }
-            QuickButton(symbol: "arrow.triangle.turn.up.right.diamond.fill", color: Theme.orange, title: "Directions") { showDirections = true }
-            if category.hasMenu {
-                QuickButton(symbol: "menucard.fill", color: Theme.pink, title: "Menu") { router.push(.web(hash: "#/place/\(p.id)/menu")) }
+            DirectionsButton(apple: p.directionsURL, google: p.googleDirectionsURL)
+            if showMenu {
+                QuickButton(symbol: "menucard.fill", color: Theme.pink, title: "Menu") { router.push(.menu(placeId: p.id)) }
+            }
+            if showCall, let phone {
+                QuickButton(symbol: "phone.fill", color: Theme.green, title: "Call") { Links.open(phone) }
+            }
+            if showSite, let site {
+                QuickButton(symbol: "globe", color: Theme.blue, title: "Website") { Links.open(site) }
             }
         }
     }
@@ -459,21 +467,45 @@ struct PlaceView: View {
     }
 }
 
-private struct QuickButton: View {
+struct QuickButton: View {
     let symbol: String
     let color: Color
     let title: String
     let action: () -> Void
 
     var body: some View {
-        Button(action: action) {
-            VStack(spacing: 6) {
-                SymbolTile(symbol: symbol, color: color, size: 34)
-                Text(title).font(.caption.weight(.medium)).foregroundStyle(Theme.label).lineLimit(1).minimumScaleFactor(0.8)
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 12)
-            .background(Theme.cell, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        Button(action: action) { QuickLabel(symbol: symbol, color: color, title: title) }
+            .buttonStyle(.plain)
+    }
+}
+
+struct QuickLabel: View {
+    let symbol: String
+    let color: Color
+    let title: String
+
+    var body: some View {
+        VStack(spacing: 6) {
+            SymbolTile(symbol: symbol, color: color, size: 34)
+            Text(title).font(.caption.weight(.medium)).foregroundStyle(Theme.label).lineLimit(1).minimumScaleFactor(0.8)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 12)
+        .background(Theme.cell, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+}
+
+/// One Directions button; its menu opens right where you tap, with Apple Maps and Google Maps.
+struct DirectionsButton: View {
+    let apple: URL?
+    let google: URL?
+
+    var body: some View {
+        Menu {
+            Button { Links.open(apple) } label: { Label("Apple Maps", systemImage: "map") }
+            Button { Links.open(google) } label: { Label("Google Maps", systemImage: "globe") }
+        } label: {
+            QuickLabel(symbol: "arrow.triangle.turn.up.right.diamond.fill", color: Theme.orange, title: "Directions")
         }
         .buttonStyle(.plain)
     }
@@ -490,13 +522,16 @@ private struct Hero: View {
         if pages > 0 {
             TabView(selection: $page) {
                 ForEach(Array(photos.enumerated()), id: \.offset) { i, photo in
-                    RemoteImage(url: photo.url(width: 1000)) { Theme.fill }
+                    Color.clear
                         .frame(maxWidth: .infinity)
                         .frame(height: 300)
+                        .overlay { RemoteImage(url: photo.url(width: 1000)) { Theme.fill } }
                         .clipped()
                         .overlay(alignment: .bottomLeading) {
                             if let credit = photo.attribution ?? (photo.source == "reel" ? "From the reel" : nil) {
                                 Text(credit).font(.caption2).foregroundStyle(.white.opacity(0.9))
+                                    .lineLimit(1).truncationMode(.middle)
+                                    .frame(maxWidth: 150, alignment: .leading)
                                     .padding(.horizontal, 8).padding(.vertical, 4)
                                     .background(.black.opacity(0.35), in: Capsule())
                                     .padding(10)

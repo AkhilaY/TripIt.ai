@@ -91,6 +91,11 @@ extension Place {
         return c.url
     }
 
+    /// Turn-by-turn directions in Google Maps (the app if installed, otherwise the website).
+    var googleDirectionsURL: URL? {
+        Maps.googleDirections(latitude: latitude, longitude: longitude, query: [name, address ?? city].filter { !$0.isEmpty }.joined(separator: ", "))
+    }
+
     var directionsURL: URL? {
         var c = URLComponents(string: "https://maps.apple.com/")!
         if let latitude, let longitude {
@@ -98,6 +103,25 @@ extension Place {
         } else {
             c.queryItems = [.init(name: "daddr", value: [name, address ?? city].filter { !$0.isEmpty }.joined(separator: ", "))]
         }
+        return c.url
+    }
+}
+
+enum Maps {
+    static func appleDirections(latitude: Double?, longitude: Double?, query: String) -> URL? {
+        var c = URLComponents(string: "https://maps.apple.com/")!
+        if let latitude, let longitude {
+            c.queryItems = [.init(name: "daddr", value: "\(latitude),\(longitude)")]
+        } else {
+            c.queryItems = [.init(name: "daddr", value: query)]
+        }
+        return c.url
+    }
+
+    static func googleDirections(latitude: Double?, longitude: Double?, query: String) -> URL? {
+        var c = URLComponents(string: "https://www.google.com/maps/dir/")!
+        let destination = latitude.flatMap { lat in longitude.map { "\(lat),\($0)" } } ?? query
+        c.queryItems = [.init(name: "api", value: "1"), .init(name: "destination", value: destination)]
         return c.url
     }
 }

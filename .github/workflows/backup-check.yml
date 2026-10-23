@@ -51,7 +51,6 @@ jobs:
         if: steps.check.outputs.ready == 'true'
         run: |
           export DATABASE_PATH=/tmp/live/tripit.db
-          litestream generations -config backend/litestream.yml "$DATABASE_PATH"
           litestream restore -config backend/litestream.yml -o /tmp/restored.db "$DATABASE_PATH"
 
       - name: Check it

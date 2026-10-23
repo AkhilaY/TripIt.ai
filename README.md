@@ -302,7 +302,7 @@ The **TestFlight** workflow builds the app on GitHub's Macs, signs it and upload
    If your server isn't `my-tripit.fly.dev`, also add a repository **variable** `TRIPIT_HOST` with its address.
 
 **Each time you want a new build:**
-1. Go to **Actions** → **TestFlight** → **Run workflow**. It takes about 15 minutes.
+1. Start the workflow. Put `[testflight]` in a commit message and push it (any branch), or go to **Actions** → **TestFlight** → **Run workflow** once the workflow is on the default branch. It takes about 5–15 minutes. You can also re-run any earlier TestFlight run.
 2. Apple then processes the build for 10–30 minutes. It appears under **App Store Connect → your app → TestFlight**.
 3. **Testers.** The first time, under TestFlight → **Internal Testing**, click **+** to make a group and add yourself. Up to 100 people on your App Store Connect team can be added there and install builds right away.
    - **External testers** are up to 10,000 people, invited by email or a public link.

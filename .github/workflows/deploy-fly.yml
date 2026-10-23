@@ -88,6 +88,7 @@ jobs:
           APNS_TEAM_ID: ${{ secrets.APNS_TEAM_ID }}
           APNS_TOPIC: ${{ secrets.APNS_TOPIC }}
           BACKUP_BUCKET: ${{ secrets.BACKUP_BUCKET }}
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
           BACKUP_ENDPOINT: ${{ secrets.BACKUP_ENDPOINT }}
           BACKUP_ACCESS_KEY_ID: ${{ secrets.BACKUP_ACCESS_KEY_ID }}
           BACKUP_SECRET_ACCESS_KEY: ${{ secrets.BACKUP_SECRET_ACCESS_KEY }}
@@ -106,6 +107,8 @@ jobs:
             [ -z "$APNS_KEY_ID" ] || printf 'APNS_KEY_ID=%s\n' "$APNS_KEY_ID"
             [ -z "$APNS_TEAM_ID" ] || printf 'APNS_TEAM_ID=%s\n' "$APNS_TEAM_ID"
             [ -z "$APNS_TOPIC" ] || printf 'APNS_TOPIC=%s\n' "$APNS_TOPIC"
+            # Error reporting (Sentry), tagged with the commit so errors point at a release.
+            [ -z "$SENTRY_DSN" ] || printf 'SENTRY_DSN=%s\nSENTRY_RELEASE=%s\n' "$SENTRY_DSN" "${GITHUB_SHA:0:12}"
             # Backups to Cloudflare R2 (start.sh).
             [ -z "$BACKUP_BUCKET" ] || printf 'BACKUP_BUCKET=%s\n' "$BACKUP_BUCKET"
             [ -z "$BACKUP_ENDPOINT" ] || printf 'BACKUP_ENDPOINT=%s\n' "$BACKUP_ENDPOINT"

@@ -108,6 +108,7 @@ from .packing import PackingService
 from .photos import PhotoStore
 from .reserve import find_reserve_link
 from .pipeline import Pipeline
+from .monitoring import RateLimit, init_monitoring, report_client_error, report_feedback, set_user
 from .push import ApnsConfig, Push
 from .routing import Router
 from .weather import Weather
@@ -187,6 +188,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
+init_monitoring(get_settings())
 app = FastAPI(title="TripIt.ai", lifespan=lifespan)
 
 
@@ -245,6 +247,7 @@ async def authenticate(
         user = accounts.owner()  # local development without a key
     CURRENT_USER.set(user.id if user else None)
     request.state.user = user
+    set_user(user.id if user else None)
     return user
 
 
@@ -449,6 +452,69 @@ async def admin_delete_invite(invite_id: str, request: Request) -> Response:
     _admin(request)
     _accounts(request).delete_invite(invite_id)
     return Response(status_code=204)
+
+
+# ---------- Error reports and feedback ----------
+
+
+class ClientError(BaseModel):
+    source: Literal["web", "ios", "ios-web"] = "web"
+    message: str = Field(max_length=2000)
+    stack: str = Field(default="", max_length=10000)
+    url: str = Field(default="", max_length=500)
+    version: str = Field(default="", max_length=40)
+
+
+class FeedbackIn(BaseModel):
+    message: str = Field(min_length=1, max_length=4000)
+    screen: str = Field(default="", max_length=200)
+    version: str = Field(default="", max_length=40)
+    platform: str = Field(default="", max_length=40)
+
+
+_client_errors = RateLimit(limit=20)
+
+
+def _signed_in(request: Request, authorization: Optional[str]) -> Optional[User]:
+    """Who sent a report, if they're signed in (reports are accepted either way)."""
+    token = authorization[7:].strip() if authorization and authorization.lower().startswith("bearer ") else request.cookies.get(SESSION_COOKIE, "")
+    return _accounts(request).session_user(token) if token else None
+
+
+@app.post("/v1/client-errors", status_code=204)
+async def client_error(body: ClientError, request: Request, authorization: Annotated[Optional[str], Header()] = None) -> Response:
+    """JavaScript errors from the web app (and the iOS app's web screens) and errors the iOS app catches, passed on
+    to error reporting. No sign-in needed, so errors on the sign-in screen are seen too; limited per address."""
+    ip = request.headers.get("fly-client-ip") or (request.client.host if request.client else "unknown")
+    if _client_errors.allow(ip):
+        user = _signed_in(request, authorization)
+        report_client_error(body.source, body.message, stack=body.stack, url=body.url, version=body.version,
+                            user_id=user.id if user else None)
+    return Response(status_code=204)
+
+
+@app.post("/v1/feedback", status_code=201, dependencies=[Auth])
+async def send_feedback(body: FeedbackIn, request: Request) -> dict:
+    """Feedback from Profile → Send feedback: kept on the server and forwarded to error reporting, with the
+    sender's email so you can reply."""
+    user = getattr(request.state, "user", None)
+    message = body.message.strip()
+    if not message:
+        raise HTTPException(status_code=422, detail="Write a few words first")
+    context = {"screen": body.screen, "version": body.version, "platform": body.platform}
+    feedback_id = _db(request).add_feedback(user.id if user else None, message, context)
+    report_feedback(message, user_id=user.id if user else None, email=user.email if user else "", context=context)
+    return {"id": feedback_id}
+
+
+@app.get("/v1/admin/feedback", dependencies=[Auth])
+async def admin_feedback(request: Request, limit: int = 100) -> list[dict]:
+    _admin(request)
+    users = {u.id: u.email for u in _accounts(request).list_users()}
+    items = _db(request).list_feedback(min(max(limit, 1), 500))
+    for item in items:
+        item["email"] = users.get(item["user_id"] or "", "")
+    return items
 
 
 @app.get("/health")

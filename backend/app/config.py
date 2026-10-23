@@ -74,6 +74,12 @@ class Settings(BaseSettings):
     # Notifications for the native iOS app (Apple Push Notification service). From developer.apple.com →
     # Keys, make a key with "Apple Push Notifications service" ticked: paste the .p8 file's contents, its key ID,
     # your Team ID and the app's bundle ID. Without them, only the web app gets notifications.
+    # Error reporting (optional): a Sentry project's DSN. Server errors, the web app's errors and in-app
+    # feedback go there. Only account ids are attached, never emails, passwords or saved places.
+    sentry_dsn: str = ""
+    sentry_environment: str = "production"
+    sentry_release: str = ""
+    sentry_traces_sample_rate: float = 0.0
     apns_key: str = ""
     apns_key_id: str = ""
     apns_team_id: str = ""

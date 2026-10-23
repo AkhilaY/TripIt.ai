@@ -3023,3 +3023,56 @@ def test_passwords_and_deleting_an_account(client):
     assert client.request("DELETE", "/v1/me", json={"password": temp}, headers=b).status_code == 204
     assert client.post("/v1/auth/login", json={"email": "b@x.com", "password": temp}).status_code == 401
     assert app.state.db._rows("SELECT COUNT(*) AS n FROM places WHERE name = 'Café de Flore'")[0]["n"] == 0
+
+
+# ---------- Error reports and feedback ----------
+
+
+def test_client_errors_are_forwarded_and_rate_limited(client, monkeypatch):
+    import app.main as main
+    reports = []
+    monkeypatch.setattr(main, "report_client_error", lambda source, message, **kw: reports.append((source, message, kw)))
+    monkeypatch.setattr(main, "_client_errors", main.RateLimit(limit=3))
+    # No sign-in needed: errors on the sign-in screen count too.
+    body = {"source": "ios-web", "message": "TypeError: null is not an object (evaluating 'S.taste.step')",
+            "stack": "onAction@app.js:3878", "url": "/#/taste", "version": "5"}
+    for _ in range(5):
+        assert client.post("/v1/client-errors", json=body).status_code == 204
+    assert len(reports) == 3 and reports[0][0] == "ios-web" and reports[0][2]["user_id"] is None
+    assert client.post("/v1/client-errors", json={"source": "elsewhere", "message": "x"}).status_code == 422
+
+    owner = signup(client, "a@x.com", "secret")
+    monkeypatch.setattr(main, "_client_errors", main.RateLimit(limit=3))
+    client.post("/v1/client-errors", json={"message": "boom"}, headers=owner)
+    me = client.get("/v1/me", headers=owner).json()
+    assert reports[-1][2]["user_id"] == me["id"]
+
+
+def test_feedback_is_kept_for_the_owner_and_deleted_with_the_account(client, monkeypatch):
+    import app.main as main
+    sent = []
+    monkeypatch.setattr(main, "report_feedback", lambda message, **kw: sent.append((message, kw)))
+    owner = signup(client, "a@x.com", "secret")
+    code = client.post("/v1/admin/invites", json={}, headers=owner).json()["code"]
+    b = signup(client, "b@x.com", code)
+    assert client.post("/v1/feedback", json={"message": "   "}, headers=b).status_code == 422
+    r = client.post("/v1/feedback", json={"message": "Love the edits! The map is slow though.", "screen": "Profile",
+                                          "version": "1.0 (5)", "platform": "ios"}, headers=b)
+    assert r.status_code == 201
+    assert sent[0][0].startswith("Love the edits") and sent[0][1]["email"] == "b@x.com"
+    assert client.get("/v1/admin/feedback", headers=b).status_code == 403
+    items = client.get("/v1/admin/feedback", headers=owner).json()
+    assert items[0]["email"] == "b@x.com" and items[0]["context"]["platform"] == "ios"
+    client.cookies.clear()
+    assert client.request("DELETE", "/v1/me", json={"password": "correct horse"}, headers=b).status_code == 204
+    assert client.get("/v1/admin/feedback", headers=owner).json() == []
+
+
+def test_error_reports_never_carry_credentials():
+    from app.monitoring import _scrub
+    event = {"request": {"headers": {"Authorization": "Bearer abc", "X-API-Key": "k", "Cookie": "tripit_session=x", "User-Agent": "ua"},
+                         "cookies": {"tripit_session": "x"}, "data": {"password": "hunter2"},
+                         "query_string": "sig=abc&w=600"}}
+    out = _scrub(event, {})["request"]
+    assert out["headers"] == {"Authorization": "[filtered]", "X-API-Key": "[filtered]", "Cookie": "[filtered]", "User-Agent": "ua"}
+    assert "cookies" not in out and "data" not in out and out["query_string"] == "[filtered]"

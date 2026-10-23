@@ -7,6 +7,7 @@ struct TripItApp: App {
     @State private var store = Store()
 
     init() {
+        Monitoring.start()
         Theme.applyAppearance()
     }
 

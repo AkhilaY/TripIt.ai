@@ -4,6 +4,12 @@ options:
     iOS: "17.0"
   createIntermediateGroups: true
 
+packages:
+  # Crash and error reporting (optional: set SENTRY_DSN_IOS).
+  Sentry:
+    url: https://github.com/getsentry/sentry-cocoa
+    from: 9.31.0
+
 configFiles:
   Debug: Config/Secrets.xcconfig
   Release: Config/Secrets.xcconfig
@@ -40,6 +46,8 @@ targets:
     dependencies:
       - target: TripItShare
         embed: true
+      - package: Sentry
+        product: Sentry
     scheme: {}
 
   TripItShare:

@@ -53,6 +53,8 @@
 	<string>UIStatusBarStyleDefault</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
+	<key>SentryDSN</key>
+	<string>$(SENTRY_DSN_IOS)</string>
 	<key>AppGroupID</key>
 	<string>$(APP_GROUP_ID)</string>
 	<key>TripItAPIBaseURL</key>

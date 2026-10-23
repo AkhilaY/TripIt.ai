@@ -169,7 +169,7 @@ class Accounts:
         """Removes the account and everything in it."""
         self.db._exec("DELETE FROM trips WHERE user_id = ?", (user.id,))
         self.db._exec("DELETE FROM places WHERE user_id = ?", (user.id,))
-        for table in ("folders", "reels", "jobs", "push_subscriptions"):
+        for table in ("folders", "reels", "jobs", "push_subscriptions", "feedback"):
             self.db._exec(f"DELETE FROM {table} WHERE user_id = ?", (user.id,))
         self.db._exec("DELETE FROM settings WHERE key LIKE ?", (f"%@{user.id}",))
         self.db._exec("DELETE FROM users WHERE id = ?", (user.id,))

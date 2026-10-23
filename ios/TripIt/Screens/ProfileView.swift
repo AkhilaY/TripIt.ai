@@ -14,6 +14,7 @@ struct ProfileView: View {
     @State private var changingPassword = false
     @State private var deleting = false
     @State private var confirmSignOut = false
+    @State private var sendingFeedback = false
 
     var body: some View {
         List {
@@ -73,6 +74,9 @@ struct ProfileView: View {
                         row("person.2.fill", Theme.indigo, "Invites and people", "Invite testers; reset a forgotten password", chevron: false)
                     }
                 }
+                Button { sendingFeedback = true } label: {
+                    row("bubble.left.and.text.bubble.right.fill", Theme.indigo, "Send feedback", "Something broken, confusing or missing? Tell us")
+                }
                 Button { confirmSignOut = true } label: {
                     row("rectangle.portrait.and.arrow.right", Theme.danger, "Sign out", nil)
                 }
@@ -102,6 +106,7 @@ struct ProfileView: View {
             Button("Sign out", role: .destructive) { Task { dismiss(); await session.signOut() } }
         }
         .sheet(isPresented: $changingPassword) { PasswordSheet().environment(store) }
+        .sheet(isPresented: $sendingFeedback) { FeedbackSheet().environment(store) }
         .sheet(isPresented: $deleting) { DeleteAccountSheet().environment(session) }
     }
 
@@ -126,6 +131,57 @@ struct ProfileView: View {
                 if let subtitle { Text(subtitle).font(.caption).foregroundStyle(Theme.secondary) }
             }
         }
+    }
+}
+
+/// Profile → Send feedback: goes to the team with your email, so they can reply.
+private struct FeedbackSheet: View {
+    @Environment(Store.self) private var store
+    @Environment(\.dismiss) private var dismiss
+    @State private var message = ""
+    @State private var busy = false
+    @State private var error: String?
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("What's working, what's broken, what you wish it did…", text: $message, axis: .vertical)
+                        .lineLimit(6...14)
+                        .focused($focused)
+                } footer: {
+                    Text("Goes straight to the team with your email, so we can reply.")
+                }
+                if let error { Text(error).foregroundStyle(Theme.danger) }
+            }
+            .tripBackground()
+            .navigationTitle("Send feedback")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    if busy { ProgressView() } else {
+                        Button("Send") { Task { await send() } }
+                            .disabled(message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }
+                }
+            }
+            .onAppear { focused = true }
+        }
+        .presentationDetents([.medium, .large])
+    }
+
+    private func send() async {
+        busy = true
+        let info = Bundle.main.infoDictionary ?? [:]
+        let version = "\(info["CFBundleShortVersionString"] as? String ?? "") (\(info["CFBundleVersion"] as? String ?? ""))"
+        do {
+            try await API.shared.call("POST", "/v1/feedback", ["message": message, "screen": "Profile", "version": version, "platform": "ios"])
+            store.show("Thanks! Your feedback was sent")
+            dismiss()
+        } catch { self.error = error.localizedDescription }
+        busy = false
     }
 }
 

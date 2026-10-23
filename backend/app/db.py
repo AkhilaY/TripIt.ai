@@ -139,6 +139,14 @@ CREATE TABLE IF NOT EXISTS api_tokens (
     last_used_at TEXT
 );
 
+CREATE TABLE IF NOT EXISTS feedback (
+    id TEXT PRIMARY KEY,
+    user_id TEXT,
+    message TEXT NOT NULL,
+    context TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
@@ -867,6 +875,19 @@ class Database:
         )
 
     # ---------- Push subscriptions ----------
+
+    # ---------- Feedback ----------
+
+    def add_feedback(self, user_id: Optional[str], message: str, context: dict) -> str:
+        feedback_id = new_id()
+        self._exec("INSERT INTO feedback (id, user_id, message, context, created_at) VALUES (?, ?, ?, ?, ?)",
+                   (feedback_id, user_id, message, json.dumps(context), now().isoformat()))
+        return feedback_id
+
+    def list_feedback(self, limit: int = 100) -> list[dict]:
+        return [{"id": r["id"], "user_id": r["user_id"], "message": r["message"], "context": json.loads(r["context"]),
+                 "created_at": r["created_at"]}
+                for r in self._rows("SELECT * FROM feedback ORDER BY created_at DESC LIMIT ?", (limit,))]
 
     def save_push_subscription(self, endpoint: str, keys: dict, origin: str) -> None:
         self._exec(

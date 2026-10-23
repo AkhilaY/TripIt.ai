@@ -32,6 +32,10 @@ jobs:
       TRIPIT_TEAM_ID: ${{ secrets.TRIPIT_TEAM_ID }}
       TRIPIT_BUNDLE_ID: ${{ secrets.TRIPIT_BUNDLE_ID }}
       TRIPIT_HOST: ${{ vars.TRIPIT_HOST || 'my-tripit.fly.dev' }}
+      SENTRY_DSN_IOS: ${{ secrets.SENTRY_DSN_IOS }}
+      SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+      SENTRY_ORG: ${{ vars.SENTRY_ORG }}
+      SENTRY_PROJECT_IOS: ${{ vars.SENTRY_PROJECT_IOS }}
       BUILD_NUMBER: ${{ github.run_number }}
     steps:
       - uses: actions/checkout@v4
@@ -64,11 +68,14 @@ jobs:
 
       - name: Configure
         run: |
+          # xcconfig reads "//" as a comment, so the DSN's https:// is written https:/$()/ (as in the example file).
+          SENTRY_DSN_XC=$(printf '%s' "$SENTRY_DSN_IOS" | sed 's#//#/$()/#')
           cat > Config/Secrets.xcconfig <<CONFIG
           TRIPIT_TEAM_ID = $TRIPIT_TEAM_ID
           TRIPIT_BUNDLE_ID = $TRIPIT_BUNDLE_ID
           TRIPIT_API_BASE_URL = https:/\$()/$TRIPIT_HOST
           TRIPIT_HOST = $TRIPIT_HOST
+          SENTRY_DSN_IOS = $SENTRY_DSN_XC
           CONFIG
           printf '%s' "$ASC_KEY_P8" | sed 's/\\n/\n/g' > "$RUNNER_TEMP/AuthKey.p8"
           xcodegen generate
@@ -99,6 +106,15 @@ jobs:
             | tee "$RUNNER_TEMP/archive.log" \
             | grep -E "error:|warning: .*(deprecated|will never be executed)|ARCHIVE (SUCCEEDED|FAILED)" || true
           grep -q "ARCHIVE SUCCEEDED" "$RUNNER_TEMP/archive.log"
+
+      - name: Upload debug symbols to Sentry
+        # Turns crash reports' memory addresses into file names and line numbers. Optional.
+        if: env.SENTRY_AUTH_TOKEN != '' && env.SENTRY_ORG != '' && env.SENTRY_PROJECT_IOS != ''
+        continue-on-error: true
+        run: |
+          brew install getsentry/tools/sentry-cli
+          sentry-cli debug-files upload --org "$SENTRY_ORG" --project "$SENTRY_PROJECT_IOS" --include-sources \
+            "$RUNNER_TEMP/TripIt.xcarchive/dSYMs"
 
       - name: Upload to App Store Connect
         run: |

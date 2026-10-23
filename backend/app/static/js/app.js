@@ -303,6 +303,7 @@ async function paint(r, token, key, quiet) {
     if (out.after) after = out.after;
   } catch (e) {
     if (e instanceof ApiError && e.status === 401) { location.hash = '#/signin'; return; }
+    reportError(e, `Screen ${r.name}`);
     if (quiet) return;
     html = `${navbar('', {})}<div class="error" role="alert">${esc(e.message || 'Something went wrong')}</div>
       <div class="section"><button class="btn tint" data-act="reload">Try again</button></div>`;
@@ -481,6 +482,24 @@ const NATIVE = /TripItiOS\//.test(navigator.userAgent);
 /** One screen of the web app shown inside the native iOS app, which has its own tab bar and screens. */
 const EMBED = NATIVE && new URLSearchParams(location.search).has('embed');
 if (EMBED) document.documentElement.classList.add('embed');
+
+// ---------- Error reporting ----------
+
+/** Sends an unexpected error (a bug, not "you're offline") to the server, which passes it on to error reporting. */
+const reportedErrors = new Set();
+function reportError(error, where = '') {
+  if (error instanceof ApiError) return; // the server already knows, or it's the network
+  const message = `${where ? `${where}: ` : ''}${(error && error.message) || String(error)}`.slice(0, 2000);
+  if (reportedErrors.size >= 10 || reportedErrors.has(message)) return;
+  reportedErrors.add(message);
+  fetch('/v1/client-errors', {
+    method: 'POST', keepalive: true, headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify({ source: EMBED ? 'ios-web' : 'web', message, stack: String((error && error.stack) || '').slice(0, 10000),
+      url: (location.hash || '#/').slice(0, 500) }),
+  }).catch(() => {});
+}
+window.addEventListener('error', (ev) => reportError(ev.error || ev.message, 'Uncaught'));
+window.addEventListener('unhandledrejection', (ev) => reportError(ev.reason, 'Unhandled'));
 
 /** The chips on the home screen: friendlier groups of the app's categories. */
 const GROUPS = [
@@ -2259,6 +2278,8 @@ const VIEWS = {
           <span class="s">Make a one-time code for each tester</span></span>${ICON.chev}</button>
         <button class="row" data-act="people">${tile('blue', 'person')}<span class="main"><span class="t">People</span>
           <span class="s">Everyone with an account; reset a forgotten password</span></span>${ICON.chev}</button>` : ''}
+        <button class="row" data-act="feedback">${tile('indigo', 'sparkle')}<span class="main"><span class="t">Send feedback</span>
+          <span class="s">Something broken, confusing or missing? Tell us</span></span>${ICON.chev}</button>
         <button class="row" data-act="signout">${tile('red', 'signout')}<span class="main"><span class="t" style="color:var(--danger)">Sign out</span></span></button>
       </div></div>` : `<div class="section"><div class="group tiles"><a class="row" href="#/signin">${tile('gold', 'person')}<span class="main"><span class="t">Create your account</span>
         <span class="s">Keeps your places private and lets you invite testers</span></span>${ICON.chev}</a></div></div>`}
@@ -3795,6 +3816,23 @@ async function onAction(act, el) {
       return;
     }
     case 'reload': render(); return;
+    case 'feedback':
+      openSheet({
+        type: 'form', title: 'Send feedback', confirm: 'Send', st: {},
+        body: () => `<div class="section"><div class="group"><div class="row"><textarea class="notes" id="feedback-text" rows="6" maxlength="4000"
+            placeholder="What's working, what's broken, what you wish it did…" aria-label="Your feedback"></textarea></div></div>
+          <div class="section-f">Goes straight to the team with your email, so we can reply.</div></div>`,
+        async ok() {
+          const message = $('#feedback-text').value.trim();
+          if (!message) { toast('Write a few words first', true); return; }
+          S.sheet.busy = true; renderOverlay();
+          try {
+            await api('/v1/feedback', { method: 'POST', body: { message, screen: route().name, platform: EMBED ? 'ios-web' : 'web' } });
+            closeSheet(); toast('Thanks! Your feedback was sent');
+          } catch (e) { S.sheet.busy = false; renderOverlay(); toast(e.message, true); }
+        },
+      });
+      return;
     case 'add': { const r = route(); addSheet({ tripId: ['trip', 'today'].includes(r.name) ? r.id : '' }); return; }
     case 'addtrip': S.sheet.st.trip = el.value; if (S.sheet.st.text) addInputChanged(S.sheet.st.text); return;
     case 'addresult': await addPlace('/v1/places', { candidate_id: el.dataset.id, trip_id: S.sheet.st.trip || null }); return;
@@ -4611,13 +4649,13 @@ document.addEventListener('click', (ev) => {
   if (['INPUT', 'SELECT', 'TEXTAREA'].includes(el.tagName)) return;
   if (el.tagName === 'A' && el.dataset.act !== 'back') return;
   ev.preventDefault();
-  onAction(el.dataset.act, el).catch((e) => toast(e.message || 'Something went wrong', true));
+  onAction(el.dataset.act, el).catch((e) => { reportError(e, `Action ${el.dataset.act}`); toast(e.message || 'Something went wrong', true); });
 });
 
 document.addEventListener('change', (ev) => {
   const el = ev.target;
   if (el.dataset && el.dataset.act && ['INPUT', 'SELECT'].includes(el.tagName) && el.type !== 'text') {
-    onAction(el.dataset.act, el).catch((e) => toast(e.message, true));
+    onAction(el.dataset.act, el).catch((e) => { reportError(e, `Action ${el.dataset.act}`); toast(e.message, true); });
   }
 });
 
@@ -4680,7 +4718,7 @@ document.addEventListener('submit', async (ev) => {
 document.addEventListener('keydown', (ev) => {
   if ((ev.key === 'Enter' || ev.key === ' ') && ev.target.classList && ev.target.classList.contains('bcard')) {
     ev.preventDefault();
-    onAction('bookingmenu', ev.target).catch((e) => toast(e.message, true));
+    onAction('bookingmenu', ev.target).catch((e) => { reportError(e, 'Action bookingmenu'); toast(e.message, true); });
     return;
   }
   if (ev.key === 'Enter' && !ev.shiftKey && !ev.isComposing && ev.target.id === 'chat-input') {

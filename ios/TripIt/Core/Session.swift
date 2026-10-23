@@ -14,6 +14,7 @@ final class Session {
         guard SessionStore.token != nil else { phase = .signedOut; return }
         do {
             me = try await API.shared.get("/v1/me", as: Me?.self)
+            Monitoring.setUser(me?.id)
             phase = .signedIn
         } catch let error as APIError where error.isSignedOut {
             signOutLocally()
@@ -36,6 +37,7 @@ final class Session {
     private func start(_ out: SessionOut) {
         SessionStore.save(out.token)
         me = out.user
+        Monitoring.setUser(out.user.id)
         phase = .signedIn
     }
 
@@ -48,6 +50,7 @@ final class Session {
     func signOutLocally() {
         SessionStore.clear()
         WebSession.clearCookies()
+        Monitoring.setUser(nil)
         me = nil
         phase = .signedOut
     }

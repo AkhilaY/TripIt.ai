@@ -96,6 +96,24 @@ To restore by hand:
 - Delete the volume, or start a new app with an empty one; the server restores on start.
 - Or copy the database to your computer with `litestream restore -o tripit.db` and the same settings.
 
+## Error reporting and feedback
+
+With [Sentry](https://sentry.io) set up (the free Developer plan covers 5,000 errors a month), you get an email the first time a new error happens, with the screen, stack trace and app version:
+- **Server:** crashes and logged errors. Failed imports and Claude API errors count as logged errors.
+- **Web app:** JavaScript errors, including the iOS app's web screens. They reach Sentry through the server (`POST /v1/client-errors`), so the web app needs no Sentry key.
+- **iOS app:** crashes and hangs. With debug symbols uploaded, crash reports show readable stack traces.
+- **Feedback:** **Profile → Send feedback**, in the app and on the web. Feedback is kept on the server (`GET /v1/admin/feedback`) and sent to Sentry with the sender's email, so you can reply.
+
+Only account ids go with errors. Emails, passwords, request bodies, cookies and saved places are never sent, and credential-like headers are removed. Without Sentry everything still works, and errors go to the server log (`fly logs`).
+
+Setup:
+1. Sign up at sentry.io and create two projects: **FastAPI** (e.g. `travel-edit-server`) and **Apple iOS** (e.g. `travel-edit-ios`). Copy each one's **DSN** (Settings → Client Keys).
+2. Add GitHub secrets `SENTRY_DSN` (the server project's DSN) and `SENTRY_DSN_IOS` (the iOS project's). The next deploy and TestFlight build use them.
+3. For readable iOS crash reports:
+   - In Sentry, go to Settings → Auth Tokens and create an organization token.
+   - Add it as the secret `SENTRY_AUTH_TOKEN`.
+   - Add two repository **variables**: `SENTRY_ORG` (your organization slug) and `SENTRY_PROJECT_IOS` (e.g. `travel-edit-ios`).
+
 ## 3. Set up your iPhone
 
 1. Open `https://<app>.fly.dev` in **Safari**, sign in (or create your account; see [Accounts](#accounts)), then tap **Share → Add to Home Screen**.
@@ -187,6 +205,7 @@ Instagram blocks most anonymous downloads. Export cookies for instagram.com from
 | `MENU_GOOGLE_PHOTOS` | `true` | When a website has no menu, read menu photos from Google Maps. Google's terms may not allow extracting text from its photos: check them, and set this to `false` if in doubt |
 | `WHISPER_MODEL` | `base` | `small` is more accurate but slower on CPU |
 | `APNS_KEY` / `APNS_KEY_ID` / `APNS_TEAM_ID` / `APNS_TOPIC` | – | Notifications for the native iOS app (see [Native iOS app](#native-ios-app-optional)). Add them as GitHub secrets of the same names |
+| `SENTRY_DSN` / `SENTRY_ENVIRONMENT` / `SENTRY_TRACES_SAMPLE_RATE` | – / `production` / `0` | Error reporting (see [Error reporting and feedback](#error-reporting-and-feedback)) |
 | `BACKUP_BUCKET` / `BACKUP_ENDPOINT` / `BACKUP_ACCESS_KEY_ID` / `BACKUP_SECRET_ACCESS_KEY` | – | Backups to Cloudflare R2 (see [Backups](#backups)). Add them as GitHub secrets of the same names |
 | `YTDLP_COOKIES_FILE` / `YTDLP_COOKIES` | – | Needed for most Instagram reels: a path to cookies.txt, or its contents |
 

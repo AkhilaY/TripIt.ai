@@ -66,6 +66,7 @@ final class API: @unchecked Sendable {
             #if DEBUG
             print("Couldn't decode \(T.self): \(error)")
             #endif
+            Monitoring.report("Couldn't read a \(T.self) from the server: \(error)")
             throw APIError(status: 0, message: "The Travel Edit sent something this version of the app can't read. Try updating the app.")
         }
     }

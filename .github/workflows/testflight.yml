@@ -20,7 +20,7 @@ jobs:
     if: >-
       github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
       || contains(github.event.head_commit.message, '[testflight]')
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 60
     defaults:
       run:
@@ -47,8 +47,14 @@ jobs:
             exit 1
           fi
 
-      - name: Show Xcode version
-        run: xcodebuild -version
+      - name: Use Xcode 26
+        # App Store Connect only accepts apps built with the iOS 26 SDK or later.
+        run: |
+          XCODE=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | grep -vi beta | sort -V | tail -1)
+          [ -n "$XCODE" ] || XCODE=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
+          if [ -z "$XCODE" ]; then echo "::error::No Xcode 26 on this runner"; ls /Applications | grep -i xcode; exit 1; fi
+          sudo xcode-select -s "$XCODE"
+          xcodebuild -version
 
       - name: Install tools
         run: |

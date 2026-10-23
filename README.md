@@ -76,6 +76,26 @@ Prefer the command line? Install `flyctl`, set `app` in `backend/fly.toml`, then
 
 Other hosts work too, as long as they run the Docker image with a **persistent disk** mounted at `/data`. Free tiers that wipe the disk on restart, like Render's free plan, will lose your trips.
 
+## Backups
+
+Everything lives in one SQLite file and a folder of photos on the server's disk. With backups on:
+- **Database:** [Litestream](https://litestream.io) streams every change to a Cloudflare R2 bucket (within about 10 seconds). It keeps 30 days of history.
+- **Files:** photos and keys are copied every 15 minutes, and again when the server stops.
+- **Restore:** if the server ever starts on an empty disk (a new or lost volume), it restores itself from the bucket first.
+- **Weekly check:** the **Check backups** workflow restores the latest backup, checks it and emails you if anything's wrong. It runs on the default branch.
+
+Setting it up takes about 10 minutes, in a browser, at no cost for a small app (R2's free tier is 10 GB):
+1. Sign up at [dash.cloudflare.com](https://dash.cloudflare.com), open **R2 Object Storage** and create a bucket, e.g. `travel-edit-backups`. Leave its location on Automatic.
+2. In R2, open **Manage API tokens** → **Create API token**:
+   - **Permissions:** **Object Read & Write**.
+   - **Scope:** this bucket only.
+   - Copy the **Access Key ID**, the **Secret Access Key** and the endpoint, `https://<account id>.r2.cloudflarestorage.com`.
+3. Add four GitHub secrets: `BACKUP_BUCKET` (the bucket name), `BACKUP_ENDPOINT`, `BACKUP_ACCESS_KEY_ID` and `BACKUP_SECRET_ACCESS_KEY`. The next deploy turns backups on.
+
+To restore by hand:
+- Delete the volume, or start a new app with an empty one; the server restores on start.
+- Or copy the database to your computer with `litestream restore -o tripit.db` and the same settings.
+
 ## 3. Set up your iPhone
 
 1. Open `https://<app>.fly.dev` in **Safari**, sign in (or create your account; see [Accounts](#accounts)), then tap **Share → Add to Home Screen**.
@@ -167,6 +187,7 @@ Instagram blocks most anonymous downloads. Export cookies for instagram.com from
 | `MENU_GOOGLE_PHOTOS` | `true` | When a website has no menu, read menu photos from Google Maps. Google's terms may not allow extracting text from its photos: check them, and set this to `false` if in doubt |
 | `WHISPER_MODEL` | `base` | `small` is more accurate but slower on CPU |
 | `APNS_KEY` / `APNS_KEY_ID` / `APNS_TEAM_ID` / `APNS_TOPIC` | – | Notifications for the native iOS app (see [Native iOS app](#native-ios-app-optional)). Add them as GitHub secrets of the same names |
+| `BACKUP_BUCKET` / `BACKUP_ENDPOINT` / `BACKUP_ACCESS_KEY_ID` / `BACKUP_SECRET_ACCESS_KEY` | – | Backups to Cloudflare R2 (see [Backups](#backups)). Add them as GitHub secrets of the same names |
 | `YTDLP_COOKIES_FILE` / `YTDLP_COOKIES` | – | Needed for most Instagram reels: a path to cookies.txt, or its contents |
 
 ### Google Maps inside the app (optional)

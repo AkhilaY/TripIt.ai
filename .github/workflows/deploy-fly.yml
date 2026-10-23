@@ -87,6 +87,10 @@ jobs:
           APNS_KEY_ID: ${{ secrets.APNS_KEY_ID }}
           APNS_TEAM_ID: ${{ secrets.APNS_TEAM_ID }}
           APNS_TOPIC: ${{ secrets.APNS_TOPIC }}
+          BACKUP_BUCKET: ${{ secrets.BACKUP_BUCKET }}
+          BACKUP_ENDPOINT: ${{ secrets.BACKUP_ENDPOINT }}
+          BACKUP_ACCESS_KEY_ID: ${{ secrets.BACKUP_ACCESS_KEY_ID }}
+          BACKUP_SECRET_ACCESS_KEY: ${{ secrets.BACKUP_SECRET_ACCESS_KEY }}
         run: |
           {
             printf 'ANTHROPIC_API_KEY=%s\n' "$ANTHROPIC_API_KEY"
@@ -102,6 +106,11 @@ jobs:
             [ -z "$APNS_KEY_ID" ] || printf 'APNS_KEY_ID=%s\n' "$APNS_KEY_ID"
             [ -z "$APNS_TEAM_ID" ] || printf 'APNS_TEAM_ID=%s\n' "$APNS_TEAM_ID"
             [ -z "$APNS_TOPIC" ] || printf 'APNS_TOPIC=%s\n' "$APNS_TOPIC"
+            # Backups to Cloudflare R2 (start.sh).
+            [ -z "$BACKUP_BUCKET" ] || printf 'BACKUP_BUCKET=%s\n' "$BACKUP_BUCKET"
+            [ -z "$BACKUP_ENDPOINT" ] || printf 'BACKUP_ENDPOINT=%s\n' "$BACKUP_ENDPOINT"
+            [ -z "$BACKUP_ACCESS_KEY_ID" ] || printf 'BACKUP_ACCESS_KEY_ID=%s\n' "$BACKUP_ACCESS_KEY_ID"
+            [ -z "$BACKUP_SECRET_ACCESS_KEY" ] || printf 'BACKUP_SECRET_ACCESS_KEY=%s\n' "$BACKUP_SECRET_ACCESS_KEY"
           } | flyctl secrets import --stage --app "$APP"
 
       - name: Deploy

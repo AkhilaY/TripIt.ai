@@ -2,6 +2,10 @@
 app = "tripit-change-me"
 primary_region = "iad"
 
+# Fly sends SIGINT to stop the machine; start.sh then saves the last changes to the backup bucket.
+kill_signal = "SIGINT"
+kill_timeout = 30
+
 [env]
   PORT = "8080"
   DATABASE_PATH = "/data/tripit.db"

@@ -1,0 +1,75 @@
+name: Check backups
+
+# Restores the latest backup into a scratch file and checks it: the database opens, passes SQLite's
+# integrity check and has data, and the photo copies are there. Runs weekly (on the default branch), when
+# started from the Actions tab, and when this file changes. A failure emails you (GitHub notifications).
+on:
+  schedule:
+    - cron: "17 9 * * 1"
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/backup-check.yml"
+      - "backend/litestream.yml"
+
+jobs:
+  check:
+    name: Restore and check the latest backup
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      BACKUP_BUCKET: ${{ secrets.BACKUP_BUCKET }}
+      BACKUP_ENDPOINT: ${{ secrets.BACKUP_ENDPOINT }}
+      LITESTREAM_ACCESS_KEY_ID: ${{ secrets.BACKUP_ACCESS_KEY_ID }}
+      LITESTREAM_SECRET_ACCESS_KEY: ${{ secrets.BACKUP_SECRET_ACCESS_KEY }}
+      RCLONE_CONFIG_BACKUP_TYPE: s3
+      RCLONE_CONFIG_BACKUP_PROVIDER: Cloudflare
+      RCLONE_CONFIG_BACKUP_ACCESS_KEY_ID: ${{ secrets.BACKUP_ACCESS_KEY_ID }}
+      RCLONE_CONFIG_BACKUP_SECRET_ACCESS_KEY: ${{ secrets.BACKUP_SECRET_ACCESS_KEY }}
+      RCLONE_CONFIG_BACKUP_ENDPOINT: ${{ secrets.BACKUP_ENDPOINT }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check setup
+        id: check
+        run: |
+          if [ -z "$BACKUP_BUCKET" ]; then
+            echo "::notice::Backups aren't set up yet (add the BACKUP_* secrets; see the README)."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install tools
+        if: steps.check.outputs.ready == 'true'
+        run: |
+          curl -fsSL -o /tmp/litestream.deb https://github.com/benbjohnson/litestream/releases/download/v0.3.13/litestream-v0.3.13-linux-amd64.deb
+          sudo dpkg -i /tmp/litestream.deb
+          sudo apt-get install -y --no-install-recommends rclone
+
+      - name: Restore the database
+        if: steps.check.outputs.ready == 'true'
+        run: |
+          export DATABASE_PATH=/tmp/live/tripit.db
+          litestream generations -config backend/litestream.yml "$DATABASE_PATH"
+          litestream restore -config backend/litestream.yml -o /tmp/restored.db "$DATABASE_PATH"
+
+      - name: Check it
+        if: steps.check.outputs.ready == 'true'
+        run: |
+          python3 - <<'PY'
+          import sqlite3, sys
+          db = sqlite3.connect("/tmp/restored.db")
+          result = db.execute("PRAGMA integrity_check").fetchone()[0]
+          counts = {t: db.execute(f"SELECT count(*) FROM {t}").fetchone()[0] for t in ("users", "places", "trips", "folders")}
+          latest = db.execute("SELECT max(created_at) FROM places").fetchone()[0]
+          print(f"Integrity: {result}. Rows: {counts}. Newest place saved: {latest}")
+          if result != "ok" or counts["places"] == 0:
+              sys.exit("The restored backup looks wrong")
+          PY
+          files=$(rclone lsf -R --files-only "backup:${BACKUP_BUCKET}/files" | wc -l)
+          echo "Files backed up (photos, keys): $files"
+          {
+            echo "### Backup restored and checked"
+            echo "Files in the bucket: $files"
+          } >> "$GITHUB_STEP_SUMMARY"

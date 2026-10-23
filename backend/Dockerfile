@@ -1,8 +1,15 @@
 FROM python:3.12-slim
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg \
+    && apt-get install -y --no-install-recommends ffmpeg rclone ca-certificates curl \
     && rm -rf /var/lib/apt/lists/*
+
+# Backups (start.sh): Litestream streams the database to Cloudflare R2; rclone copies photos and keys.
+ARG LITESTREAM_VERSION=0.3.13
+RUN arch="$(dpkg --print-architecture)" \
+    && curl -fsSL -o /tmp/litestream.deb \
+       "https://github.com/benbjohnson/litestream/releases/download/v${LITESTREAM_VERSION}/litestream-v${LITESTREAM_VERSION}-linux-${arch}.deb" \
+    && dpkg -i /tmp/litestream.deb && rm /tmp/litestream.deb
 
 WORKDIR /app
 COPY requirements.txt .
@@ -19,9 +26,10 @@ ARG WHISPER_MODEL=base
 RUN python -c "from faster_whisper import WhisperModel; WhisperModel('${WHISPER_MODEL}', device='cpu', compute_type='int8')"
 
 COPY app ./app
+COPY litestream.yml start.sh ./
 
 ENV PORT=8080
 ENV DATABASE_PATH=/data/tripit.db
 VOLUME /data
 EXPOSE 8080
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT}"]
+CMD ["/app/start.sh"]

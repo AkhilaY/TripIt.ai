@@ -1,0 +1,14 @@
+# Continuous backup of the SQLite database to S3-compatible storage (Cloudflare R2), used by start.sh.
+# Litestream fills in the ${...} values from the environment.
+dbs:
+  - path: ${DATABASE_PATH}
+    replicas:
+      - type: s3
+        bucket: ${BACKUP_BUCKET}
+        path: db
+        endpoint: ${BACKUP_ENDPOINT}
+        region: auto
+        force-path-style: true
+        sync-interval: 10s       # changes reach the bucket within about 10 seconds
+        snapshot-interval: 24h   # a full copy each day...
+        retention: 720h          # ...and 30 days of history to restore from

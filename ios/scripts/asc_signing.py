@@ -15,6 +15,7 @@ which may create certificates), TRIPIT_BUNDLE_ID, and RUNNER_TEMP for its workin
 import base64
 import json
 import os
+import plistlib
 import secrets
 import subprocess
 import sys
@@ -89,11 +90,15 @@ def make_profile(name: str, bundle: str, certificate: str) -> dict:
     }})["data"]
     content = base64.b64decode(data["attributes"]["profileContent"])
     uuid = data["attributes"]["uuid"]
+    # The profile is a signed plist; read its entitlements from the embedded XML.
+    start, end = content.find(b"<?xml"), content.rfind(b"</plist>")
+    entitlements = plistlib.loads(content[start:end + len(b"</plist>")]).get("Entitlements", {}) if start >= 0 else {}
     for folder in (Path.home() / "Library/MobileDevice/Provisioning Profiles",
                    Path.home() / "Library/Developer/Xcode/UserData/Provisioning Profiles"):
         folder.mkdir(parents=True, exist_ok=True)
         (folder / f"{uuid}.mobileprovision").write_bytes(content)
-    return {"id": data["id"], "name": name, "uuid": uuid}
+    return {"id": data["id"], "name": name, "uuid": uuid,
+            "groups": list(entitlements.get("com.apple.security.application-groups", []))}
 
 
 def run(*args: str) -> None:
@@ -145,8 +150,22 @@ def setup() -> None:
     state["profiles"].append(share_profile["id"])
     STATE.write_text(json.dumps(state))
 
+    # The app and its share extension share sign-in through an App Group. Use the one registered for them.
+    print("App Groups in the profiles:", app_profile["groups"], share_profile["groups"])
+    for profile, identifier in ((app_profile, app_identifier), (share_profile, app_identifier + ".share")):
+        if not profile["groups"]:
+            raise SystemExit(
+                f"The App ID {identifier} has no App Group chosen. In developer.apple.com → Identifiers, open it, "
+                "tick App Groups, click Configure, choose your group (e.g. group." + app_identifier + "), and Save.")
+    shared = [g for g in app_profile["groups"] if g in share_profile["groups"]]
+    if not shared:
+        raise SystemExit(f"The app ({app_profile['groups']}) and the share extension ({share_profile['groups']}) "
+                         "need the same App Group. Choose the same group for both App IDs in developer.apple.com.")
+    group = f"group.{app_identifier}" if f"group.{app_identifier}" in shared else shared[0]
+
     env = os.environ.get("GITHUB_ENV")
-    lines = [f"TRIPIT_APP_PROFILE={app_profile['name']}", f"TRIPIT_SHARE_PROFILE={share_profile['name']}"]
+    lines = [f"TRIPIT_APP_PROFILE={app_profile['name']}", f"TRIPIT_SHARE_PROFILE={share_profile['name']}",
+             f"TRIPIT_APP_GROUP={group}"]
     if env:
         with open(env, "a") as f:
             f.write("\n".join(lines) + "\n")

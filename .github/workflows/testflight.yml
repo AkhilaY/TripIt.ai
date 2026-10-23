@@ -88,6 +88,7 @@ jobs:
             TRIPIT_APP_PROFILE="$TRIPIT_APP_PROFILE" \
             TRIPIT_SHARE_PROFILE="$TRIPIT_SHARE_PROFILE" \
             APS_ENVIRONMENT=production \
+            APP_GROUP_ID="$TRIPIT_APP_GROUP" \
             CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
             | tee "$RUNNER_TEMP/archive.log" \
             | grep -E "error:|warning: .*(deprecated|will never be executed)|ARCHIVE (SUCCEEDED|FAILED)" || true

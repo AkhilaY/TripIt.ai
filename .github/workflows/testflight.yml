@@ -5,6 +5,9 @@ name: TestFlight
 # Setup (once): see "Getting it on your phone (TestFlight)" in the README.
 on:
   workflow_dispatch:
+  # Or push a tag like testflight-3 (works from any branch, before this workflow is on the default branch).
+  push:
+    tags: ["testflight-*"]
 
 concurrency:
   group: testflight

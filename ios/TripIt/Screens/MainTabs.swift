@@ -35,6 +35,11 @@ struct MainTabs: View {
             AddPlaceSheet(request: request)
                 .environment(router).environment(store)
         }
+        .sheet(item: Binding(get: { store.reviewJob }, set: { store.reviewJob = $0 })) { job in
+            SaveReviewSheet(job: job)
+                .environment(router).environment(store)
+                .modifier(ToastOverlay())
+        }
         .task {
             if !store.loaded { await store.refresh() }
             await Push.shared.registerIfAllowed()
@@ -43,7 +48,16 @@ struct MainTabs: View {
             if phase == .active, store.loaded { Task { await store.refresh() } }
         }
         .onReceive(NotificationCenter.default.publisher(for: Push.opened)) { note in
-            if let url = note.object as? String { router.open(url) }
+            guard let url = note.object as? String else { return }
+            // A finished import: review its places rather than just listing them.
+            if let reel = URLComponents(string: url.replacingOccurrences(of: "#/saved", with: "saved"))?.queryItems?.first(where: { $0.name == "reel" })?.value {
+                Task {
+                    await store.refresh()
+                    if let job = store.jobs.first(where: { $0.reelId == reel }) { store.reviewJob = job } else { router.open(url) }
+                }
+            } else {
+                router.open(url)
+            }
         }
         .onOpenURL { url in
             // tripit://open?url=… from the Share Extension, or a link to the web app

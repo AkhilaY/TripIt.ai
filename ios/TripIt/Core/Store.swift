@@ -17,6 +17,8 @@ final class Store {
     var error: String?
     /// A short message shown at the bottom of the screen ("Saved to Date night").
     var toast: Toast?
+    /// An import that just finished, to review: its places by city, a trip that passes through, lists.
+    var reviewJob: Job?
 
     private let api = API.shared
     private var pollTask: Task<Void, Never>?
@@ -129,7 +131,11 @@ final class Store {
                     await self.reloadTrips()
                     for job in finished {
                         if job.status == "done" {
-                            self.show(job.addedPlaces == 1 ? "1 new place saved" : "\(job.addedPlaces) new places saved")
+                            if job.reelId != nil, self.places.contains(where: { $0.reelIds.contains(job.reelId!) }) {
+                                self.reviewJob = job
+                            } else {
+                                self.show(job.addedPlaces == 1 ? "1 new place saved" : "\(job.addedPlaces) new places saved")
+                            }
                         } else {
                             self.show(job.message ?? "Couldn't read that post", error: true)
                         }

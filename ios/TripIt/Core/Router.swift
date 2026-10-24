@@ -68,10 +68,15 @@ final class Router {
         func param(_ name: String) -> String? { query.first { $0.name == name }?.value }
 
         switch parts.first ?? "" {
-        case "", "saved":
+        case "", "home":
+            showProfile = false
+            tab = .home
+        case "library", "saved":
             showProfile = false
             tab = .library
             library = param("reel").map { [.reel(id: $0)] } ?? []
+        case "city" where parts.count > 1:
+            push(.city(name: parts[1].removingPercentEncoding ?? parts[1]))
         case "place" where parts.count > 1:
             if parts.count > 2, parts[2] == "menu" { push(.menu(placeId: parts[1])) }
             else { push(.place(id: parts[1], tripId: param("trip"))) }
@@ -85,9 +90,6 @@ final class Router {
         case "map":
             showProfile = false
             push(.map)
-        case "home":
-            showProfile = false
-            tab = .home
         case "discover":
             showProfile = false
             tab = .discover

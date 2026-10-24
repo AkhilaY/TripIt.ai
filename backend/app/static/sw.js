@@ -13,7 +13,7 @@ const SHELL_FILES = [
   '/js/app.js', '/js/api.js', '/js/icons.js', '/js/hours.js', '/js/map.js', '/js/pwa.js', '/js/drag.js', '/js/images.js',
   '/vendor/leaflet/leaflet.css', '/vendor/leaflet/leaflet.js',
   '/vendor/inter/inter-latin-wght-normal.woff2', '/vendor/inter/inter-latin-ext-wght-normal.woff2',
-  '/vendor/cormorant/cormorant-garamond-latin-wght-normal.woff2', '/vendor/cormorant/cormorant-garamond-latin-wght-italic.woff2',
+  '/vendor/newsreader/newsreader-latin-wght-normal.woff2', '/vendor/newsreader/newsreader-latin-wght-italic.woff2',
   '/icons/apple-touch-icon.png', '/icons/favicon.png', '/icons/icon-192.png',
 ];
 

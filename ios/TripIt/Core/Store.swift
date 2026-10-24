@@ -397,18 +397,10 @@ extension Trip {
         return Fmt.iso(end)
     }
 
-    /// "1–6 Nov", "28 Oct – 2 Nov", or nil without dates.
+    /// "Nov 1–6" (or "1–6 Nov", by region), or nil without dates.
     var dateRange: String? {
         guard let start = startDate.flatMap(Fmt.day) else { return nil }
-        let end = lastDay.flatMap(Fmt.day) ?? start
-        let cal = Calendar.current
-        let d = DateFormatter(); d.setLocalizedDateFormatFromTemplate("d")
-        let dm = DateFormatter(); dm.setLocalizedDateFormatFromTemplate("d MMM")
-        if cal.isDate(start, inSameDayAs: end) { return dm.string(from: start) }
-        if cal.component(.month, from: start) == cal.component(.month, from: end) {
-            return "\(d.string(from: start))–\(dm.string(from: end))"
-        }
-        return "\(dm.string(from: start)) – \(dm.string(from: end))"
+        return Fmt.range(start, lastDay.flatMap(Fmt.day) ?? start)
     }
 
     /// "In 9 days", "Tomorrow", "Now", or nil.

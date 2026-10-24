@@ -56,6 +56,13 @@ enum Fmt {
         return date.formatted(.relative(presentation: .named))
     }
 
+    /// "Oct 24–25", "Oct 28 – Nov 2": a span of days, in the region's order.
+    static func range(_ start: Date, _ end: Date) -> String {
+        let f = DateIntervalFormatter()
+        f.dateTemplate = "MMMd"
+        return f.string(from: start, to: max(start, end))
+    }
+
     static func plural(_ n: Int, _ word: String) -> String { "\(n) \(word)\(n == 1 ? "" : "s")" }
 
     static let timesOfDay = ["morning", "lunch", "afternoon", "dinner", "evening"]

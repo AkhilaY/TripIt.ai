@@ -9,8 +9,8 @@ import { clearOfflineData, disablePush, enablePush, pushState, registerServiceWo
 // ---------- Constants & helpers ----------
 
 const CATS = {
-  food: 'Food', cafe: 'Cafés', dessert: 'Sweets', drinks: 'Drinks', nightlife: 'Nightlife', attraction: 'Sights',
-  activity: 'Things to do', event: 'Events', nature: 'Outdoors', shopping: 'Shopping', stay: 'Stay', other: 'Other',
+  food: 'Restaurant', cafe: 'Café', dessert: 'Sweets', drinks: 'Bar', nightlife: 'Nightlife', attraction: 'Sight',
+  activity: 'Things to do', event: 'Event', nature: 'Outdoors', shopping: 'Shopping', stay: 'Stay', other: 'Other',
 };
 const CAT_ORDER = Object.keys(CATS);
 const TODS = ['morning', 'lunch', 'afternoon', 'dinner', 'evening'];
@@ -196,7 +196,9 @@ function route() {
   const [path, query = ''] = hash.split('?');
   const parts = path.split('/').filter(Boolean);
   const params = new URLSearchParams(query);
-  if (!parts.length) return { name: 'trips', params };
+  if (!parts.length || parts[0] === 'home') return { name: 'home', params };
+  if (parts[0] === 'library') return { name: 'trips', params };
+  if (parts[0] === 'city' && parts[1]) return { name: 'city', id: decodeURIComponent(parts[1]), params };
   if (parts[0] === 'trip' && parts[1] && parts[2] === 'bookings') return { name: 'bookings', params: new URLSearchParams(`trip=${parts[1]}`) };
   if (parts[0] === 'settings') return { name: 'profile', params };
   if (parts[0] === 'setup') return { name: 'signin', params };
@@ -214,14 +216,14 @@ function route() {
 }
 
 const TAB_FOR = {
-  trips: 'trips', folder: 'trips', trip: 'trips', place: 'trips', today: 'trips', edit: 'trips', editplace: 'trips', packing: 'trips', events: 'trips', map: 'map', concierge: 'concierge',
+  home: 'home', trips: 'trips', folder: 'trips', city: 'trips', trip: 'trips', place: 'trips', today: 'trips', edit: 'trips', editplace: 'trips', packing: 'trips', events: 'trips', map: 'trips', concierge: 'concierge',
   discover: 'discover', bookings: 'bookings', add: 'trips',
 };
 // Profile, calendar and their pages open over whichever tab you were on.
 const tabOf = (name) => TAB_FOR[name] || S.lastTab || 'trips';
-const TAB_INDEX = { trips: 0, discover: 1, map: 2, bookings: 3, concierge: 4 };
-const TAB_LABEL = { trips: 'Library', discover: 'Discover', map: 'Map', bookings: 'Bookings', concierge: 'Concierge' };
-const DEPTH = { profile: 1, calendar: 1, imports: 2, usage: 2, taste: 2, folder: 1, trip: 1, today: 1, taste: 1, packing: 1, events: 1, edit: 2, editplace: 3, place: 2 };
+const TAB_INDEX = { home: 0, trips: 1, discover: 2, bookings: 3, concierge: 4 };
+const TAB_LABEL = { home: 'Home', trips: 'Library', discover: 'Discover', bookings: 'Bookings', concierge: 'Concierge' };
+const DEPTH = { profile: 1, calendar: 1, imports: 2, usage: 2, city: 1, map: 1, taste: 2, folder: 1, trip: 1, today: 1, taste: 1, packing: 1, events: 1, edit: 2, editplace: 3, place: 2 };
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
 let renderToken = 0;
 let lastKey = '';
@@ -249,7 +251,7 @@ let navigating = 0; // token of a navigation render still loading its data
 let quietPending = false; // a background refresh arrived mid-navigation; repaint once it's done
 
 /** Screens the iOS app shows natively: opening one from an embedded web screen hands it to the app. */
-const nativeRoute = (r) => ['trips', 'folder', 'trip', 'map', 'profile', 'signin', 'imports', 'add', 'editplace', 'place'].includes(r.name);
+const nativeRoute = (r) => ['home', 'trips', 'folder', 'city', 'trip', 'map', 'profile', 'signin', 'imports', 'add', 'editplace', 'place'].includes(r.name);
 
 /** Leaves a screen: inside the iOS app the first web screen hands back to the app's own navigation. */
 function leave(fallback) {
@@ -661,7 +663,13 @@ function fmtDuration(sec) {
   const h = Math.floor(m / 60);
   return `${h} h${m % 60 ? ` ${m % 60} min` : ''}`;
 }
+// Miles where people use them (US, UK), kilometres elsewhere.
+const USE_MILES = /^en-(US|GB|LR|MM)\b/i.test(navigator.language || '');
 function fmtDistance(m) {
+  if (USE_MILES) {
+    const mi = m / 1609.34;
+    return mi < 0.1 ? `${Math.max(50, Math.round(m * 3.28084 / 50) * 50)} ft` : `${mi < 10 ? mi.toFixed(1) : Math.round(mi)} mi`;
+  }
   const km = m / 1000;
   return km < 1 ? `${Math.round(m / 10) * 10} m` : `${km < 10 ? km.toFixed(1) : Math.round(km)} km`;
 }
@@ -1566,7 +1574,7 @@ async function savedView(r) {
       <button class="fcard new" data-act="newfolder"><span class="fcover empty">${ICON.plus}</span><span class="fname">New folder</span>
         <span class="fcount">${folders.length ? 'Name it anything' : 'e.g. Date night, Brunch'}</span></button>
     </div></div>`;
-  const banner = reel ? `<div class="reelbanner">${ICON.link}<span>${plural(shown.length, 'place')} from one post</span><a class="linkbtn" href="#/">Show everything</a></div>` : '';
+  const banner = reel ? `<div class="reelbanner">${ICON.link}<span>${plural(shown.length, 'place')} from one post</span><a class="linkbtn" href="#/saved">Show everything</a></div>` : '';
   const body = !places.length
     ? emptyState('accent', 'bookmark', 'Nothing saved yet',
       'Share a TikTok or Instagram post to Travel Edit, paste a link, or search for a place. Everything you save lands here, ready to sort into folders and trips.',
@@ -1581,7 +1589,7 @@ async function folderView(r) {
   if (!fo) throw new ApiError('This folder was deleted.', 404);
   const inside = places.filter((p) => p.folder_ids.includes(fo.id));
   const more = `<button class="gbtn" data-act="foldermenu" data-id="${fo.id}" aria-label="Folder options">${ICON.more}</button>`;
-  const head = `${navbar(fo.name, { back: '#/', backLabel: 'Library', right: more })}<h1 class="largetitle" data-anchor>${esc(fo.name)}</h1>
+  const head = `${navbar(fo.name, { back: '#/library', backLabel: 'Library', right: more })}<h1 class="largetitle" data-anchor>${esc(fo.name)}</h1>
     <div class="subtitle"><span>${plural(inside.length, 'place')}</span></div>
     <div class="actionsrow"><button class="btn tint small" data-act="folderadd" data-id="${fo.id}">${ICON.plus}Add places</button>
       ${inside.length ? `<button class="btn small" data-act="newtrip" data-folder="${fo.id}">${ICON.plane}Plan a trip from this</button>` : ''}</div>`;
@@ -1596,7 +1604,9 @@ async function folderView(r) {
 function redrawLibList(scope) {
   const box = document.getElementById('libbody');
   if (!box || box.dataset.scope !== scope || !S.places) return;
-  const places = scope === 'saved' ? S.places : S.places.filter((p) => p.folder_ids.includes(scope));
+  const places = scope === 'saved' ? S.places
+    : scope.startsWith('city:') ? byVisit(savedOnly(S.places).filter((p) => p.city && cityKey(p.city) === scope.slice(5)))
+      : S.places.filter((p) => p.folder_ids.includes(scope));
   box.innerHTML = libList(scope, places);
   hydrateIcons(box);
 }
@@ -1656,14 +1666,14 @@ async function pickSavedSheet({ title, exclude = new Set(), confirm = 'Add', onD
   });
 }
 
-function folderNameSheet({ title = 'New folder', name = '', confirm = 'Create', onDone }) {
+function folderNameSheet({ title = 'New list', name = '', confirm = 'Create', onDone }) {
   openSheet({
     type: 'form', title, confirm, st: {},
     body: () => `<div class="section"><div class="group"><div class="row"><input class="field" id="folder-name" value="${esc(name)}" maxlength="80"
-      placeholder="e.g. Date night, Brunch spots, Paris someday" aria-label="Folder name" autocomplete="off"></div></div></div>`,
+      placeholder="e.g. Date night, Brunch spots, Paris someday" aria-label="List name" autocomplete="off"></div></div></div>`,
     async ok() {
       const value = $('#folder-name').value.trim();
-      if (!value) { toast('Give the folder a name', true); return; }
+      if (!value) { toast('Give the list a name', true); return; }
       S.sheet.busy = true; renderOverlay();
       try { await onDone(value); } catch (e) { S.sheet.busy = false; renderOverlay(); toast(e.message, true); }
     },
@@ -1890,6 +1900,515 @@ async function usageView() {
       ${u.google.length ? `<div class="section-f">About ${money(u.google_cost)} at Google’s list prices, before its free monthly allowance (most small apps pay nothing). Billed by Google; not part of the AI budget.</div>` : ''}</div>`;
 }
 
+// ---------- Place page pieces ----------
+
+/** "● Open now · until midnight · $$" */
+function statusLine(p, st) {
+  const price = p.price_hint && p.price_hint.length <= 5 ? p.price_hint : '';
+  if (!st && !price) return '';
+  const rest = st ? st.label.replace(/^Open until /, 'until ').replace(/^Closed · /, '').replace(/^Open now$/, '') : '';
+  return `<span class="pstatus">${st ? `<i class="dot ${st.state === 'open' ? 'open' : ''}"></i><b class="${st.state === 'open' ? 'open' : ''}">${st.state === 'open' ? 'Open now' : 'Closed'}</b>${rest && !/^(Closed|Open 24 hours)$/.test(rest) ? ` · ${esc(rest)}` : ''}` : ''}${price ? `${st ? ' · ' : ''}${esc(price)}` : ''}</span>`;
+}
+
+/** The Reel you saved it from, what it said, and your own note. */
+function whySaved(p, reels) {
+  const reel = reels && reels[0];
+  const quote = p.tips || (p.recommended_items[0] ? `Order the ${p.recommended_items[0]}.` : p.summary);
+  const saved = p.created_at ? dayOf(p.created_at.slice(0, 10)).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) : 'recently';
+  const frame = (p.photos || []).find((ph) => ph.source === 'reel');
+  const thumbSrc = frame ? photoUrl(frame, 240) : (reel && reel.thumbnail_url && safeUrl(reel.thumbnail_url)) || '';
+  const url = reel && safeUrl(reel.url);
+  const noteOpen = S.noteOpen && S.noteOpen[p.id];
+  return `<h2 class="h2">Why you saved it</h2><div class="pcard why">
+    ${reel ? `<a class="reelthumb" ${url ? `href="${esc(url)}" target="_blank" rel="noopener"` : ''} aria-label="Watch the Reel">${thumbSrc ? `<img src="${esc(thumbSrc)}" alt="" loading="lazy" onerror="this.remove()">` : ''}<span class="play">${ICON.play}</span></a>` : ''}
+    <span class="m">
+      <span class="t">${reel ? esc(reel.creator ? `@${reel.creator}` : platformName(reel.platform)) : 'Saved by you'}</span>
+      <span class="s">${reel ? `From a Reel · saved ${esc(saved)}` : `Saved ${esc(saved)}`}</span>
+      ${quote ? `<q>${esc(quote)}</q>` : ''}
+      ${url ? `<a class="tlink" href="${esc(url)}" target="_blank" rel="noopener">Watch the Reel</a>` : ''}
+      ${p.mention_count >= 2 ? `<span class="s">In ${p.mention_count} of your saved Reels</span>` : ''}
+    </span>
+    ${noteOpen || p.user_notes ? `<textarea class="notes" id="notes" data-act="notes" data-id="${p.id}" placeholder="Your note" rows="2" aria-label="Your note">${esc(p.user_notes)}</textarea>` : ''}
+  </div>${noteOpen || p.user_notes ? '' : `<button class="tbtn quietbtn" data-act="shownote" data-id="${p.id}">${ICON.note}Add your own note</button>`}`;
+}
+
+function bookedOn(p, trip) { return !!(trip && (trip.bookings || []).some((b) => b.place_id === p.id && b.kind === 'reservation')); }
+function mainKind(p, trip) {
+  if (!bookedOn(p, trip) && safeUrl(p.reserve_url)) return 'reserve';
+  if (p.booking_kind === 'tickets' && p.booking_need && safeUrl(p.website)) return 'tickets';
+  return 'directions';
+}
+
+/** One main button (Book a table, Get tickets, or Directions) and what to know about booking. */
+function mainAction(p, trip) {
+  const kind = mainKind(p, trip);
+  const links = mapsLinks(p, trip || { places: [p] });
+  const button = kind === 'reserve'
+    ? `<a class="btn wide" href="${esc(p.reserve_url)}" target="_blank" rel="noopener" data-reserve="${p.id}" data-act="link">${ICON.calendar}Book a table</a>`
+    : kind === 'tickets'
+      ? `<a class="btn wide" href="${esc(p.website)}" target="_blank" rel="noopener">${ICON.ticket}Get tickets</a>`
+      : `<button class="btn wide" data-act="directionsmenu" data-apple="${esc(links.apple)}" data-google="${esc(links.google)}">${ICON.route}Directions</button>`;
+  let need = '';
+  if (p.booking_need && p.booking_need !== 'none') {
+    const req = p.booking_need === 'required';
+    const text = p.booking_kind === 'tickets' ? (req ? 'Tickets needed' : 'Tickets recommended') : (req ? 'Book ahead' : 'Booking recommended');
+    need = `<p class="needhint${req ? ' attn' : ''}">${ICON.info}${esc(text)}.${p.booking_note ? ` ${esc(p.booking_note)}` : ''}</p>`;
+  }
+  return `<div class="mainact">${button}${need}</div>`;
+}
+
+/** Quiet buttons: Directions (unless it's the main one), Menu, Call, Website. */
+function quietActions(p, trip) {
+  const kind = mainKind(p, trip);
+  const links = mapsLinks(p, trip || { places: [p] });
+  const out = [];
+  if (kind !== 'directions') out.push(`<button class="qtile" data-act="directionsmenu" data-apple="${esc(links.apple)}" data-google="${esc(links.google)}">${ICON.route}Directions</button>`);
+  if (MENU_CATS.has(p.category)) out.push(`<a class="qtile" href="${placeHref(p, '/menu')}">${ICON.menu}Menu</a>`);
+  if (p.phone) out.push(`<a class="qtile" href="tel:${esc(p.phone.replace(/[^\d+]/g, ''))}">${ICON.phone}Call</a>`);
+  if (safeUrl(p.website) && kind !== 'tickets') out.push(`<a class="qtile" href="${esc(p.website)}" target="_blank" rel="noopener">${ICON.globe}Website</a>`);
+  return out.length ? `<div class="qtiles" style="--n:${out.length}">${out.join('')}</div>` : '';
+}
+
+/** Day, time and reservation on the trip this place is part of. */
+function tripSlot(p, trip) {
+  const m = trip.places.find((x) => x.id === p.id) || p;
+  const booking = (trip.bookings || []).find((b) => b.place_id === p.id);
+  const dayLabel = (d) => [dayDate(trip.start_date, d) ? shortDay(dayDate(trip.start_date, d)) : `Day ${d}`, trip.city].filter(Boolean).join(' · ');
+  const rows = [];
+  if (trip.day_count) {
+    rows.push(`<label class="srow" for="slot-day">${ICON.calendar}<span class="k">Day</span>
+      <select class="select" id="slot-day" data-act="slotday" data-trip="${trip.id}" data-id="${p.id}">
+        <option value="0">Not scheduled</option>
+        ${Array.from({ length: trip.day_count }, (_, i) => `<option value="${i + 1}" ${m.day_number === i + 1 ? 'selected' : ''}>${esc(dayLabel(i + 1))}</option>`).join('')}
+      </select></label>`);
+    rows.push(`<label class="srow" for="slot-tod">${ICON.clock}<span class="k">Time</span>
+      <select class="select" id="slot-tod" data-act="slottod" data-trip="${trip.id}" data-id="${p.id}">
+        <option value="">Any time</option>
+        ${TODS.map((x) => `<option value="${x}" ${m.time_of_day === x ? 'selected' : ''}>${cap(x)}</option>`).join('')}
+      </select></label>`);
+    rows.push(`<label class="srow" for="slot-time">${ICON.clock}<span class="k">Exact time</span>
+      <input class="datefield" type="time" id="slot-time" data-act="slottime" data-trip="${trip.id}" data-id="${p.id}" value="${esc(m.start_time || '')}"></label>`);
+  }
+  if (MENU_CATS.has(p.category) || p.booking_need || booking) {
+    rows.push(booking
+      ? `<button class="srow" data-act="bookingmenu" data-id="${booking.id}">${ICON.ticket}<span class="k">Reservation</span><span class="v">${esc(booking.title)}</span></button>`
+      : `<button class="srow" data-act="bookedplace" data-id="${p.id}">${ICON.ticket}<span class="k">Reservation</span><span class="v${p.booking_need === 'required' ? ' attn' : ''}">Not booked yet</span></button>`);
+  }
+  if (!rows.length) return '';
+  return `<div class="h2row"><h2 class="h2">On your trip</h2><a class="tbtn" href="#/trip/${trip.id}">${esc(trip.name)}</a></div>
+    <div class="pcard list">${rows.join('')}</div>`;
+}
+
+/** Today's hours (tap for the week), tips, price and what it's like. */
+function goodToKnow(p) {
+  const h = p.opening_hours;
+  const rows = [];
+  if (h && h.text && h.text.length) {
+    let today = h.text[0];
+    if (h.weekly && h.weekly.length === 7) {
+      const ranges = h.weekly[mondayIndex(new Date())] || [];
+      today = ranges.length ? `Open today ${ranges.map((x) => `${fmtClock(x.open)} – ${fmtClock(x.close)}`).join(', ')}` : 'Closed today';
+    }
+    const open = S.allHours && S.allHours[p.id];
+    const idx = mondayIndex(new Date());
+    rows.push(`<button class="krow" data-act="allhours" data-id="${p.id}" aria-expanded="${!!open}">${ICON.clock}<span class="m"><span class="t">${esc(today)}</span>
+      <span class="s">From ${h.source === 'google' ? 'Google' : 'OpenStreetMap'} · hours change, check before you go</span></span><span class="tlink">${open ? 'Less' : 'All hours'}</span></button>
+      ${open ? `<div class="hourlist pad">${h.text.map((line, i) => `<span class="${h.weekly && i === idx ? 'today' : ''}">${esc(line)}</span>`).join('')}</div>` : ''}`);
+  } else {
+    rows.push(`<div class="krow">${ICON.clock}<span class="m"><span class="t">No opening hours found</span><span class="s">Check Google Maps before you go</span></span></div>`);
+  }
+  p.recommended_items.slice(p.tips ? 0 : 1).forEach((item) => rows.push(`<div class="krow">${ICON.star}<span class="m"><span class="t">Try the ${esc(item)}</span></span></div>`));
+  const price = p.price_hint && (p.summary || p.price_hint.length > 5) ? p.price_hint : '';
+  if (price || (p.summary && (p.tips || p.recommended_items.length))) {
+    rows.push(`<div class="krow">${ICON.tag}<span class="m"><span class="t">${esc([price, p.summary].filter(Boolean).join(' · '))}</span></span></div>`);
+  }
+  return `<h2 class="h2">Good to know</h2><div class="pcard list">${rows.join('')}</div>`;
+}
+
+/** Address, phone, website, then the rating. */
+function detailsBlock(p) {
+  const rows = [];
+  if (p.address) rows.push(`<div class="krow">${ICON.pin}<span class="m"><span class="t">${esc(p.address)}</span></span>
+    <button class="ibtn" data-act="copy" data-value="${esc(p.address)}" aria-label="Copy address">${ICON.copy}</button></div>`);
+  if (p.phone) rows.push(`<a class="krow" href="tel:${esc(p.phone.replace(/[^\d+]/g, ''))}">${ICON.phone}<span class="m"><span class="t">${esc(p.phone)}</span></span></a>`);
+  const site = safeUrl(p.website);
+  if (site) {
+    let host = site;
+    try { host = new URL(site).hostname.replace(/^www\./, ''); } catch { /* as is */ }
+    rows.push(`<a class="krow" href="${esc(site)}" target="_blank" rel="noopener">${ICON.globe}<span class="m"><span class="t">${esc(host)}</span></span></a>`);
+  }
+  if (p.rating) {
+    const google = safeUrl(p.maps_url);
+    const body = `${ICON.star}<span class="m"><span class="t quiet">${p.rating.toFixed(1)} on Google${p.rating_count ? ` · ${p.rating_count.toLocaleString()} reviews` : ''}</span></span>`;
+    rows.push(google ? `<a class="krow" href="${esc(google)}" target="_blank" rel="noopener">${body}</a>` : `<div class="krow">${body}</div>`);
+  }
+  if (!rows.length) return '';
+  return `<h2 class="h2">Details</h2><div class="pcard list">${rows.join('')}</div>`;
+}
+
+/** City (automatic), category, lists and trips. */
+function organizeBlock(p) {
+  if (!S.folders) loadFolders().then(() => render({ quiet: true })).catch(() => {});
+  const lists = (S.folders || []).filter((fo) => (p.folder_ids || []).includes(fo.id)).map((fo) => fo.name);
+  const trips = realTrips(S.trips || []).filter((t) => (p.trip_ids || []).includes(t.id)).map((t) => t.name);
+  const city = isHomePlace(p) ? `Around ${p.city} · automatic` : p.city ? `${p.city} · automatic` : 'Unknown';
+  return `<h2 class="h2">Organize</h2><div class="pcard list">
+    <div class="orow"><span class="k">City</span><span class="v quiet">${esc(city)}</span></div>
+    <label class="orow" for="cat-select"><span class="k">Category</span><select class="select" id="cat-select" data-act="setcat" data-id="${p.id}">
+      ${CAT_ORDER.map((c) => `<option value="${c}" ${p.category === c ? 'selected' : ''}>${CATS[c]}</option>`).join('')}</select></label>
+    <button class="orow" data-act="placefolders" data-id="${p.id}"><span class="k">Lists</span><span class="v${lists.length ? '' : ' acc'}">${esc(lists.join(', ') || 'Add to a list')}</span></button>
+    <button class="orow" data-act="placetrips" data-id="${p.id}"><span class="k">Trips</span><span class="v${trips.length ? '' : ' acc'}">${esc(trips.join(', ') || 'Add to a trip')}</span></button>
+  </div>`;
+}
+
+// ---------- Home, Library and cities ----------
+// Places file themselves by city: your home city is "Around <city>", every other city is sorted automatically,
+// trips are routes of stops, and lists are yours. "Want to go / Been" filters the whole Library.
+
+const cityKey = (c) => normText(c);
+const isHomePlace = (p) => !!(S.homeCity && p.city && cityKey(p.city) === cityKey(S.homeCity.city));
+const savedOnly = (list) => list.filter((p) => p.saved !== false);
+const VISITS = [['all', 'All'], ['want', 'Want to go'], ['been', 'Been']];
+function visitOf() { try { return localStorage.getItem('tripit.visit') || 'all'; } catch { return 'all'; } }
+const byVisit = (list, v = visitOf()) => (v === 'want' ? list.filter((p) => !p.visited) : v === 'been' ? list.filter((p) => p.visited) : list);
+const todayIso = () => isoDate(new Date());
+
+async function ensureHome() {
+  if (S.homeCity === undefined) S.homeCity = await api('/v1/home').catch(() => null);
+  return S.homeCity;
+}
+
+/** Every city with saved places except home, the biggest first. */
+function cityGroups(list) {
+  const groups = new Map();
+  list.filter((p) => p.city && !isHomePlace(p)).forEach((p) => {
+    const k = cityKey(p.city);
+    if (!groups.has(k)) groups.set(k, { name: p.city, places: [] });
+    groups.get(k).places.push(p);
+  });
+  return [...groups.values()].sort((a, b) => b.places.length - a.places.length || a.name.localeCompare(b.name));
+}
+
+const realTrips = (trips) => trips.filter((t) => t.kind !== 'local').sort((a, b) => {
+  if (a.start_date && b.start_date) return a.start_date.localeCompare(b.start_date);
+  if (a.start_date || b.start_date) return a.start_date ? -1 : 1;
+  return (b.created_at || '').localeCompare(a.created_at || '');
+});
+function tripEnd(t) {
+  if (!t.start_date || !t.day_count) return t.start_date;
+  const d = dayOf(t.start_date); d.setDate(d.getDate() + t.day_count - 1);
+  return isoDate(d);
+}
+/** "Oct 24–25", "Oct 28 – Nov 2" (or "24–25 Oct" where that's the custom). */
+function dateRange(a, b) {
+  const f = new Intl.DateTimeFormat(undefined, { day: 'numeric', month: 'short' });
+  return a.getTime() === b.getTime() || !f.formatRange ? f.format(a) : f.formatRange(a, b);
+}
+const upcomingTrips = (trips) => realTrips(trips).filter((t) => t.start_date && (tripEnd(t) || t.start_date) >= todayIso());
+const tripStops = (t) => [t.city].filter(Boolean);
+function tripForCity(trips, city) {
+  const k = cityKey(city);
+  return upcomingTrips(trips).find((t) => cityKey(t.city) === k) || realTrips(trips).find((t) => cityKey(t.city) === k) || null;
+}
+
+/** "1–6 Nov", "28 Oct – 2 Nov". */
+function tripRange(t) {
+  if (!t.start_date) return '';
+  return dateRange(dayOf(t.start_date), dayOf(tripEnd(t) || t.start_date));
+}
+
+/** "In 9 days", "Tomorrow", "Now". */
+function tripCountdown(t) {
+  if (!t.start_date) return '';
+  const days = Math.round((dayOf(t.start_date) - dayOf(todayIso())) / 86400000);
+  if (days > 1) return `In ${days} days`;
+  if (days === 1) return 'Tomorrow';
+  return (tripEnd(t) || t.start_date) >= todayIso() ? 'Now' : '';
+}
+
+/** Where a place was filed: "Atlanta · Around Atlanta", "Zürich · Switzerland trip, Day 1", "Paris · on your wishlist". */
+function filing(p) {
+  let where;
+  const trip = realTrips(S.trips || []).find((t) => (p.trip_ids || []).includes(t.id));
+  if (isHomePlace(p)) where = `Around ${S.homeCity.city}`;
+  else if (trip) {
+    where = /trip/i.test(trip.name) ? trip.name : `${trip.name} trip`;
+    const member = S.trip[trip.id] && S.trip[trip.id].places.find((x) => x.id === p.id);
+    if (member && member.day_number) where += `, Day ${member.day_number}`;
+  } else {
+    const fo = (S.folders || []).find((f) => (p.folder_ids || []).includes(f.id));
+    where = fo ? fo.name : 'on your wishlist';
+  }
+  return [p.city, where].filter(Boolean).join(' · ');
+}
+
+/** Distance from you (when the browser knows) or from the middle of your home city. */
+function distanceOf(p) {
+  if (p.latitude == null || p.longitude == null) return null;
+  if (S.pos) return meters(S.pos.latitude, S.pos.longitude, p.latitude, p.longitude);
+  if (S.homeCity && S.homeCity.latitude != null) return meters(S.homeCity.latitude, S.homeCity.longitude, p.latitude, p.longitude);
+  return null;
+}
+const miles = (m) => (m == null ? '' : fmtDistance(m));
+
+const roundBtn = (act, icon, label, extra = '') => `<button class="rbtn" data-act="${act}" ${extra} aria-label="${esc(label)}">${ICON[icon]}</button>`;
+function profileBtn() {
+  const src = (S.me && (S.me.name || S.me.email)) || '';
+  return `<a class="rbtn initial" href="#/profile" aria-label="Profile and settings">${src ? esc(src[0].toUpperCase()) : ICON.person}</a>`;
+}
+const smallThumb = (p, size = 48) => (p.photos && p.photos[0]
+  ? `<img class="sthumb" style="--sz:${size}px" src="${esc(photoUrl(p.photos[0], size * 3))}" alt="" loading="lazy" decoding="async" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'sthumb ph',style:'--sz:${size}px'}))">`
+  : `<span class="sthumb ph" style="--sz:${size}px">${ICON[p.category] || ICON.pin}</span>`);
+function visitSeg(list) {
+  const v = visitOf();
+  return `<div class="visitseg" role="group" aria-label="Filter by status">${VISITS.map(([k, label]) => `<button data-act="visit" data-v="${k}" aria-pressed="${v === k}" class="${v === k ? 'on' : ''}">${label} <span>${byVisit(list, k).length}</span></button>`).join('')}</div>`;
+}
+
+// This weekend's picks: Saturday brunch or coffee, Sunday dinner, from places you haven't been to yet.
+function weekendDays(now = new Date()) {
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  if (today.getDay() === 0) return [null, today];
+  const sat = new Date(today); sat.setDate(today.getDate() + (6 - today.getDay()));
+  const sun = new Date(sat); sun.setDate(sat.getDate() + 1);
+  return [sat, sun];
+}
+function weekendLabel() {
+  const [sat, sun] = weekendDays();
+  return dateRange(sat || sun, sun);
+}
+function openAt(p, day, minute) {
+  const w = p.opening_hours && p.opening_hours.weekly;
+  if (!w || w.length !== 7) return true;
+  const toMin = (s) => { const [h, m] = String(s).split(':').map(Number); return h * 60 + m; };
+  return (w[mondayIndex(day)] || []).some((r) => { const o = toMin(r.open); let c = toMin(r.close); if (c <= o) c += 1440; return minute >= o && minute < c; });
+}
+function weekendPicks(places, seed) {
+  const eat = new Set(['food', 'cafe', 'dessert', 'drinks']);
+  let pool = places.filter((p) => eat.has(p.category));
+  if (!pool.length) pool = places;
+  if (!pool.length) return [];
+  pool = [...pool].sort((a, b) => (b.must_do - a.must_do) || (a.created_at || '').localeCompare(b.created_at || ''));
+  const k = ((seed * 2) % pool.length + pool.length) % pool.length;
+  pool = pool.slice(k).concat(pool.slice(0, k));
+  const [sat, sun] = weekendDays();
+  const used = new Set();
+  const picks = [];
+  const take = (test) => pool.find((p) => !used.has(p.id) && test(p)) || pool.find((p) => !used.has(p.id));
+  if (sat) {
+    const p = take((x) => ['cafe', 'food', 'dessert'].includes(x.category) && openAt(x, sat, 660));
+    if (p) { used.add(p.id); picks.push({ slot: p.category === 'cafe' ? 'Sat · Coffee' : 'Sat · Brunch', p }); }
+  }
+  const q = take((x) => ['food', 'drinks'].includes(x.category) && openAt(x, sun, 1140));
+  if (q) { used.add(q.id); picks.push({ slot: q.category === 'drinks' ? 'Sun · Drinks' : 'Sun · Dinner', p: q }); }
+  return picks;
+}
+
+function bookMeta(p) {
+  const bits = [esc(p.neighborhood || CATS[p.category] || '')];
+  const d = distanceOf(p);
+  if (d != null) bits.push(esc(miles(d)));
+  if (p.booking_need === 'required') bits.push(`<span class="attn">${p.booking_kind === 'tickets' ? 'Tickets needed' : 'Book ahead'}</span>`);
+  else if (p.booking_need === 'none') bits.push('walk-in');
+  return bits.filter(Boolean).join(' · ');
+}
+
+async function homeView() {
+  const [places, trips] = await Promise.all([cachedPlaces(), cachedTrips()]);
+  cachedFolders();
+  await ensureHome();
+  if (S.me === undefined) S.me = await api('/v1/me').catch(() => null);
+  const saved = savedOnly(places);
+  const hour = new Date().getHours();
+  const first = S.me && S.me.name ? S.me.name.split(' ')[0] : '';
+  const greet = `${hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening'}${first ? `, ${esc(first)}` : ''}`;
+  const date = new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' });
+  const head = `<div class="tophead"><span class="eyebrow quiet">${esc([date, S.homeCity && S.homeCity.city].filter(Boolean).join(' · '))}</span>
+      <span class="tbtns">${roundBtn('add', 'plus', 'Save a place')}${profileBtn()}</span></div>
+    <h1 class="greet" data-anchor>${greet}</h1>`;
+  const jobs = S.jobs.filter((j) => ACTIVE.has(j.status));
+  const jobsHtml = jobs.length ? `<div class="section"><div class="group tiles">${jobs.map(jobRow).join('')}</div></div>` : '';
+
+  let weekend;
+  if (S.homeCity) {
+    const picks = weekendPicks(saved.filter((p) => isHomePlace(p) && !p.visited), S.shuffle || 0);
+    weekend = `<section class="wcard"><span class="eyebrow">This weekend · ${esc(weekendLabel())}</span>
+      <h2 class="h2 big">Your ${esc(S.homeCity.city)} weekend</h2>
+      ${picks.length ? `<p class="sub">Picked from places you've saved but haven't been to yet</p>
+        <ul class="picks">${picks.map(({ slot, p }) => `<li><a href="${placeHref(p)}">${smallThumb(p, 56)}<span class="m">
+          <span class="eyebrow quiet">${esc(slot)}</span><span class="t">${esc(p.name)}</span><span class="s">${bookMeta(p)}</span></span></a></li>`).join('')}</ul>
+        <div class="wbtns"><button class="btn" data-act="planweekend" data-ids="${picks.map((x) => x.p.id).join(',')}">Plan the weekend</button>
+          <button class="btn tint" data-act="shuffle">${ICON.shuffle}Shuffle</button></div>`
+        : `<p class="sub">Save places around ${esc(S.homeCity.city)} and we'll pick a couple for the weekend from the ones you haven't been to.</p>`}
+    </section>`;
+  } else {
+    weekend = `<section class="wcard"><span class="eyebrow">Your city</span><h2 class="h2 big">Where's home?</h2>
+      <p class="sub">Set your home city and places you save there are kept as Around your city, with weekend picks and what's open now.</p>
+      <div class="wbtns"><button class="btn" data-act="homecity">Set home city</button></div></section>`;
+  }
+
+  const open = saved.filter((p) => {
+    const st = openStatus(p.opening_hours);
+    if (!st || st.state !== 'open') return false;
+    const d = S.pos ? distanceOf(p) : null;
+    return d != null ? d < 30000 : isHomePlace(p);
+  }).sort((a, b) => (distanceOf(a) ?? 1e12) - (distanceOf(b) ?? 1e12)).slice(0, 8);
+  const openHtml = open.length ? `<h2 class="h2">Open now from your saves</h2>
+    <div class="hscroll">${open.map((p) => { const st = openStatus(p.opening_hours); const d = distanceOf(p); return `<a class="ocard" href="${placeHref(p)}">
+      ${p.photos && p.photos[0] ? `<img src="${esc(photoUrl(p.photos[0], 500))}" alt="" loading="lazy" decoding="async">` : `<span class="ph">${ICON[p.category] || ICON.pin}</span>`}
+      <span class="t">${esc(p.name)}</span><span class="s"><span class="open">${esc(st.label.replace(/^Open until/, 'Until'))}</span>${d != null ? ` · ${esc(miles(d))}` : ''}</span></a>`; }).join('')}</div>` : '';
+
+  const next = upcomingTrips(trips)[0];
+  let coming = '';
+  if (next) {
+    const detail = S.trip[next.id];
+    if (!detail) loadTrip(next.id).then(() => render({ quiet: true })).catch(() => {});
+    const booked = new Set(((detail && detail.bookings) || []).map((b) => b.place_id).filter(Boolean));
+    const need = detail && detail.places.find((p) => p.booking_need === 'required' && !booked.has(p.id) && !p.suggested);
+    const cover = next.cover_photo ? `<img class="sthumb" style="--sz:64px" src="${esc(photoUrl(next.cover_photo, 200))}" alt="" loading="lazy">` : `<span class="sthumb ph" style="--sz:64px">${ICON.plane}</span>`;
+    coming = `<h2 class="h2">Coming up</h2><a class="ccard" href="#/trip/${next.id}">
+      <span class="crow">${cover}<span class="m">${tripCountdown(next) ? `<span class="eyebrow">${esc(tripCountdown(next))}</span>` : ''}
+        <span class="t serif">${esc(next.name)}</span><span class="s">${esc([tripStops(next).join(' → '), tripRange(next)].filter(Boolean).join(' · '))}</span></span></span>
+      ${need ? `<span class="cneed">${ICON.bell}<span class="t">${esc(need.name)} still needs ${need.booking_kind === 'tickets' ? 'tickets' : 'a table'}</span><span class="go">Book</span></span>` : ''}</a>`;
+  }
+
+  const weekAgo = isoDate(new Date(Date.now() - 7 * 86400000));
+  const sorted = [...saved].sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
+  const thisWeek = sorted.filter((p) => (p.created_at || '') >= weekAgo);
+  const recent = (thisWeek.length ? thisWeek : sorted).slice(0, 5);
+  const recentHtml = recent.length ? `<h2 class="h2">${thisWeek.length ? 'Saved this week' : 'Recently saved'}</h2>
+    <ul class="rows">${recent.map((p) => `<li><a href="${placeHref(p)}">${smallThumb(p)}<span class="m"><span class="t">${esc(p.name)}</span><span class="s">${esc(filing(p))}</span></span></a></li>`).join('')}</ul>`
+    : (S.homeCity ? emptyState('accent', 'bookmark', 'Nothing saved yet', 'Share a TikTok or Instagram Reel to The Travel Edit, paste a link, or search for a place.',
+      `<button class="btn" data-act="add">${ICON.plus}Save a place</button>`) : '');
+
+  // On a trip today: its day first.
+  const active = activeTrip(trips);
+  if (active && !S.trip[active.trip.id]) loadTrip(active.trip.id).then(() => render({ quiet: true })).catch(() => {});
+  const todayHtml = active && S.trip[active.trip.id] ? todayCard(active) : '';
+  return `<div class="page">${head}${jobsHtml}${todayHtml}${weekend}${openHtml}${coming}${recentHtml}${tasteInvite()}</div>`;
+}
+
+function libMain(places, trips, folders) {
+  const q = normText(S.libq || '');
+  const shown = byVisit(places);
+  if (q) {
+    const hits = shown.filter((p) => normText(`${p.name} ${p.neighborhood || ''} ${p.city || ''} ${p.venue || ''}`).includes(q));
+    const cities = cityGroups(shown).filter((c) => normText(c.name).includes(q));
+    const lists = folders.filter((f) => normText(f.name).includes(q));
+    if (!hits.length && !cities.length && !lists.length) return emptyState('gray', 'search', 'Nothing matches', `Nothing in your Library matches “${esc(S.libq)}”.`);
+    return `${cities.length || lists.length ? `<h2 class="h2 small">Cities and lists</h2><ul class="rows">
+        ${cities.map((c) => listRow(`#/city/${encodeURIComponent(c.name)}`, c.name, plural(c.places.length, 'place'), c.places.find((p) => p.photos && p.photos[0]))).join('')}
+        ${lists.map((f) => listRow(`#/folder/${f.id}`, f.name, plural(f.place_count, 'place'), null, f.covers[0])).join('')}</ul>` : ''}
+      ${hits.length ? `<h2 class="h2 small">${plural(hits.length, 'place')}</h2><div class="section flush"><div class="group thumbs">${hits.map((p) => placeRow(p, { home: true })).join('')}</div></div>` : ''}`;
+  }
+  let around = '';
+  if (S.homeCity) {
+    const mine = shown.filter(isHomePlace);
+    const openN = mine.filter((p) => { const st = openStatus(p.opening_hours); return st && st.state === 'open'; }).length;
+    around = `<a class="acard" href="#/city/${encodeURIComponent(S.homeCity.city)}">
+      <span class="arow"><span class="m"><span class="eyebrow">${ICON.home}Your city</span><span class="t serif">Around ${esc(S.homeCity.city)}</span>
+        <span class="s">${plural(mine.length, 'place')}${openN ? ` · <span class="open">${openN} open now</span>` : ''}</span></span><span class="chevc">${ICON.chev}</span></span>
+      ${mine.length ? photoStrip(mine) : ''}</a>`;
+  }
+  const all = realTrips(trips);
+  const tripsHtml = `<div class="h2row"><h2 class="h2">Trips</h2><button class="tbtn" data-act="newtrip">${ICON.plus}New trip</button></div>
+    ${all.length ? all.map((t, i) => (i === 0 ? routeCard(t) : tripRowHtml(t))).join('') : '<p class="sub">Plan a trip from a city you’ve saved places in, or start one from scratch.</p>'}`;
+  const groups = cityGroups(shown);
+  const visible = S.allCities ? groups : groups.slice(0, 4);
+  const citiesHtml = groups.length ? `<div class="h2row"><h2 class="h2">Cities</h2><span class="hint">Sorted for you automatically</span></div>
+    <div class="cgrid">${visible.map((c) => cityTile(c, tripForCity(trips, c.name))).join('')}</div>
+    ${groups.length > 4 ? `<button class="tbtn" data-act="allcities">${S.allCities ? 'Show fewer' : `See all ${groups.length} cities`}</button>` : ''}` : '';
+  const listsHtml = `<div class="h2row"><h2 class="h2">Your lists</h2><button class="tbtn" data-act="newfolder">${ICON.plus}New list</button></div>
+    ${folders.length ? `<ul class="rows">${folders.map((f) => listRow(`#/folder/${f.id}`, f.name, listSub(f, places), null, f.covers[0])).join('')}</ul>`
+      : '<p class="sub">Make lists for anything: date night, early risers, best croissants. A place can be on several.</p>'}`;
+  return `${around}${tripsHtml}${citiesHtml}${listsHtml}`;
+}
+
+function photoStrip(list) {
+  const withPhotos = list.filter((p) => p.photos && p.photos[0]);
+  const src = withPhotos.length ? withPhotos : list;
+  const n = list.length > 4 ? 3 : 4;
+  return `<span class="pstrip">${src.slice(0, n).map((p) => (p.photos && p.photos[0] ? `<img src="${esc(photoUrl(p.photos[0], 240))}" alt="" loading="lazy" decoding="async">` : `<span class="ph">${ICON[p.category] || ICON.pin}</span>`)).join('')}${list.length > 4 ? `<span class="more">+${list.length - 3}</span>` : ''}</span>`;
+}
+function routeStrip(stops) { return `<span class="route">${stops.map((s, i) => `${i ? '<i></i>' : ''}<span>${esc(s)}</span>`).join('')}</span>`; }
+function routeCard(t) {
+  return `<a class="rcard" href="#/trip/${t.id}">${t.cover_photo ? `<img src="${esc(photoUrl(t.cover_photo, 900))}" alt="" loading="lazy" decoding="async">` : `<span class="ph">${ICON.plane}</span>`}
+    <span class="b"><span class="tr"><span class="t serif">${esc(t.name)}</span>${tripCountdown(t) ? `<span class="cd">${esc(tripCountdown(t))}</span>` : ''}</span>
+      <span class="s">${esc([tripRange(t) || 'No dates yet', plural(t.place_count, 'place')].join(' · '))}</span>${routeStrip(tripStops(t))}</span></a>`;
+}
+function tripRowHtml(t) {
+  const cover = t.cover_photo ? `<img class="sthumb" style="--sz:56px" src="${esc(photoUrl(t.cover_photo, 180))}" alt="" loading="lazy">` : `<span class="sthumb ph" style="--sz:56px">${ICON.plane}</span>`;
+  return `<a class="trow" href="#/trip/${t.id}">${cover}<span class="m"><span class="t serif">${esc(t.name)}</span>
+    <span class="s">${esc([tripRange(t), tripStops(t).join(' → ')].filter(Boolean).join(' · '))}</span></span>${ICON.chev}</a>`;
+}
+function cityTile(c, trip) {
+  const photos = c.places.filter((p) => p.photos && p.photos[0]).slice(0, 2);
+  const when = trip ? (trip.start_date ? `<span class="acc">Trip ${esc(dayOf(trip.start_date).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }))}</span>` : '<span class="acc">On a trip</span>') : 'No trip yet';
+  return `<a class="ctile" href="#/city/${encodeURIComponent(c.name)}"><span class="cimgs">${photos.length ? photos.map((p) => `<img src="${esc(photoUrl(p.photos[0], 300))}" alt="" loading="lazy" decoding="async">`).join('') : `<span class="ph">${ICON.pin}</span>`}</span>
+    <span class="t serif">${esc(c.name)}</span><span class="s">${plural(c.places.length, 'place')} · ${when}</span></a>`;
+}
+function listRow(href, title, sub, place = null, photo = null) {
+  const ph = photo || (place && place.photos && place.photos[0]);
+  return `<li><a href="${href}">${ph ? `<img class="sthumb" style="--sz:48px" src="${esc(photoUrl(ph, 150))}" alt="" loading="lazy">` : `<span class="sthumb ph" style="--sz:48px">${ICON.folder}</span>`}
+    <span class="m"><span class="t">${esc(title)}</span><span class="s">${esc(sub)}</span></span>${ICON.chev}</a></li>`;
+}
+function listSub(f, places) {
+  const cities = [...new Set(places.filter((p) => (p.folder_ids || []).includes(f.id) && p.city).map((p) => p.city))].sort();
+  const where = !cities.length ? '' : cities.length <= 2 ? cities.join(', ') : `${cities.length} cities`;
+  return [plural(f.place_count, 'place'), where].filter(Boolean).join(' · ');
+}
+
+async function libraryView(r) {
+  const [places, trips, folders] = await Promise.all([cachedPlaces(), cachedTrips(), cachedFolders()]);
+  await ensureHome();
+  if (S.me === undefined) S.me = await api('/v1/me').catch(() => null);
+  if (r.tab === 'saved') { // everything in one list (and the places from one Reel, from a notification)
+    return `${navbar('All places', { back: '#/library', backLabel: 'Library' })}<h1 class="largetitle" data-anchor>All places</h1>${await savedView(r)}`;
+  }
+  const saved = savedOnly(places);
+  const jobs = S.jobs.filter((j) => ACTIVE.has(j.status));
+  const head = `<div class="tophead end"><span class="tbtns">${roundBtn('add', 'plus', 'Save a place')}${profileBtn()}</span></div>
+    <div class="libtitle"><h1 data-anchor>Library</h1><a class="mapbtn" href="#/map">${ICON.map}Map</a></div>
+    <label class="lsearch">${ICON.search}<span class="vh">Search places, cities and lists</span>
+      <input type="search" data-act="libsearch" value="${esc(S.libq || '')}" placeholder="Places, cities, lists" autocomplete="off" enterkeyhint="search"></label>
+    ${visitSeg(saved)}`;
+  const empty = !saved.length && !realTrips(trips).length;
+  const body = empty ? emptyState('accent', 'bookmark', 'Nothing saved yet',
+    'Share a TikTok or Instagram Reel to The Travel Edit, paste a link, or search for a place. Places file themselves by city.',
+    `<button class="btn" data-act="add">${ICON.plus}Save a place</button><a class="linkbtn" href="#/profile">Set up the share button</a>`)
+    : `${jobs.length ? `<div class="section flush"><div class="group tiles">${jobs.map(jobRow).join('')}</div></div>` : ''}<div id="libmain">${libMain(saved, trips, folders)}</div>`;
+  return `<div class="page">${head}${body}</div>`;
+}
+
+/** Redraws the Library under the search box while typing. */
+function redrawLibMain() {
+  const box = document.getElementById('libmain');
+  if (!box || !S.places) return;
+  box.innerHTML = libMain(savedOnly(S.places), S.trips || [], S.folders || []);
+  hydrateIcons(box);
+}
+
+async function cityView(r) {
+  const [places, trips] = await Promise.all([cachedPlaces(), cachedTrips()]);
+  cachedFolders();
+  await ensureHome();
+  const name = r.id;
+  const home = !!(S.homeCity && cityKey(S.homeCity.city) === cityKey(name));
+  const all = savedOnly(places).filter((p) => p.city && cityKey(p.city) === cityKey(name));
+  const trip = home ? null : tripForCity(trips, name);
+  const title = home ? `Around ${name}` : name;
+  const openN = all.filter((p) => { const st = openStatus(p.opening_hours); return st && st.state === 'open'; }).length;
+  const sub = [plural(all.length, 'place'), home ? (openN ? `${openN} open now` : '') : trip ? (tripRange(trip) ? `trip ${tripRange(trip)}` : `on ${trip.name}`) : 'your wishlist, no trip yet'].filter(Boolean).join(' · ');
+  const scope = `city:${cityKey(name)}`;
+  const shown = byVisit(all);
+  const head = `${navbar(title, { back: '#/library', backLabel: 'Library', right: `<a class="gbtn" href="#/map" aria-label="Map">${ICON.map}</a>` })}
+    ${home ? '<div class="eyebrow pad">Your city</div>' : ''}<h1 class="largetitle" data-anchor>${esc(title)}</h1>
+    <div class="subtitle"><span>${esc(sub)}</span></div>
+    <div class="page tight">${trip ? tripRowHtml(trip) : (!home && all.length ? `<button class="btn wide" data-act="citytrip" data-city="${esc(name)}">${ICON.plane}Plan a trip to ${esc(name)}</button>` : '')}
+    ${visitSeg(all)}</div>`;
+  if (!all.length) return head + emptyState('gray', 'pin', 'Nothing here yet', `Places you save in ${esc(name)} land here automatically.`);
+  return `${head}${libControls(scope, shown)}<div id="libbody" data-scope="${esc(scope)}">${libList(scope, shown)}</div>${selBar()}`;
+}
+
 const VIEWS = {
   async folder(r) { return folderView(r); },
 
@@ -1899,25 +2418,11 @@ const VIEWS = {
 
   async discover() { return discoverView(); },
 
-  async trips(r) {
-    if (r.tab) S.home.tab = r.tab;
-    const head = `${rootNav('Library', { right: addButton })}<h1 class="largetitle" data-anchor>Library</h1>${homeSwitch()}`;
-    const inflightJobs = S.jobs.filter((j) => ACTIVE.has(j.status));
-    const jobs = inflightJobs.length ? `<div class="section"><div class="group tiles">${inflightJobs.map(jobRow).join('')}</div></div>` : '';
-    if (S.home.tab !== 'trips') return head + jobs + await savedView(r);
-    const trips = await cachedTrips();
-    const active = activeTrip(trips);
-    if (active && !S.trip[active.trip.id]) loadTrip(active.trip.id).then(() => render({ quiet: true })).catch(() => {});
-    const cta = `<button class="newtrip" data-act="newtrip">${tile('gold', 'plane', 'md')}<span class="main"><span class="t">Plan a new trip</span>
-      <span class="s">Pick a city and your saved places. AI can plan it, or build it yourself.</span></span>${ICON.chev}</button>`;
-    const body = trips.length ? `<div class="cards">${trips.map(tripCard).join('')}</div>`
-      : `<div class="section-f centered">Your trips appear here.</div>`;
-    return {
-      html: `${head}${active ? todayCard(active) : ''}<div class="section">${cta}</div>${tasteInvite()}${homeEdits(trips.length)}${body}`,
-      // Warm the cache so opening a trip is instant.
-      after: () => setTimeout(() => trips.slice(0, 8).forEach((t) => { if (!S.trip[t.id]) loadTrip(t.id).catch(() => {}); }), 400),
-    };
-  },
+  async home() { return homeView(); },
+
+  async trips(r) { return libraryView(r); },
+
+  async city(r) { return cityView(r); },
 
   async trip(r) {
     const trip = await cachedTrip(r.id);
@@ -1933,7 +2438,7 @@ const VIEWS = {
     })));
     const meta = [local ? 'Near home' : trip.country, plural(trip.places.length, 'place'), trip.day_count ? `${trip.day_count}-day plan` : ''].filter(Boolean).join(' · ');
     const cats = [...new Set(trip.places.map((p) => p.category))].sort((a, b) => CAT_ORDER.indexOf(a) - CAT_ORDER.indexOf(b));
-    const head = `${navbar(trip.name, { back: '#/', backLabel: 'Trips', right })}
+    const head = `${navbar(trip.name, { back: '#/library', backLabel: 'Library', right })}
       <h1 class="largetitle" data-anchor>${esc(trip.name)}</h1>
       <div class="subtitle"><span>${esc(meta)}</span><span class="tiles-inline" aria-hidden="true">${cats.slice(0, 6).map((c) => catTile(c, 'sm')).join('')}</span>
         ${trip.share_token ? `<button class="chip-shared" data-act="sharetrip" data-id="${trip.id}">${ICON.link}Shared</button>` : ''}</div>${seg}`;
@@ -1979,7 +2484,7 @@ const VIEWS = {
   async today(r) {
     const trip = await cachedTrip(r.id);
     const active = activeTrip([trip]);
-    const head = (title) => navbar(title, { back: '#/', backLabel: 'Trips',
+    const head = (title) => navbar(title, { back: '#/library', backLabel: 'Library',
       right: `<a class="gbtn" href="#/trip/${trip.id}/itinerary" aria-label="Full itinerary">${ICON.calendar}</a>` });
     if (!trip.day_count) {
       return `${head(trip.name)}<h1 class="largetitle" data-anchor>${esc(trip.name)}</h1>
@@ -2039,7 +2544,6 @@ const VIEWS = {
       p = d.place; reels = d.reels;
     }
     const trip = p.trip_id && inTrip ? inTrip : { id: null, name: 'Library', city: p.city, bookings: [], day_count: 0, places: [p], reels };
-    const links = mapsLinks(p, trip);
     const isLocated = located(p);
     const photos = p.photos || [];
     const pages = photos.map((ph, i) => `<button class="gimg" data-act="viewphoto" data-id="${p.id}" data-index="${i}" aria-label="Open photo ${i + 1} of ${photos.length}">
@@ -2052,25 +2556,7 @@ const VIEWS = {
         ${pageCount > 1 ? `<div class="dots" aria-hidden="true">${Array.from({ length: pageCount }, (_, i) => `<i class="${i ? '' : 'on'}"></i>`).join('')}</div>` : ''}</div>` : '';
     const st = openStatus(p.opening_hours);
 
-    const dayRows = trip.day_count ? `
-      <div class="row">${tile('red', 'calendar')}<label class="main" for="day-select"><span class="t">Day</span></label>
-        <select class="select" id="day-select" data-act="setday" data-id="${p.id}">
-          <option value="0">Not scheduled</option>
-          ${Array.from({ length: trip.day_count }, (_, i) => `<option value="${i + 1}" ${p.day_number === i + 1 ? 'selected' : ''}>Day ${i + 1}</option>`).join('')}
-        </select></div>
-      <div class="row">${tile('indigo', 'clock')}<label class="main" for="tod-select"><span class="t">Time</span></label>
-        <select class="select" id="tod-select" data-act="settod" data-id="${p.id}">
-          <option value="">Any time</option>
-          ${TODS.map((x) => `<option value="${x}" ${p.time_of_day === x ? 'selected' : ''}>${cap(x)}</option>`).join('')}
-        </select></div>
-      <div class="row">${tile('orange', 'calendarPlus')}<label class="main" for="time-input"><span class="t">Exact time</span>
-          <span class="s">For a reservation or a tour</span></label>
-        <input class="datefield" type="time" id="time-input" data-act="settime" data-id="${p.id}" value="${esc(p.start_time || '')}">
-        ${p.start_time ? `<button class="linkbtn" data-act="cleartime" data-id="${p.id}" aria-label="Clear exact time">Clear</button>` : ''}</div>` : '';
-
-    const star = `<button class="gbtn star${p.must_do ? ' on' : ''}" data-act="star" data-id="${p.id}" aria-pressed="${p.must_do}" aria-label="${p.must_do ? 'Remove the star' : 'Star this place'}">${p.must_do ? ICON.star : ICON.starO}</button>`;
     const hasMenu = MENU_CATS.has(p.category);
-    const canReserve = !!safeUrl(p.reserve_url) && !(trip.bookings || []).some((b) => b.place_id === p.id && b.kind === 'reservation');
     if (hasMenu && p.website && !p.reserve_checked_at && !S.reserveTried[p.id]) {
       S.reserveTried[p.id] = true; // look for the restaurant's Resy or OpenTable page once, in the background
       api(`/v1/places/${p.id}/reserve-link`, { method: 'POST' }).then((fresh) => {
@@ -2079,81 +2565,52 @@ const VIEWS = {
         render({ quiet: true });
       }).catch(() => {});
     }
-    const mode = hasMenu && r.mode === 'menu' ? 'menu' : 'overview';
-    const tabs = hasMenu ? segControl(`pseg:${p.id}`, [['overview', 'Overview'], ['menu', 'Menu']].map(([m, label]) => ({
-      on: m === mode,
-      html: `<a href="${placeHref(p, m === 'menu' ? '/menu' : '')}" class="${m === mode ? 'on' : ''}" ${m === mode ? 'aria-current="page"' : ''}>${label}</a>`,
-    }))) : '';
-    const head = `${navbar(p.name, { back: trip.id ? `#/trip/${trip.id}` : '#/', backLabel: trip.name, right: star })}
-      ${mode === 'menu' ? '' : hero}
-      <div class="ph" style="${cvar(p.category)}">
-        <span class="cat">${catTile(p.category, 'sm')}${CATS[p.category]}</span>
-        <h1 data-anchor>${esc(p.name)}${isNew(p)}</h1>
-        <span class="loc">${esc([p.neighborhood, p.city].filter(Boolean).join(' · '))}</span>
-        ${p.must_do ? `<span class="mustline">${ICON.star}Starred: first in your lists, and the planner always fits it in</span>` : ''}
-        ${p.booking_need && NEED_LABEL[p.booking_kind] ? `<span class="needline">${needChip(p)}${p.booking_note ? ` ${esc(p.booking_note)}` : ''}</span>` : ''}
-        ${p.mention_count >= 2 ? `<span class="hotline">${ICON.flame}Recommended in ${p.mention_count} of your saved reels</span>` : ''}
-        ${st ? `<span class="status hours-${st.state}">${esc(st.label)}</span>` : ''}
-        ${p.resolved_name ? `<span class="s">On maps as ${esc(p.resolved_name)}</span>` : ''}
-        ${p.confidence === 'low' ? '<span class="flag">The name was hard to make out in the reel; double-check it.</span>' : ''}
-      </div>
-      ${tabs ? `<div class="ptabs">${tabs}</div>` : ''}`;
+    // The trip this place is on (opened from the Library it's the first one), for its day, time and reservation.
+    let slotTrip = trip.id ? trip : null;
+    if (!slotTrip) {
+      const member = realTrips(S.trips || []).find((t) => (p.trip_ids || []).includes(t.id));
+      if (member) {
+        slotTrip = S.trip[member.id] || null;
+        if (!slotTrip) loadTrip(member.id).then(() => render({ quiet: true })).catch(() => {});
+      }
+    }
+    const back = trip.id ? `#/trip/${trip.id}` : '#/library';
+    const right = `<span class="gcluster"><button class="gbtn" data-act="shareplace" data-id="${p.id}" aria-label="Share">${ICON.share}</button>
+      <button class="gbtn" data-act="placemore" data-id="${p.id}" data-trip="${slotTrip ? slotTrip.id : ''}" aria-label="More: star, lists, wrong pin, remove from trip, delete">${ICON.more}</button></span>`;
+    if (r.mode === 'menu' && hasMenu) {
+      return { html: `${navbar(`${p.name} menu`, { back: placeHref(p), backLabel: p.name })}<h1 class="largetitle" data-anchor>Menu</h1>
+        <div class="subtitle"><span>${esc(p.name)}</span></div>${await menuSection(p)}` };
+    }
     const after = () => { if (isLocated) renderMap($('#mini-map'), [p], { interactive: false, zoom: 15 }); };
-    if (mode === 'menu') return { html: head + await menuSection(p) };
-    const html = `${head}
-      ${p.summary ? `<p class="para">${esc(p.summary)}</p>` : ''}
-
-      <div class="quick"${canReserve ? ' style="grid-template-columns:repeat(4,1fr)"' : ''}>
-        ${canReserve ? `<a class="qbtn qreserve" href="${esc(p.reserve_url)}" target="_blank" rel="noopener" data-reserve="${p.id}" data-act="link">${tile('gold', 'calendarPlus')}Reserve</a>` : ''}
-        <a class="qbtn" href="${esc(links.apple)}" target="_blank" rel="noopener">${tile('green', 'map')}Apple Maps</a>
-        <a class="qbtn" href="${esc(links.google)}" target="_blank" rel="noopener">${tile('blue', 'globe')}Google Maps</a>
-        <button class="qbtn" data-act="directions" data-id="${p.id}">${tile('orange', 'route')}Directions</button>
-      </div>
-
-      ${librarySection(p, trip)}
-      ${eventWhen(p)}
-      ${reservationSection(p, trip)}
-
-      ${isLocated ? '' : `<div class="section"><div class="section-h">Not on the map yet</div><div class="group">
-        <form class="row" data-form="locate" data-id="${p.id}"><span class="inline-form">
-          <input class="field" id="locate-q" name="q" placeholder="Search, e.g. ${esc(p.name)}, ${esc(p.city)}" value="${esc(`${p.name}, ${p.neighborhood ? `${p.neighborhood}, ` : ''}${p.city}`)}" autocomplete="off">
-          <button class="btn small" type="submit">Find</button></span></form>
-        </div><div class="section-f">Add a street or neighborhood if the first search didn’t find it.</div></div>`}
-
-      ${hoursSection(p)}
-      ${gettingThere(p)}
-
-      ${(p.recommended_items.length || p.tips || p.price_hint) ? `<div class="section"><div class="section-h">From the reel</div><div class="group tiles">
-        ${p.recommended_items.map((i) => `<div class="row"><span class="tile" style="--pc:#FFCC00">${ICON.star}</span><span class="main"><span class="t">${esc(i)}</span></span></div>`).join('')}
-        ${p.price_hint ? `<div class="row">${tile('green', 'tag')}<span class="main"><span class="s">Price</span><span class="t">${esc(p.price_hint)}</span></span></div>` : ''}
-        ${p.tips ? `<div class="row">${tile('pink', 'sparkle')}<span class="main"><span class="s">Tip</span><span class="t">${esc(p.tips)}</span></span></div>` : ''}
-      </div></div>` : ''}
-
-      <div class="section"><div class="section-h">Details</div><div class="group tiles">
-        ${contactRows(p)}
-        ${p.address ? `<div class="row">${tile('gray', 'pin')}<span class="main"><span class="s">Address</span><span class="t">${esc(p.address)}</span></span></div>` : ''}
-        <label class="row" for="visited-toggle">${tile('green', 'done')}<span class="main"><span class="t">Visited</span></span>
-          <input class="switch" type="checkbox" id="visited-toggle" data-act="visited" data-id="${p.id}" ${p.visited ? 'checked' : ''}></label>
-        ${dayRows}
-        <div class="row">${catTile(p.category)}<label class="main" for="cat-select"><span class="t">Category</span></label>
-          <select class="select" id="cat-select" data-act="setcat" data-id="${p.id}">
-            ${CAT_ORDER.map((c) => `<option value="${c}" ${p.category === c ? 'selected' : ''}>${CATS[c]}</option>`).join('')}
-          </select></div>
-        ${isLocated ? `<button class="row" data-act="relocate" data-id="${p.id}">${tile('teal', 'locate')}<span class="main"><span class="t link">Wrong pin? Search again</span></span></button>` : ''}
-      </div></div>
-
-      <div class="section"><div class="section-h">My notes</div><div class="group"><div class="row">
-        <textarea class="notes" id="notes" data-act="notes" data-id="${p.id}" placeholder="Add a note" rows="3" aria-label="My notes">${esc(p.user_notes)}</textarea>
-      </div></div></div>
-
-      ${reels.length ? `<div class="section"><div class="section-h">Saved from</div><div class="group tiles">${reels.map((reel) => `
-        ${safeUrl(reel.url) ? `<a class="row" href="${esc(reel.url)}" target="_blank" rel="noopener">` : '<div class="row">'}
-        ${platformTile(platformOf(reel.platform || reel.url))}
-        <span class="main"><span class="t">${esc(reel.title)}</span>
-        <span class="s">${esc([platformName(reel.platform), reel.creator ? `@${reel.creator}` : ''].filter(Boolean).join(' · '))}</span></span>
-        ${safeUrl(reel.url) ? `${ICON.chev}</a>` : '</div>'}`).join('')}</div></div>` : ''}
-
-      <div class="section"><div class="group"><button class="row destructive" data-act="askdeleteplace" data-id="${p.id}" data-trip="${trip.id || ''}">Delete place</button></div></div>`;
+    const html = `${navbar(p.name, { back, backLabel: trip.id ? trip.name : 'Library', right })}
+      ${hero}
+      <div class="pg">
+        <span class="eyebrow quiet">${esc([CATS[p.category], p.must_do ? 'Starred' : ''].filter(Boolean).join(' · '))}</span>
+        <h1 class="pname" data-anchor>${esc(p.name)}${isNew(p)}</h1>
+        ${p.neighborhood || p.city ? `<span class="ploc">${esc([p.neighborhood, p.city].filter(Boolean).join(', '))}</span>` : ''}
+        ${statusLine(p, st)}
+        ${p.resolved_name ? `<span class="pnote">On maps as ${esc(p.resolved_name)}</span>` : ''}
+        ${p.confidence === 'low' ? '<span class="pnote attn">The name was hard to make out in the Reel; double-check it.</span>' : ''}
+        ${p.suggested && trip.id ? `<div class="pcard sugg">${ICON.sparkle}<span class="m"><span class="t">Suggested for this trip</span>
+          <span class="s">${esc(p.suggestion_note || 'Added by AI to fill a quiet day')}</span></span>
+          <button class="tbtn" data-act="keepsugg" data-trip="${trip.id}" data-id="${p.id}">Keep</button></div>` : ''}
+        <div class="visitseg two" role="group" aria-label="Status">
+          <button data-act="pvisit" data-id="${p.id}" data-v="0" aria-pressed="${!p.visited}" class="${p.visited ? '' : 'on'}">${ICON.bookmark}Want to go</button>
+          <button data-act="pvisit" data-id="${p.id}" data-v="1" aria-pressed="${p.visited}" class="${p.visited ? 'on' : ''}">${ICON.check}Been here</button></div>
+        ${whySaved(p, reels)}
+        ${mainAction(p, slotTrip)}
+        ${quietActions(p, slotTrip)}
+        ${eventWhen(p)}
+        ${slotTrip && slotTrip.kind !== 'local' ? tripSlot(p, slotTrip) : ''}
+        ${isLocated ? '' : `<h2 class="h2 small">Not on the map yet</h2><div class="group">
+          <form class="row" data-form="locate" data-id="${p.id}"><span class="inline-form">
+            <input class="field" id="locate-q" name="q" placeholder="Search, e.g. ${esc(p.name)}, ${esc(p.city)}" value="${esc(`${p.name}, ${p.neighborhood ? `${p.neighborhood}, ` : ''}${p.city}`)}" autocomplete="off">
+            <button class="btn small" type="submit">Find</button></span></form></div>`}
+        ${goodToKnow(p)}
+        ${detailsBlock(p)}
+        ${gettingThere(p)}
+        ${organizeBlock(p)}
+      </div>`;
     return { html, after };
   },
 
@@ -2287,7 +2744,8 @@ const VIEWS = {
     const chips = `<div class="mapchips top">${groups.map((g) =>
       `<button class="mapchip ${S.mapTrip === g.id ? 'on' : ''}" data-act="maptrip" data-id="${g.id}" aria-pressed="${S.mapTrip === g.id}">${g.folder ? ICON.folder : ''}${esc(g.name)} · ${g.n}</button>`).join('')}</div>`;
     return {
-      html: `<h1 class="vh">All places</h1><div class="map fill"><div id="all-map" style="position:absolute;inset:0"></div>${groups.length > 1 ? chips : ''}
+      html: `<h1 class="vh">All places</h1><div class="map fill"><div id="all-map" style="position:absolute;inset:0"></div>
+        <a class="gbtn mapback" href="#/library" data-act="back" data-fallback="#/library" aria-label="Back to Library">${ICON.back}</a>${groups.length > 1 ? chips : ''}
         ${!places.length ? '<div class="mapnote">No places yet. Share a reel to start.</div>' : ''}</div>`,
       after: () => renderMap($('#all-map'), shown, { popup: popupHtml, newIds: S.newIds, pad: { top: 90, bottom: 120 } }),
     };
@@ -4080,12 +4538,30 @@ async function onAction(act, el) {
         { label: 'Delete folder', destructive: true, run: () => openSheet({ type: 'actions', title: `Delete “${fo.name}”? Its places stay saved.`, actions: [
           { label: 'Delete folder', destructive: true, run: async () => {
             await api(`/v1/folders/${fo.id}`, { method: 'DELETE' });
-            await afterLibraryChange(); toast('Folder deleted'); go('#/');
+            await afterLibraryChange(); toast('List deleted'); go('#/library');
           } }] }) },
       ] });
       return;
     }
     case 'newtrip': newTripSheet({ folderId: el.dataset.folder || null }); return;
+    case 'citytrip': {
+      const k = cityKey(el.dataset.city);
+      newTripSheet({ placeIds: savedOnly(S.places || []).filter((p) => p.city && cityKey(p.city) === k).map((p) => p.id) });
+      return;
+    }
+    case 'visit': try { localStorage.setItem('tripit.visit', el.dataset.v); } catch { /* per-visit only */ } render({ quiet: true }); return;
+    case 'allcities': S.allCities = !S.allCities; redrawLibMain(); return;
+    case 'shuffle': S.shuffle = (S.shuffle || 0) + 1; render({ quiet: true }); return;
+    case 'planweekend': {
+      const ids = el.dataset.ids.split(',').filter(Boolean);
+      const folders = S.folders || await loadFolders();
+      let fo = folders.find((f) => f.name.toLowerCase() === 'this weekend');
+      if (fo) await api(`/v1/folders/${fo.id}/places`, { method: 'POST', body: { place_ids: ids } });
+      else fo = await api('/v1/folders', { method: 'POST', body: { name: 'This weekend', place_ids: ids } });
+      await afterLibraryChange();
+      go(`#/folder/${fo.id}`);
+      return;
+    }
     case 'ntcity': S.sheet.st.city = el.dataset.city; renderOverlay(); return;
     case 'ntdays': { const { st } = S.sheet; st.days = Math.max(1, Math.min(21, st.days + Number(el.dataset.d))); renderOverlay(); return; }
     case 'ntmode': { const { st } = S.sheet; st.mode = el.dataset.m; st.step = 3; S.sheet.confirm = 'Create trip'; renderOverlay(); return; }
@@ -4521,6 +4997,48 @@ async function onAction(act, el) {
     case 'maptrip': S.mapTrip = el.dataset.id; render(); return;
 
     case 'visited': await patchPlace(el.dataset.id, { visited: el.checked }, false); return;
+    case 'pvisit': await patchPlace(el.dataset.id, { visited: el.dataset.v === '1' }); return;
+    case 'shownote': (S.noteOpen ||= {})[el.dataset.id] = true; await render({ quiet: true }); const n = $('#notes'); if (n) n.focus(); return;
+    case 'allhours': (S.allHours ||= {})[el.dataset.id] = !(S.allHours[el.dataset.id]); render({ quiet: true }); return;
+    case 'slotday': case 'slottod': case 'slottime': {
+      const v = el.value;
+      const body = el.dataset.act === 'slotday' ? { day_number: Number(v) }
+        : el.dataset.act === 'slottod' ? (v ? { time_of_day: v } : { clear_time_of_day: true })
+          : (v ? { start_time: v } : { clear_start_time: true });
+      const place = await api(`/v1/places/${el.dataset.id}`, { method: 'PATCH', body: { ...body, trip_id: el.dataset.trip } });
+      updatePlaceEverywhere(place);
+      await loadTrip(el.dataset.trip);
+      render({ quiet: true });
+      return;
+    }
+    case 'directionsmenu':
+      openSheet({ type: 'actions', title: 'Directions', actions: [
+        { label: 'Apple Maps', run: () => window.open(el.dataset.apple, '_blank', 'noopener') },
+        { label: 'Google Maps', run: () => window.open(el.dataset.google, '_blank', 'noopener') },
+      ] });
+      return;
+    case 'shareplace': {
+      const place = (S.places || []).find((x) => x.id === el.dataset.id) || (placeDetail[el.dataset.id] && placeDetail[el.dataset.id].place) || findAnyPlace(el.dataset.id);
+      const url = (place && safeUrl(place.maps_url)) || location.href;
+      if (navigator.share) { try { await navigator.share({ title: place ? place.name : 'Place', url }); } catch { /* cancelled */ } } else await copy(url);
+      return;
+    }
+    case 'placemore': {
+      const id = el.dataset.id;
+      const place = (S.places || []).find((x) => x.id === id) || (placeDetail[id] && placeDetail[id].place) || findAnyPlace(id);
+      if (!place) return;
+      const t = el.dataset.trip ? S.trip[el.dataset.trip] : null;
+      const actions = [
+        { label: place.must_do ? 'Remove star' : 'Star', run: async () => { await patchPlace(id, { must_do: !place.must_do }); toast(place.must_do ? 'Star removed' : 'Starred. It stays at the top of your lists'); } },
+        { label: 'Add to a trip…', run: () => placeTripsSheet(id) },
+        { label: 'Add to a list…', run: () => placeFoldersSheet(id) },
+        { label: located(place) ? 'Wrong pin? Search again' : 'Find on the map', run: () => onAction('relocate', { dataset: { id } }) },
+      ];
+      if (t && !place.suggested) actions.push({ label: `Remove from ${t.name}`, destructive: true, run: () => onAction('removefromtrip', { dataset: { trip: t.id, id } }) });
+      actions.push({ label: 'Delete place', destructive: true, run: () => onAction('askdeleteplace', { dataset: { id, trip: route().params.get('trip') || '' } }) });
+      openSheet({ type: 'actions', title: place.name, actions });
+      return;
+    }
     case 'setday': await patchPlace(el.dataset.id, { day_number: Number(el.value) }); return;
     case 'settod': await patchPlace(el.dataset.id, el.value ? { time_of_day: el.value } : { clear_time_of_day: true }); return;
     case 'setcat': await patchPlace(el.dataset.id, { category: el.value }); return;
@@ -4529,7 +5047,8 @@ async function onAction(act, el) {
       notesTimer = setTimeout(() => patchPlace(el.dataset.id, { user_notes: el.value }, false), 600);
       return;
     case 'relocate': {
-      const place = allPlaces().find((p) => p.id === el.dataset.id);
+      const place = allPlaces().find((p) => p.id === el.dataset.id) || (S.places || []).find((p) => p.id === el.dataset.id)
+        || (placeDetail[el.dataset.id] && placeDetail[el.dataset.id].place);
       openSheet({
         type: 'form', title: 'Search again', confirm: 'Find',
         body: () => `<div class="section"><div class="group"><div class="row"><input class="field" id="relocate-q" value="${esc(`${place.name}, ${place.city}`)}" aria-label="Search"></div></div>
@@ -4549,7 +5068,7 @@ async function onAction(act, el) {
           fetchedAt.trips = 0;
           await afterLibraryChange();
           toast('Place deleted');
-          go(el.dataset.trip ? `#/trip/${el.dataset.trip}` : '#/');
+          go(el.dataset.trip ? `#/trip/${el.dataset.trip}` : '#/library');
         } }],
       });
       return;
@@ -4747,6 +5266,7 @@ document.addEventListener('input', (ev) => {
   if (el.dataset && el.dataset.act === 'tidytext' && S.sheet && S.sheet.st) S.sheet.st.text = el.value;
   if (el.dataset && el.dataset.act === 'ntfield' && S.sheet && S.sheet.st) S.sheet.st[el.dataset.f] = el.value;
   if (el.dataset && el.dataset.act === 'libq') { libFilter(el.dataset.scope).q = el.value; redrawLibList(el.dataset.scope); }
+  if (el.dataset && el.dataset.act === 'libsearch') { S.libq = el.value; redrawLibMain(); }
   if (el.dataset && el.dataset.act === 'pkq' && S.sheet && S.sheet.st) {
     S.sheet.st.q = el.value;
     const box = document.getElementById('pklist');

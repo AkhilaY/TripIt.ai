@@ -138,8 +138,6 @@ struct HomeView: View {
             if p.bookingNeed == "required" {
                 Text(" · ").foregroundStyle(Theme.secondary)
                 Text(p.bookingKind == "tickets" ? "Tickets needed" : "Book ahead").fontWeight(.semibold).foregroundStyle(Theme.attention)
-            } else if p.bookingNeed == "none" {
-                Text(" · walk-in").foregroundStyle(Theme.secondary)
             }
         }
         .font(.footnote).lineLimit(1)
@@ -339,14 +337,10 @@ struct TripCover: View {
 enum WeekendPicks {
     struct Pick { let slot: String; let place: Place }
 
-    /// "24–25 Oct" for this weekend (or "25 Oct" on a Sunday).
+    /// "Oct 24–25" for this weekend (or just Sunday's date on a Sunday).
     static func label(now: Date = Date()) -> String {
         let (sat, sun) = days(now)
-        let d = DateFormatter(); d.setLocalizedDateFormatFromTemplate("d")
-        let dm = DateFormatter(); dm.setLocalizedDateFormatFromTemplate("d MMM")
-        guard let sat else { return dm.string(from: sun) }
-        return Calendar.current.component(.month, from: sat) == Calendar.current.component(.month, from: sun)
-            ? "\(d.string(from: sat))–\(dm.string(from: sun))" : "\(dm.string(from: sat)) – \(dm.string(from: sun))"
+        return Fmt.range(sat ?? sun, sun)
     }
 
     /// This weekend's Saturday (nil on a Sunday, when it's passed) and Sunday.

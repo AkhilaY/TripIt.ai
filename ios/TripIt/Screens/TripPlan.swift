@@ -52,7 +52,7 @@ struct TripPlan: View {
                 if let notes = trip.planNotes {
                     Text(notes).font(.subheadline).foregroundStyle(Theme.label)
                 }
-                if !trip.route.isEmpty { RouteStrip(stops: trip.route) { sheet = .route } }
+                if !trip.route.isEmpty { TripRouteStrip(stops: trip.route) { sheet = .route } }
             }
             ForEach(1...trip.dayCount, id: \.self) { day in
                 daySection(day)
@@ -336,7 +336,7 @@ struct StopRow: View {
 // MARK: - Multi-city pieces
 
 /// The trip's cities in a row, with how you travel between them. Tap to edit the route.
-struct RouteStrip: View {
+struct TripRouteStrip: View {
     let stops: [TripStop]
     let onEdit: () -> Void
 

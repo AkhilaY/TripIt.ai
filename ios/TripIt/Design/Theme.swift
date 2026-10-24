@@ -1,53 +1,71 @@
 import SwiftUI
 import UIKit
 
-/// TripIt's look: sand and espresso, a serif for display type, colour mostly from photos.
-/// Same palette as the web app (backend/app/static/styles.css), on standard iOS components.
+/// The Travel Edit's look: warm ivory by day, deep espresso at night, one serif (Newsreader) for display type,
+/// one-colour icons, and colour only for status: green means open, coral means it needs your attention.
+/// Same palette as the web app (backend/app/static/styles.css).
 enum Theme {
-    static let accent = dynamic(0x2B2019, 0xEADFCF)  // espresso: buttons and active states
-    static let accentInk = dynamic(0xFBF7F1, 0x17110D)  // text on the accent
-    static let gold = dynamic(0xA07A50, 0xC9A47A)
-    static let link = dynamic(0x84603C, 0xD3B08A)
-    static let background = dynamic(0xF1EBE2, 0x15100C)
-    static let cell = dynamic(0xFBF8F3, 0x211A14)
-    static let label = dynamic(0x2B2019, 0xF0E7DA)
-    static let secondary = dynamic(0x7A6A5B, 0xA69684)
-    static let tertiary = dynamic(0xB3A493, 0x6A5C4F)
-    static let fill = Color(uiColor: UIColor { $0.userInterfaceStyle == .dark
-        ? UIColor(red: 240 / 255, green: 231 / 255, blue: 218 / 255, alpha: 0.08)
-        : UIColor(red: 43 / 255, green: 32 / 255, blue: 25 / 255, alpha: 0.06) })
-    static let danger = dynamic(0xA4473C, 0xD27A6E)
-    static let ok = dynamic(0x5D7B53, 0x93B087)
-    static let warn = dynamic(0xA9762E, 0xD4A15A)
+    static let accent = dynamic(0x84652F, 0xC9A46A)  // gold: the main button and active states
+    static let accentInk = dynamic(0xFFFDF9, 0x13100D)  // text on the accent
+    static let gold = accent
+    static let link = accent
+    static let background = dynamic(0xF6F1E9, 0x13100D)
+    static let cell = dynamic(0xFFFDF9, 0x1E1A16)  // cards
+    static let border = dynamic(0xE6DDCF, 0x2E2822)
+    static let raised = dynamic(0xEFE8DC, 0x2A241E)  // quiet buttons and tiles
+    static let raisedBorder = dynamic(0xDDD3C3, 0x3A322A)
+    static let divider = dynamic(0xE6DDCF, 0x2A241E)
+    static let label = dynamic(0x1C1813, 0xF2EBE0)
+    static let secondary = dynamic(0x6E6458, 0xA89D8F)
+    static let tertiary = dynamic(0x776C60, 0x958A7E)
+    static let quiet = dynamic(0xA39889, 0x6B6157)
+    static let fill = raised
 
-    static let blue = dynamic(0x557189, 0x86A2BA)
-    static let green = dynamic(0x5D7B53, 0x93B087)
-    static let orange = dynamic(0xA9762E, 0xD4A15A)
-    static let indigo = dynamic(0x5E5A7E, 0x9C97C0)
-    static let teal = dynamic(0x5B827C, 0x86AFA8)
-    static let gray = dynamic(0x8A7F73, 0xA99D90)
-    static let red = dynamic(0xA4473C, 0xD27A6E)
-    static let pink = dynamic(0xB2707A, 0xC98C95)
+    // Status
+    static let open = dynamic(0x4A6B3E, 0xA3BE8C)
+    static let attention = dynamic(0xA14F37, 0xE59C7F)
+    static let ok = open
+    static let warn = attention
+    static let danger = attention
 
-    /// Display type: the system serif (New York), like the web app's Cormorant headings.
-    static func serif(_ size: CGFloat, weight: Font.Weight = .semibold) -> Font {
-        .system(size: size, weight: weight, design: .serif)
+    // Older names: icons are one colour now, so these are the quiet ink, except the status ones.
+    static let blue = secondary
+    static let indigo = secondary
+    static let teal = secondary
+    static let gray = secondary
+    static let pink = secondary
+    static let green = open
+    static let orange = attention
+    static let red = attention
+
+    /// Display type: Newsreader (bundled), falling back to the system serif.
+    static func serif(_ size: CGFloat, weight: Font.Weight = .medium) -> Font {
+        hasNewsreader ? Font.custom("Newsreader", size: size).weight(weight) : Font.system(size: size, weight: weight, design: .serif)
+    }
+
+    static let hasNewsreader = UIFont(name: "Newsreader", size: 12) != nil
+        || UIFont.fontNames(forFamilyName: "Newsreader").isEmpty == false
+
+    static func uiSerif(_ size: CGFloat, weight: UIFont.Weight = .medium) -> UIFont {
+        if hasNewsreader {
+            let descriptor = UIFontDescriptor(fontAttributes: [.family: "Newsreader", .traits: [UIFontDescriptor.TraitKey.weight: weight]])
+            return UIFont(descriptor: descriptor, size: size)
+        }
+        let serif = UIFontDescriptor.preferredFontDescriptor(withTextStyle: .body).withDesign(.serif)!
+        return UIFont(descriptor: serif.addingAttributes([.traits: [UIFontDescriptor.TraitKey.weight: weight]]), size: size)
     }
 
     static func dynamic(_ light: UInt32, _ dark: UInt32) -> Color {
         Color(uiColor: UIColor { $0.userInterfaceStyle == .dark ? UIColor(hex: dark) : UIColor(hex: light) })
     }
 
-    /// Navigation and tab bars in the TripIt fonts and colours.
+    /// Navigation and tab bars in the app's fonts and colours.
     static func applyAppearance() {
-        let serif = UIFontDescriptor.preferredFontDescriptor(withTextStyle: .largeTitle).withDesign(.serif)!
-        let large = UIFont(descriptor: serif.withSymbolicTraits(.traitBold) ?? serif, size: 34)
-        let small = UIFont(descriptor: serif.withSymbolicTraits(.traitBold) ?? serif, size: 19)
         let nav = UINavigationBarAppearance()
         nav.configureWithDefaultBackground()
         nav.backgroundEffect = UIBlurEffect(style: .systemChromeMaterial)
-        nav.largeTitleTextAttributes = [.font: large, .foregroundColor: UIColor(Theme.label)]
-        nav.titleTextAttributes = [.font: small, .foregroundColor: UIColor(Theme.label)]
+        nav.largeTitleTextAttributes = [.font: uiSerif(36), .foregroundColor: UIColor(Theme.label)]
+        nav.titleTextAttributes = [.font: uiSerif(19, weight: .semibold), .foregroundColor: UIColor(Theme.label)]
         let scrollEdge = UINavigationBarAppearance()
         scrollEdge.configureWithTransparentBackground()
         scrollEdge.largeTitleTextAttributes = nav.largeTitleTextAttributes
@@ -75,14 +93,14 @@ enum Category: String, CaseIterable, Identifiable {
 
     var label: String {
         switch self {
-        case .food: "Food"
-        case .cafe: "Cafés"
+        case .food: "Restaurant"
+        case .cafe: "Café"
         case .dessert: "Sweets"
-        case .drinks: "Drinks"
+        case .drinks: "Bar"
         case .nightlife: "Nightlife"
-        case .attraction: "Sights"
+        case .attraction: "Sight"
         case .activity: "Things to do"
-        case .event: "Events"
+        case .event: "Event"
         case .nature: "Outdoors"
         case .shopping: "Shopping"
         case .stay: "Stay"
@@ -107,22 +125,8 @@ enum Category: String, CaseIterable, Identifiable {
         }
     }
 
-    var color: Color {
-        switch self {
-        case .food: Theme.dynamic(0xB0644A, 0xC98063)
-        case .cafe: Theme.dynamic(0x8A6A4E, 0xAD8C6E)
-        case .dessert: Theme.dynamic(0xB2707A, 0xC98C95)
-        case .drinks: Theme.dynamic(0x7E5B78, 0xA383A0)
-        case .nightlife: Theme.dynamic(0x4F5878, 0x8590B4)
-        case .attraction: Theme.dynamic(0x557189, 0x86A2BA)
-        case .activity: Theme.dynamic(0x5B827C, 0x86AFA8)
-        case .event: Theme.dynamic(0xA4537C, 0xD08AB0)
-        case .nature: Theme.dynamic(0x6C875B, 0x97B084)
-        case .shopping: Theme.dynamic(0x8E8455, 0xB5AB7C)
-        case .stay: Theme.dynamic(0x6A869C, 0x96B0C4)
-        case .other: Theme.dynamic(0x8A7F73, 0xA99D90)
-        }
-    }
+    /// Icons are one colour; categories are told apart by their symbol.
+    var color: Color { Theme.accent }
 
     /// Places that get a menu (and a Reserve button when the restaurant takes bookings online).
     var hasMenu: Bool { [.food, .cafe, .dessert, .drinks, .nightlife].contains(self) }

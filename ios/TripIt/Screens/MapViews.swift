@@ -85,7 +85,7 @@ struct TripMapView: View {
     }
 }
 
-/// The Map tab: everything you've saved, filtered by kind.
+/// Your saved places on a map, filtered by kind (the Map button in the Library).
 struct MapTab: View {
     @Environment(Store.self) private var store
     @State private var groups = Set<PlaceGroup>()
@@ -112,7 +112,6 @@ struct MapTab: View {
             }
             .navigationTitle("Map")
             .navigationBarTitleDisplayMode(.inline)
-            .rootToolbar()
             .onAppear { Location.shared.request() }
     }
 }

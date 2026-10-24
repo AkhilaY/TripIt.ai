@@ -61,24 +61,21 @@ struct CategoryTile: View {
     var size: CGFloat = 30
 
     var body: some View {
-        RoundedRectangle(cornerRadius: size * 0.28, style: .continuous)
-            .fill(category.color)
-            .frame(width: size, height: size)
-            .overlay(Image(systemName: category.symbol).font(.system(size: size * 0.46, weight: .semibold)).foregroundStyle(.white))
+        SymbolTile(symbol: category.symbol, size: size)
     }
 }
 
-/// A coloured square with a symbol, for list rows (like the web app's tiles).
+/// A quiet square with a one-colour symbol, for list rows. (The colour argument is kept for older callers.)
 struct SymbolTile: View {
     let symbol: String
     var color: Color = Theme.gray
     var size: CGFloat = 30
 
     var body: some View {
-        RoundedRectangle(cornerRadius: size * 0.28, style: .continuous)
-            .fill(color)
+        RoundedRectangle(cornerRadius: size * 0.3, style: .continuous)
+            .fill(Theme.raised)
             .frame(width: size, height: size)
-            .overlay(Image(systemName: symbol).font(.system(size: size * 0.46, weight: .semibold)).foregroundStyle(.white))
+            .overlay(Image(systemName: symbol).font(.system(size: size * 0.44, weight: .medium)).foregroundStyle(Theme.label))
     }
 }
 
@@ -90,12 +87,12 @@ struct PlaceThumb: View {
         let category = Category(place.category)
         RemoteImage(url: place.photos.first?.url(width: Int(size * 3))) {
             ZStack {
-                category.color.opacity(0.18)
-                Image(systemName: category.symbol).font(.system(size: size * 0.36, weight: .semibold)).foregroundStyle(category.color)
+                Theme.raised
+                Image(systemName: category.symbol).font(.system(size: size * 0.36, weight: .medium)).foregroundStyle(Theme.secondary)
             }
         }
         .frame(width: size, height: size)
-        .clipShape(RoundedRectangle(cornerRadius: size * 0.22, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: min(size * 0.25, 16), style: .continuous))
     }
 }
 
@@ -162,19 +159,19 @@ struct PlaceRow: View {
     private var chipItems: [ChipItem] {
         var out: [ChipItem] = []
         if Category(place.category) == .event {
-            out.append(ChipItem(text: place.eventDate.map(Fmt.shortDay) ?? "Date TBC", symbol: "calendar", color: Category.event.color))
+            out.append(ChipItem(text: place.eventDate.map(Fmt.shortDay) ?? "Date TBC", symbol: "calendar", color: Theme.secondary))
         }
-        if place.suggested { out.append(ChipItem(text: "Suggested", symbol: "sparkles", color: Theme.gold)) }
+        if place.suggested { out.append(ChipItem(text: "Suggested", symbol: "sparkles", color: Theme.accent)) }
         if place.bookingNeed == "required" {
             out.append(ChipItem(text: place.bookingKind == "tickets" ? "Tickets needed" : "Book ahead", symbol: nil, color: Theme.warn))
         }
         if let rating = place.rating {
             let count = place.ratingCount.map { " (\(Fmt.count($0)))" } ?? ""
-            out.append(ChipItem(text: String(format: "%.1f", rating) + count, symbol: "star.fill", color: Theme.gold))
+            out.append(ChipItem(text: String(format: "%.1f", rating) + count, symbol: "star.fill", color: Theme.secondary))
         }
-        if place.mentionCount >= 2 { out.append(ChipItem(text: "\(place.mentionCount) reels", symbol: "flame.fill", color: Theme.orange)) }
-        if showDay, let day = place.dayNumber { out.append(ChipItem(text: "Day \(day)", symbol: nil, color: Theme.indigo)) }
-        if let distance { out.append(ChipItem(text: Fmt.distance(distance) + " away", symbol: "location.fill", color: Theme.blue)) }
+        if place.mentionCount >= 2 { out.append(ChipItem(text: "\(place.mentionCount) Reels", symbol: nil, color: Theme.secondary)) }
+        if showDay, let day = place.dayNumber { out.append(ChipItem(text: "Day \(day)", symbol: nil, color: Theme.secondary)) }
+        if let distance { out.append(ChipItem(text: Fmt.distance(distance), symbol: nil, color: Theme.secondary)) }
         return out
     }
 }
@@ -190,8 +187,8 @@ struct Chip: View {
             Text(text).font(.caption.weight(.semibold)).lineLimit(1)
         }
         .foregroundStyle(color)
-        .padding(.horizontal, 6).padding(.vertical, 2)
-        .background(color.opacity(0.12), in: Capsule())
+        .padding(.horizontal, 7).padding(.vertical, 2)
+        .background(Theme.raised, in: Capsule())
     }
 }
 
@@ -211,9 +208,9 @@ struct FilterChip: View {
                 if let count { Text("\(count)").font(.caption.weight(.semibold)).opacity(0.6) }
             }
             .padding(.horizontal, 12).padding(.vertical, 7)
-            .foregroundStyle(isOn ? Theme.accentInk : Theme.label)
-            .background(isOn ? Theme.accent : Theme.cell, in: Capsule())
-            .overlay(Capsule().strokeBorder(Theme.fill, lineWidth: isOn ? 0 : 1))
+            .foregroundStyle(isOn ? Theme.background : Theme.label)
+            .background(isOn ? Theme.label : Theme.cell, in: Capsule())
+            .overlay(Capsule().strokeBorder(Theme.border, lineWidth: isOn ? 0 : 1))
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(isOn ? .isSelected : [])
@@ -222,16 +219,84 @@ struct FilterChip: View {
 
 // MARK: - Buttons, empty states, toasts
 
+/// The one main action on a screen (gold), or with `tinted` a quiet one.
 struct PrimaryButtonStyle: ButtonStyle {
     var tinted = false
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.body.weight(.semibold))
-            .padding(.horizontal, 20).padding(.vertical, 13)
-            .frame(maxWidth: .infinity)
-            .foregroundStyle(tinted ? Theme.accent : Theme.accentInk)
-            .background(tinted ? Theme.fill : Theme.accent, in: Capsule())
+            .padding(.horizontal, 20)
+            .frame(maxWidth: .infinity, minHeight: 50)
+            .foregroundStyle(tinted ? Theme.label : Theme.accentInk)
+            .background(tinted ? Theme.raised : Theme.accent, in: RoundedRectangle(cornerRadius: 15, style: .continuous))
+            .overlay {
+                if tinted { RoundedRectangle(cornerRadius: 15, style: .continuous).strokeBorder(Theme.raisedBorder) }
+            }
             .opacity(configuration.isPressed ? 0.75 : 1)
+    }
+}
+
+/// A quiet square button with an icon over its label (Directions, Menu, Call, Website).
+struct QuietTileLabel: View {
+    let symbol: String
+    let title: String
+
+    var body: some View {
+        VStack(spacing: 6) {
+            Image(systemName: symbol).font(.system(size: 18, weight: .regular))
+            Text(title).font(.caption.weight(.medium)).lineLimit(1).minimumScaleFactor(0.8)
+        }
+        .foregroundStyle(Theme.label)
+        .frame(maxWidth: .infinity, minHeight: 64)
+        .background(Theme.cell, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Theme.border))
+    }
+}
+
+/// Small caps above a heading ("THIS WEEKEND · 24–25 OCT").
+struct Eyebrow: View {
+    let text: String
+    var color: Color = Theme.accent
+    var body: some View {
+        Text(text.uppercased()).font(.system(size: 11, weight: .semibold)).kerning(1.6).foregroundStyle(color)
+    }
+}
+
+/// A section heading in the serif, with an optional action on the right.
+struct SectionHeading<Trailing: View>: View {
+    let title: String
+    var size: CGFloat = 24
+    @ViewBuilder var trailing: () -> Trailing
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(title).font(Theme.serif(size)).foregroundStyle(Theme.label)
+            Spacer(minLength: 8)
+            trailing()
+        }
+        .frame(minHeight: 44)
+    }
+}
+
+extension SectionHeading where Trailing == EmptyView {
+    init(_ title: String, size: CGFloat = 24) { self.init(title: title, size: size) { EmptyView() } }
+}
+
+/// A text button in the accent colour with a symbol ("+ New trip").
+struct AccentTextButton: View {
+    let title: String
+    var symbol: String? = "plus"
+    let action: () -> Void
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 5) {
+                if let symbol { Image(systemName: symbol).font(.subheadline.weight(.semibold)) }
+                Text(title).font(.subheadline.weight(.semibold))
+            }
+            .foregroundStyle(Theme.accent)
+            .frame(minHeight: 44)
+        }
+        .buttonStyle(.plain)
     }
 }
 
@@ -297,12 +362,45 @@ struct ToastOverlay: ViewModifier {
     }
 }
 
-/// A rounded section like the web app's grouped lists.
+/// A rounded card with a hairline border.
 struct Card<Content: View>: View {
+    var radius: CGFloat = 20
+    var padding: CGFloat = 0
     @ViewBuilder var content: () -> Content
     var body: some View {
         VStack(alignment: .leading, spacing: 0, content: content)
-            .background(Theme.cell, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .padding(padding)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Theme.cell, in: RoundedRectangle(cornerRadius: radius, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous).strokeBorder(Theme.border))
+    }
+}
+
+/// A round button for the top of a screen (+, profile initial).
+struct RoundIconButton: View {
+    let symbol: String
+    let label: String
+    let action: () -> Void
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: symbol).font(.system(size: 17, weight: .regular))
+                .foregroundStyle(Theme.label)
+                .frame(width: 44, height: 44)
+                .background(Theme.cell, in: Circle())
+                .overlay(Circle().strokeBorder(Theme.border))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(label)
+    }
+}
+
+/// Green "Open now · until 10 PM", or the time it opens, from saved hours.
+struct OpenStatusText: View {
+    let hours: OpeningHours?
+    var body: some View {
+        if let status = Hours.status(hours) {
+            Text(status.label).foregroundStyle(status.isOpen ? Theme.open : Theme.secondary)
+        }
     }
 }
 

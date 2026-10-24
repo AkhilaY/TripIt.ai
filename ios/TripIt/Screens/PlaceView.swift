@@ -17,6 +17,9 @@ struct PlaceView: View {
     @State private var confirmDelete = false
     @State private var locating = false
     @State private var locateQuery = ""
+    @State private var allHours = false
+    @State private var editingNote = false
+    @FocusState private var noteFocused: Bool
 
     private var trip: TripDetail? { tripId.flatMap { store.tripDetails[$0] } }
 
@@ -63,53 +66,40 @@ struct PlaceView: View {
 
     @ViewBuilder private func content(_ p: Place) -> some View {
         let category = Category(p.category)
-        List {
-            Section {
+        let slotTrip = trip ?? memberTrip(p)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
                 Hero(place: p)
-                    .listRowInsets(EdgeInsets())
-                    .listRowBackground(Color.clear)
-                header(p, category)
-                    .listRowBackground(Color.clear)
-                    .listRowInsets(EdgeInsets(top: 8, leading: 20, bottom: 4, trailing: 20))
-                if !p.summary.isEmpty {
-                    Text(p.summary).font(.body).foregroundStyle(Theme.label)
-                        .listRowBackground(Color.clear)
-                        .listRowInsets(EdgeInsets(top: 4, leading: 20, bottom: 4, trailing: 20))
+                VStack(alignment: .leading, spacing: 0) {
+                    header(p, category)
+                    if p.suggested, let trip { suggestedBanner(p, trip).padding(.top, 16) }
+                    visitToggle(p).padding(.top, 18)
+                    whySaved(p).padding(.top, 24)
+                    mainAction(p, category).padding(.top, 20)
+                    quietActions(p, category).padding(.top, 12)
+                    if category == .event { eventSection(p).padding(.top, 28) }
+                    if let slotTrip, !slotTrip.isLocal { tripSlot(p, slotTrip).padding(.top, 28) }
+                    if !p.isLocated { locatePrompt(p).padding(.top, 20) }
+                    goodToKnow(p).padding(.top, 28)
+                    details(p).padding(.top, 28)
+                    organize(p, category).padding(.top, 28)
                 }
-                quickActions(p, category)
-                    .listRowBackground(Color.clear)
-                    .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
-            }
-            .listSectionSeparator(.hidden)
-
-            librarySection(p)
-            if category == .event { eventSection(p) }
-            if let trip, trip.dayCount > 0, !trip.isLocal { planSection(p, trip) }
-            if !p.isLocated { locateSection(p) }
-            hoursSection(p)
-            if !p.recommendedItems.isEmpty || p.tips != nil || p.priceHint != nil { reelSection(p) }
-            detailsSection(p, category)
-            notesSection(p)
-            if let reels = detail?.reels, !reels.isEmpty { savedFrom(reels) }
-            Section {
-                Button("Delete place", role: .destructive) { confirmDelete = true }
-                    .frame(maxWidth: .infinity)
+                .padding(.horizontal, 20)
+                .padding(.top, 20)
+                .padding(.bottom, 48)
             }
         }
-        .listStyle(.insetGrouped)
-        .tripBackground()
-        .navigationTitle(p.name)
+        .ignoresSafeArea(edges: .top)
+        .background(Theme.background.ignoresSafeArea())
+        .toolbarBackground(.hidden, for: .navigationBar)
+        .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            Button { Task { await store.toggleStar(p) } } label: {
-                Image(systemName: p.mustDo ? "star.fill" : "star")
-            }
-            .tint(p.mustDo ? Theme.gold : Theme.accent)
-            .accessibilityLabel(p.mustDo ? "Remove the star" : "Star this place")
             ShareLink(item: p.googleMapsURL ?? AppConfig.baseURL, subject: Text(p.name), message: Text(p.name))
+            moreMenu(p, slotTrip)
         }
         .sheet(item: $sheet) { $0.view.environment(store).environment(router) }
-        .confirmationDialog("Delete this place everywhere? It leaves your saved places, folders and trips.",
+        .confirmationDialog("Delete this place everywhere? It leaves your Library, lists and trips.",
                             isPresented: $confirmDelete, titleVisibility: .visible) {
             Button("Delete place", role: .destructive) {
                 Task { if await store.delete(p) { dismiss() } }
@@ -122,199 +112,376 @@ struct PlaceView: View {
         } message: {
             Text("Add a street or neighbourhood if the first search didn't find it.")
         }
+        .task(id: slotTrip?.id) {
+            if let id = slotTrip?.id, store.tripDetails[id] == nil { _ = try? await store.loadTrip(id) }
+        }
         .onDisappear { saveNotes(p) }
+    }
+
+    /// The trip this place is on (when it wasn't opened from one), so its day and time show here.
+    private func memberTrip(_ p: Place) -> TripDetail? {
+        guard let id = store.realTrips.first(where: { p.tripIds.contains($0.id) })?.id else { return nil }
+        return store.tripDetails[id]
     }
 
     // MARK: Header
 
     private func header(_ p: Place, _ category: Category) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 6) {
-                CategoryTile(category: category, size: 22)
-                Text(category.label.uppercased()).font(.caption.weight(.bold)).foregroundStyle(category.color).kerning(0.6)
-            }
-            Text(p.name).font(Theme.serif(32))
-            let loc = [p.neighborhood, p.city.isEmpty ? nil : p.city].compactMap { $0 }.joined(separator: " · ")
+            Eyebrow(text: [category.label, p.mustDo ? "Starred" : nil].compactMap { $0 }.joined(separator: " · "), color: Theme.tertiary)
+            Text(p.name).font(Theme.serif(34)).foregroundStyle(Theme.label).fixedSize(horizontal: false, vertical: true)
+            let loc = [p.neighborhood, p.city.isEmpty ? nil : p.city].compactMap { $0 }.joined(separator: ", ")
             if !loc.isEmpty { Text(loc).font(.subheadline).foregroundStyle(Theme.secondary) }
-            if p.mustDo {
-                Label("Starred: first in your lists, and the planner always fits it in", systemImage: "star.fill")
-                    .font(.footnote).foregroundStyle(Theme.gold)
-            }
-            if let need = needText(p) {
-                Label(need, systemImage: "calendar.badge.exclamationmark")
-                    .font(.footnote).foregroundStyle(Theme.warn)
-            }
-            if p.mentionCount >= 2 {
-                Label("Recommended in \(p.mentionCount) of your saved reels", systemImage: "flame.fill")
-                    .font(.footnote).foregroundStyle(Theme.orange)
-            }
-            if let status = Hours.status(p.openingHours) {
-                Text(status.label).font(.subheadline.weight(.semibold)).foregroundStyle(status.isOpen ? Theme.ok : Theme.danger)
-            }
+            statusLine(p)
             if let resolved = p.resolvedName, resolved != p.name {
                 Text("On maps as \(resolved)").font(.footnote).foregroundStyle(Theme.secondary)
             }
             if p.confidence == "low" {
-                Text("The name was hard to make out in the reel; double-check it.").font(.footnote).foregroundStyle(Theme.warn)
+                Text("The name was hard to make out in the Reel; double-check it.").font(.footnote).foregroundStyle(Theme.attention)
+            }
+        }
+    }
+
+    /// "● Open now · until midnight · $$"
+    @ViewBuilder private func statusLine(_ p: Place) -> some View {
+        let status = Hours.status(p.openingHours)
+        let price = p.priceHint.flatMap { $0.count <= 5 ? $0 : nil }
+        if status != nil || price != nil {
+            HStack(spacing: 6) {
+                if let status {
+                    Circle().fill(status.isOpen ? Theme.open : Theme.quiet).frame(width: 7, height: 7)
+                    Text(status.isOpen ? "Open now" : "Closed").fontWeight(.semibold).foregroundStyle(status.isOpen ? Theme.open : Theme.secondary)
+                    let rest = status.label.replacingOccurrences(of: "Open until ", with: "until ").replacingOccurrences(of: "Closed · ", with: "")
+                    if rest != "Closed" && rest != "Open 24 hours" { Text("· " + rest).foregroundStyle(Theme.secondary) }
+                }
+                if let price { Text((status == nil ? "" : "· ") + price).foregroundStyle(Theme.secondary) }
+            }
+            .font(.subheadline)
+            .padding(.top, 2)
+        }
+    }
+
+    private func suggestedBanner(_ p: Place, _ trip: TripDetail) -> some View {
+        Card(padding: 14) {
+            HStack(spacing: 12) {
+                Image(systemName: "sparkles").foregroundStyle(Theme.accent)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Suggested for this trip").font(.subheadline.weight(.semibold))
+                    Text(p.suggestionNote ?? "Added by AI to fill a quiet day").font(.caption).foregroundStyle(Theme.secondary)
+                }
+                Spacer()
+                Button("Keep") {
+                    Task {
+                        await store.tripCall("POST", "/v1/trips/\(trip.id)/places/\(p.id)/keep")
+                        await store.reloadPlaces()
+                        store.show("Kept, and added to your Library")
+                    }
+                }
+                .font(.subheadline.weight(.semibold)).foregroundStyle(Theme.accent)
+            }
+        }
+    }
+
+    /// Want to go | Been here
+    private func visitToggle(_ p: Place) -> some View {
+        HStack(spacing: 4) {
+            ForEach([false, true], id: \.self) { been in
+                let on = p.visited == been
+                Button {
+                    guard !on else { return }
+                    Task { await store.patch(p, ["visited": been]) }
+                } label: {
+                    Label(been ? "Been here" : "Want to go", systemImage: been ? "checkmark" : "bookmark")
+                        .font(.subheadline.weight(on ? .semibold : .medium))
+                        .foregroundStyle(on ? Theme.background : Theme.label)
+                        .frame(maxWidth: .infinity, minHeight: 40)
+                        .background(on ? Theme.label : .clear, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(on ? .isSelected : [])
+            }
+        }
+        .padding(4)
+        .background(Theme.cell, in: RoundedRectangle(cornerRadius: 15, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 15, style: .continuous).strokeBorder(Theme.border))
+    }
+
+    // MARK: Why you saved it
+
+    private func whySaved(_ p: Place) -> some View {
+        let reel = detail?.reels.first
+        let quote = p.tips ?? p.recommendedItems.first.map { "Order the \($0)." } ?? (p.summary.isEmpty ? nil : p.summary)
+        return VStack(alignment: .leading, spacing: 12) {
+            Text("Why you saved it").font(Theme.serif(22)).foregroundStyle(Theme.label)
+            Card(padding: 14) {
+                HStack(alignment: .top, spacing: 14) {
+                    if let reel {
+                        Button { Links.open(URL(string: reel.url)) } label: { ReelThumb(reel: reel, place: p) }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Watch the Reel")
+                    }
+                    VStack(alignment: .leading, spacing: 3) {
+                        if let reel {
+                            Text(reel.creator.map { "@\($0)" } ?? reel.platform.capitalized).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.label)
+                            Text("From a Reel · saved \(Self.savedDate(p.createdAt))").font(.caption).foregroundStyle(Theme.secondary)
+                        } else {
+                            Text("Saved by you").font(.subheadline.weight(.semibold)).foregroundStyle(Theme.label)
+                            Text("Saved \(Self.savedDate(p.createdAt))").font(.caption).foregroundStyle(Theme.secondary)
+                        }
+                        if let quote {
+                            Text("“\(quote)”").font(Theme.serif(17, weight: .regular)).italic().foregroundStyle(Theme.label)
+                                .fixedSize(horizontal: false, vertical: true).padding(.top, 6)
+                        }
+                        if let reel {
+                            Button("Watch the Reel") { Links.open(URL(string: reel.url)) }
+                                .font(.subheadline.weight(.semibold)).foregroundStyle(Theme.accent).frame(minHeight: 36)
+                        }
+                        if p.mentionCount >= 2 {
+                            Text("In \(p.mentionCount) of your saved Reels").font(.caption).foregroundStyle(Theme.secondary)
+                        }
+                    }
+                    Spacer(minLength: 0)
+                }
+                if editingNote || !notes.isEmpty {
+                    Divider().overlay(Theme.border).padding(.vertical, 12)
+                    TextField("Your note", text: $notes, axis: .vertical)
+                        .lineLimit(1...10)
+                        .font(.subheadline)
+                        .focused($noteFocused)
+                        .onChange(of: notes) { _, _ in scheduleNotesSave(p) }
+                }
+            }
+            if !editingNote && notes.isEmpty {
+                Button { editingNote = true; noteFocused = true } label: {
+                    Label("Add your own note", systemImage: "square.and.pencil").font(.subheadline.weight(.medium)).foregroundStyle(Theme.label)
+                }
+                .frame(minHeight: 36)
+            }
+        }
+    }
+
+    private static func savedDate(_ iso: String) -> String {
+        guard let date = Fmt.day(iso) else { return "recently" }
+        return date.formatted(.dateTime.day().month(.abbreviated))
+    }
+
+    // MARK: Actions
+
+    private enum MainAction { case reserve(URL), tickets(URL), directions }
+
+    private func main(_ p: Place, _ category: Category) -> MainAction {
+        let booked = (trip ?? memberTrip(p))?.bookings.contains { $0.placeId == p.id && $0.kind == "reservation" } ?? false
+        if !booked, let url = p.reserveUrl.flatMap({ URL(string: $0) }) { return .reserve(url) }
+        if p.bookingKind == "tickets", p.bookingNeed != nil, let url = p.website.flatMap({ URL(string: $0) }) { return .tickets(url) }
+        return .directions
+    }
+
+    @ViewBuilder private func mainAction(_ p: Place, _ category: Category) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            switch main(p, category) {
+            case .reserve(let url):
+                Button { Links.open(url) } label: { Label("Book a table", systemImage: "calendar") }.buttonStyle(PrimaryButtonStyle())
+            case .tickets(let url):
+                Button { Links.open(url) } label: { Label("Get tickets", systemImage: "ticket") }.buttonStyle(PrimaryButtonStyle())
+            case .directions:
+                Menu {
+                    Button { Links.open(p.directionsURL) } label: { Label("Apple Maps", systemImage: "map") }
+                    Button { Links.open(p.googleDirectionsURL) } label: { Label("Google Maps", systemImage: "globe") }
+                } label: {
+                    Label("Directions", systemImage: "arrow.triangle.turn.up.right.diamond")
+                        .font(.body.weight(.semibold)).foregroundStyle(Theme.accentInk)
+                        .frame(maxWidth: .infinity, minHeight: 50)
+                        .background(Theme.accent, in: RoundedRectangle(cornerRadius: 15, style: .continuous))
+                }
+            }
+            if let need = needText(p) {
+                Label(need, systemImage: "info.circle").font(.footnote).foregroundStyle(p.bookingNeed == "required" ? Theme.attention : Theme.secondary)
             }
         }
     }
 
     private func needText(_ p: Place) -> String? {
-        guard let need = p.bookingNeed else { return nil }
+        guard let need = p.bookingNeed, need != "none" else { return nil }
         let required = need == "required"
         let text: String
         if p.bookingKind == "tickets" { text = required ? "Tickets needed" : "Tickets recommended" }
         else { text = required ? "Book ahead" : "Booking recommended" }
         if let note = p.bookingNote { return text + ". " + note }
-        return text
+        return text + "."
     }
 
-    /// Reserve (when the restaurant books online), Directions, Menu, then Call and Website: at most four.
-    private func quickActions(_ p: Place, _ category: Category) -> some View {
-        let booked = trip?.bookings.contains { $0.placeId == p.id && $0.kind == "reservation" } ?? false
-        let reserve: URL? = booked ? nil : p.reserveUrl.flatMap { URL(string: $0) }
+    /// Quiet buttons under the main one: Directions (unless it's the main one), Menu, Call, Website.
+    private func quietActions(_ p: Place, _ category: Category) -> some View {
+        let primary = main(p, category)
         let phone = p.phone.flatMap { URL(string: "tel:" + $0.filter { $0.isNumber || $0 == "+" }) }
         let site = p.website.flatMap { URL(string: $0) }
-        var extras = 0
-        let room = { (needed: Bool) -> Bool in
-            guard needed else { return false }
-            extras += 1
-            return extras <= 4
-        }
-        let showReserve = room(reserve != nil)
-        _ = room(true)  // Directions is always there
-        let showMenu = room(category.hasMenu)
-        let showCall = room(phone != nil)
-        let showSite = room(site != nil)
+        var isDirections = false
+        var isTickets = false
+        switch primary { case .directions: isDirections = true; case .tickets: isTickets = true; default: break }
         return HStack(spacing: 10) {
-            if showReserve, let reserve {
-                QuickButton(symbol: "calendar.badge.plus", color: Theme.gold, title: "Reserve") { Links.open(reserve) }
+            if !isDirections { DirectionsButton(apple: p.directionsURL, google: p.googleDirectionsURL) }
+            if category.hasMenu {
+                Button { router.push(.menu(placeId: p.id)) } label: { QuietTileLabel(symbol: "menucard", title: "Menu") }.buttonStyle(.plain)
             }
-            DirectionsButton(apple: p.directionsURL, google: p.googleDirectionsURL)
-            if showMenu {
-                QuickButton(symbol: "menucard.fill", color: Theme.pink, title: "Menu") { router.push(.menu(placeId: p.id)) }
+            if let phone {
+                Button { Links.open(phone) } label: { QuietTileLabel(symbol: "phone", title: "Call") }.buttonStyle(.plain)
             }
-            if showCall, let phone {
-                QuickButton(symbol: "phone.fill", color: Theme.green, title: "Call") { Links.open(phone) }
-            }
-            if showSite, let site {
-                QuickButton(symbol: "globe", color: Theme.blue, title: "Website") { Links.open(site) }
+            if let site, !isTickets {
+                Button { Links.open(site) } label: { QuietTileLabel(symbol: "globe", title: "Website") }.buttonStyle(.plain)
             }
         }
+    }
+
+    private func moreMenu(_ p: Place, _ slotTrip: TripDetail?) -> some View {
+        Menu {
+            Button { Task { await store.toggleStar(p) } } label: {
+                Label(p.mustDo ? "Remove star" : "Star", systemImage: p.mustDo ? "star.slash" : "star")
+            }
+            Button { sheet = .trips([p.id]) } label: { Label("Add to a trip…", systemImage: "airplane") }
+            Button { sheet = .folders([p.id]) } label: { Label("Add to a list…", systemImage: "list.bullet") }
+            Button {
+                locateQuery = [p.name, p.neighborhood, p.city].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: ", ")
+                locating = true
+            } label: { Label(p.isLocated ? "Wrong pin? Search again" : "Find on the map", systemImage: "location.magnifyingglass") }
+            if let slotTrip, !p.suggested {
+                Button(role: .destructive) {
+                    Task {
+                        await store.removeFromTrip(slotTrip.id, p.id)
+                        store.show("Removed from \(slotTrip.name). It's still in your Library.")
+                        if trip != nil { dismiss() }
+                    }
+                } label: { Label("Remove from \(slotTrip.name)", systemImage: "minus.circle") }
+            }
+            Button(role: .destructive) { confirmDelete = true } label: { Label("Delete place", systemImage: "trash") }
+        } label: {
+            Image(systemName: "ellipsis")
+        }
+        .accessibilityLabel("More: star, lists, wrong pin, remove from trip, delete")
     }
 
     // MARK: Sections
 
-    @ViewBuilder private func librarySection(_ p: Place) -> some View {
-        if p.suggested, let trip {
-            Section {
-                HStack {
-                    SymbolTile(symbol: "sparkles", color: Theme.gold)
-                    VStack(alignment: .leading) {
-                        Text("Suggested for this trip")
-                        Text(p.suggestionNote ?? "Added by AI to fill a quiet day").font(.caption).foregroundStyle(Theme.secondary)
-                    }
-                    Spacer()
-                    Button("Keep") {
-                        Task {
-                            await store.tripCall("POST", "/v1/trips/\(trip.id)/places/\(p.id)/keep")
-                            await store.reloadPlaces()
-                            store.show("Kept, and added to your saved places")
-                        }
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
-                }
-            }
-        } else {
-            let folders = store.folders.filter { p.folderIds.contains($0.id) }.map(\.name)
-            let trips = store.trips.filter { p.tripIds.contains($0.id) }.map(\.name)
-            Section("In your library") {
-                Button { sheet = .folders([p.id]) } label: {
-                    row(symbol: "folder.fill", color: Theme.gold, title: "Folders",
-                        value: folders.isEmpty ? "Not in a folder" : folders.joined(separator: ", "), chevron: true)
-                }
-                Button { sheet = .trips([p.id]) } label: {
-                    row(symbol: "airplane", color: Theme.blue, title: "Trips",
-                        value: trips.isEmpty ? "Not in a trip yet" : trips.joined(separator: ", "), chevron: true)
-                }
-                if let trip {
-                    Button {
-                        Task {
-                            await store.removeFromTrip(trip.id, p.id)
-                            store.show("Removed from the trip. It's still saved.")
-                            dismiss()
-                        }
-                    } label: {
-                        row(symbol: "xmark", color: Theme.gray, title: "Remove from \(trip.name)", value: "It stays in your saved places")
-                    }
-                }
-            }
-        }
+    private func sectionTitle(_ text: String) -> some View {
+        Text(text).font(Theme.serif(22)).foregroundStyle(Theme.label).padding(.bottom, 10)
     }
 
     private func eventSection(_ p: Place) -> some View {
-        Section {
-            if let date = p.eventDate.flatMap(Fmt.day) {
-                DatePicker("Date", selection: Binding(get: { date }, set: { new in
-                    Task { await store.patch(p, ["event_date": Fmt.iso(new)]) }
-                }), displayedComponents: .date)
-                Button("Clear date", role: .destructive) { Task { await store.patch(p, ["clear_event_date": true]) } }
-            } else {
-                Button { Task { await store.patch(p, ["event_date": Fmt.iso(Date())]) } } label: {
-                    row(symbol: "calendar.badge.plus", color: Category.event.color, title: "Add the date", value: "So it shows on your calendar")
+        VStack(alignment: .leading, spacing: 0) {
+            sectionTitle("When")
+            Card(padding: 14) {
+                if let date = p.eventDate.flatMap(Fmt.day) {
+                    DatePicker("Date", selection: Binding(get: { date }, set: { new in
+                        Task { await store.patch(p, ["event_date": Fmt.iso(new)]) }
+                    }), displayedComponents: .date)
+                    if let end = p.eventEndDate { Text("Runs until \(Fmt.shortDay(end)).").font(.footnote).foregroundStyle(Theme.secondary) }
+                    Button("Clear date", role: .destructive) { Task { await store.patch(p, ["clear_event_date": true]) } }
+                        .font(.subheadline).padding(.top, 8)
+                } else {
+                    Button { Task { await store.patch(p, ["event_date": Fmt.iso(Date())]) } } label: {
+                        infoRow("calendar.badge.plus", "Add the date", "So it shows on your calendar")
+                    }
+                    .buttonStyle(.plain)
                 }
-            }
-            if let venue = p.venue { row(symbol: "mappin", color: Theme.gray, title: "Where", value: venue) }
-        } header: {
-            Text("When")
-        } footer: {
-            if let end = p.eventEndDate { Text("Runs until \(Fmt.shortDay(end)).") }
-        }
-    }
-
-    private func planSection(_ p: Place, _ trip: TripDetail) -> some View {
-        Section("On this trip") {
-            Picker(selection: Binding(get: { p.dayNumber ?? 0 }, set: { day in
-                Task { await store.patch(p, ["day_number": day], tripId: trip.id) }
-            })) {
-                Text("Not scheduled").tag(0)
-                ForEach(1...trip.dayCount, id: \.self) { d in
-                    Text(Fmt.tripDay(start: trip.startDate, day: d).map { "Day \(d) · \($0)" } ?? "Day \(d)").tag(d)
-                }
-            } label: { Label("Day", systemImage: "calendar") }
-            Picker(selection: Binding(get: { p.timeOfDay ?? "" }, set: { value in
-                Task { await store.patch(p, value.isEmpty ? ["clear_time_of_day": true] : ["time_of_day": value], tripId: trip.id) }
-            })) {
-                Text("Any time").tag("")
-                ForEach(Fmt.timesOfDay, id: \.self) { Text($0.capitalized).tag($0) }
-            } label: { Label("Time of day", systemImage: "clock") }
-            if let start = p.startTime, let date = clockDate(start) {
-                HStack {
-                    DatePicker(selection: Binding(get: { date }, set: { new in
-                        Task { await store.patch(p, ["start_time": hhmm(new)], tripId: trip.id) }
-                    }), displayedComponents: .hourAndMinute) { Label("Exact time", systemImage: "alarm") }
-                    Button("Clear") { Task { await store.patch(p, ["clear_start_time": true], tripId: trip.id) } }
-                        .buttonStyle(.borderless)
-                }
-            } else {
-                Button { Task { await store.patch(p, ["start_time": "19:00"], tripId: trip.id) } } label: {
-                    Label("Set an exact time (a reservation or tour)", systemImage: "alarm")
-                }
+                if let venue = p.venue { infoRow("mappin", venue, nil).padding(.top, 10) }
             }
         }
     }
 
-    private func locateSection(_ p: Place) -> some View {
-        Section {
-            Button {
-                locateQuery = [p.name, p.neighborhood, p.city].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: ", ")
-                locating = true
-            } label: {
-                row(symbol: "mappin.and.ellipse", color: Theme.warn, title: "Not on the map yet", value: "Search for it to add the pin", chevron: true)
+    /// The day, time and reservation on the trip this place is part of.
+    private func tripSlot(_ p: Place, _ trip: TripDetail) -> some View {
+        let member = trip.places.first { $0.id == p.id } ?? p
+        let booking = trip.bookings.first { $0.placeId == p.id }
+        return VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .firstTextBaseline) {
+                sectionTitle("On your trip")
+                Spacer()
+                Button(trip.name) { router.push(.trip(id: trip.id)) }
+                    .font(.subheadline.weight(.semibold)).foregroundStyle(Theme.accent).lineLimit(1)
+            }
+            Card {
+                if trip.dayCount > 0 {
+                    Menu {
+                        Button("Not scheduled") { Task { await store.patch(p, ["day_number": 0], tripId: trip.id) } }
+                        ForEach(1...trip.dayCount, id: \.self) { d in
+                            Button(dayLabel(trip, d)) { Task { await store.patch(p, ["day_number": d], tripId: trip.id) } }
+                        }
+                    } label: {
+                        slotRow("calendar", "Day", member.dayNumber.map { dayLabel(trip, $0) } ?? "Not scheduled", chevron: true)
+                    }
+                    Divider().overlay(Theme.border).padding(.leading, 48)
+                    Menu {
+                        Button("Any time") { Task { await store.patch(p, ["clear_time_of_day": true], tripId: trip.id) } }
+                        ForEach(Fmt.timesOfDay, id: \.self) { t in
+                            Button(t.capitalized) { Task { await store.patch(p, ["time_of_day": t], tripId: trip.id) } }
+                        }
+                        Divider()
+                        Button("Set an exact time…") { Task { await store.patch(p, ["start_time": member.startTime ?? "19:00"], tripId: trip.id) } }
+                        if member.startTime != nil {
+                            Button("Clear exact time") { Task { await store.patch(p, ["clear_start_time": true], tripId: trip.id) } }
+                        }
+                    } label: {
+                        slotRow("clock", "Time", timeLabel(member), chevron: true)
+                    }
+                    if let start = member.startTime, let date = clockDate(start) {
+                        DatePicker("Exact time", selection: Binding(get: { date }, set: { new in
+                            Task { await store.patch(p, ["start_time": hhmm(new)], tripId: trip.id) }
+                        }), displayedComponents: .hourAndMinute)
+                        .font(.subheadline)
+                        .padding(.horizontal, 14).padding(.bottom, 8)
+                    }
+                    Divider().overlay(Theme.border).padding(.leading, 48)
+                }
+                if Category(p.category).hasMenu || p.bookingNeed != nil || booking != nil {
+                    Button { router.open("#/trip/\(trip.id)/bookings") } label: {
+                        slotRow("ticket", "Reservation", booking.map { $0.title } ?? "Not booked yet", chevron: booking == nil,
+                                attention: booking == nil && p.bookingNeed == "required")
+                    }
+                }
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private func dayLabel(_ trip: TripDetail, _ d: Int) -> String {
+        [Fmt.tripDay(start: trip.startDate, day: d) ?? "Day \(d)", trip.city.isEmpty ? nil : trip.city].compactMap { $0 }.joined(separator: " · ")
+    }
+
+    private func timeLabel(_ p: Place) -> String {
+        if let start = p.startTime { return Fmt.clock(start) }
+        return p.timeOfDay?.capitalized ?? "Any time"
+    }
+
+    private func slotRow(_ symbol: String, _ title: String, _ value: String, chevron: Bool, attention: Bool = false) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: symbol).frame(width: 22).foregroundStyle(Theme.secondary)
+            Text(title).foregroundStyle(Theme.secondary)
+            Spacer(minLength: 8)
+            Text(value).fontWeight(.medium).foregroundStyle(attention ? Theme.attention : Theme.label).lineLimit(1)
+            if chevron { Image(systemName: "chevron.up.chevron.down").font(.caption).foregroundStyle(Theme.quiet) }
+        }
+        .font(.subheadline)
+        .padding(.horizontal, 14).frame(minHeight: 50)
+        .contentShape(Rectangle())
+    }
+
+    private func locatePrompt(_ p: Place) -> some View {
+        Button {
+            locateQuery = [p.name, p.neighborhood, p.city].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: ", ")
+            locating = true
+        } label: {
+            Card(padding: 14) {
+                HStack(spacing: 12) {
+                    Image(systemName: "mappin.and.ellipse").foregroundStyle(Theme.attention)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Not on the map yet").font(.subheadline.weight(.semibold)).foregroundStyle(Theme.label)
+                        Text("Search for it to add the pin").font(.caption).foregroundStyle(Theme.secondary)
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right").font(.footnote).foregroundStyle(Theme.quiet)
+                }
             }
         }
+        .buttonStyle(.plain)
     }
 
     private func locate(_ p: Place) async {
@@ -327,113 +494,174 @@ struct PlaceView: View {
         } catch { store.fail(error) }
     }
 
-    @ViewBuilder private func hoursSection(_ p: Place) -> some View {
-        Section {
-            if let hours = p.openingHours, !hours.text.isEmpty {
-                let today = Hours.mondayIndex()
-                ForEach(Array(hours.text.enumerated()), id: \.offset) { i, line in
-                    Text(line)
-                        .font(.subheadline.weight(hours.weekly != nil && i == today ? .semibold : .regular))
-                        .foregroundStyle(hours.weekly != nil && i == today ? Theme.label : Theme.secondary)
-                }
-            } else {
-                Text("No opening hours found for this place. Check Google Maps before you go.")
-                    .font(.subheadline).foregroundStyle(Theme.secondary)
-            }
-        } header: {
-            Text("Hours")
-        } footer: {
-            if let hours = p.openingHours, !hours.text.isEmpty {
-                Text("From \(hours.source == "google" ? "Google" : "OpenStreetMap"). Hours change, so check before you go.")
-            }
-        }
-    }
-
-    private func reelSection(_ p: Place) -> some View {
-        Section("From the reel") {
-            ForEach(p.recommendedItems, id: \.self) { item in
-                Label { Text(item) } icon: { Image(systemName: "star.fill").foregroundStyle(Theme.gold) }
-            }
-            if let price = p.priceHint { row(symbol: "tag.fill", color: Theme.green, title: "Price", value: price) }
-            if let tips = p.tips { row(symbol: "sparkles", color: Theme.pink, title: "Tip", value: tips) }
-        }
-    }
-
-    private func detailsSection(_ p: Place, _ category: Category) -> some View {
-        Section("Details") {
-            if let rating = p.rating {
-                Button { Links.open(p.googleMapsURL) } label: {
-                    row(symbol: "star.fill", color: Theme.gold, title: "Google rating",
-                        value: String(format: "%.1f", rating) + (p.ratingCount.map { " · \($0.formatted()) reviews" } ?? " out of 5"), chevron: true)
-                }
-            }
-            if let site = p.website, let url = URL(string: site) {
-                Button { Links.open(url) } label: {
-                    row(symbol: "globe", color: Theme.blue, title: "Website",
-                        value: (url.host ?? site).replacingOccurrences(of: "www.", with: ""), chevron: true)
-                }
-            }
-            if let phone = p.phone {
-                Button { Links.open(URL(string: "tel:" + phone.filter { $0.isNumber || $0 == "+" })) } label: {
-                    row(symbol: "phone.fill", color: Theme.green, title: "Phone", value: phone, chevron: true)
-                }
-            }
-            if let address = p.address {
-                row(symbol: "mappin", color: Theme.gray, title: "Address", value: address)
-                    .contextMenu { Button { UIPasteboard.general.string = address } label: { Label("Copy address", systemImage: "doc.on.doc") } }
-            }
-            Toggle(isOn: Binding(get: { p.visited }, set: { v in Task { await store.patch(p, ["visited": v]) } })) {
-                Label("Visited", systemImage: "checkmark.circle")
-            }
-            Picker(selection: Binding(get: { category }, set: { c in Task { await store.patch(p, ["category": c.rawValue]) } })) {
-                ForEach(Category.allCases) { Label($0.label, systemImage: $0.symbol).tag($0) }
-            } label: { Label("Category", systemImage: category.symbol) }
-            if p.isLocated {
-                Button {
-                    locateQuery = [p.name, p.neighborhood, p.city].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: ", ")
-                    locating = true
-                } label: { Label("Wrong pin? Search again", systemImage: "location.magnifyingglass") }
-            }
-        }
-    }
-
-    private func notesSection(_ p: Place) -> some View {
-        Section("My notes") {
-            TextField("Add a note", text: $notes, axis: .vertical)
-                .lineLimit(3...12)
-                .onChange(of: notes) { _, _ in scheduleNotesSave(p) }
-        }
-    }
-
-    private func savedFrom(_ reels: [Reel]) -> some View {
-        Section("Saved from") {
-            ForEach(reels) { reel in
-                Button { Links.open(URL(string: reel.url)) } label: {
-                    HStack(spacing: 12) {
-                        SymbolTile(symbol: JobRow.symbol(for: reel.url), color: Theme.indigo)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(reel.title).foregroundStyle(Theme.label).lineLimit(2)
-                            Text([reel.platform.capitalized, reel.creator.map { "@\($0)" }].compactMap { $0 }.joined(separator: " · "))
-                                .font(.caption).foregroundStyle(Theme.secondary)
+    /// Today's hours (tap for the week), tips, and the price and what it's like.
+    private func goodToKnow(_ p: Place) -> some View {
+        let quoteUsed = p.tips
+        return VStack(alignment: .leading, spacing: 0) {
+            sectionTitle("Good to know")
+            Card {
+                if let hours = p.openingHours, !hours.text.isEmpty {
+                    Button { withAnimation(.snappy) { allHours.toggle() } } label: {
+                        HStack(alignment: .top, spacing: 12) {
+                            Image(systemName: "clock").frame(width: 22).foregroundStyle(Theme.secondary)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(todayHours(hours)).font(.subheadline.weight(.medium)).foregroundStyle(Theme.label)
+                                Text("From \(hours.source == "google" ? "Google" : "OpenStreetMap") · hours change, check before you go")
+                                    .font(.caption).foregroundStyle(Theme.secondary)
+                            }
+                            Spacer(minLength: 8)
+                            Text(allHours ? "Less" : "All hours").font(.footnote.weight(.semibold)).foregroundStyle(Theme.accent)
                         }
-                        Spacer()
-                        Image(systemName: "arrow.up.right").font(.footnote).foregroundStyle(Theme.tertiary)
+                        .padding(14)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    if allHours {
+                        let today = Hours.mondayIndex()
+                        VStack(alignment: .leading, spacing: 4) {
+                            ForEach(Array(hours.text.enumerated()), id: \.offset) { i, line in
+                                Text(line)
+                                    .font(.footnote.weight(hours.weekly != nil && i == today ? .semibold : .regular))
+                                    .foregroundStyle(hours.weekly != nil && i == today ? Theme.label : Theme.secondary)
+                            }
+                        }
+                        .padding(.leading, 48).padding(.trailing, 14).padding(.bottom, 14)
+                    }
+                } else {
+                    infoRow("clock", "No opening hours found", "Check Google Maps before you go").padding(14)
+                }
+                ForEach(p.recommendedItems.dropFirst(quoteUsed == nil ? 1 : 0), id: \.self) { item in
+                    Divider().overlay(Theme.border).padding(.leading, 48)
+                    infoRow("star", "Try the \(item)", nil).padding(14)
+                }
+                if let price = p.priceHint, !p.summary.isEmpty || price.count > 5 {
+                    Divider().overlay(Theme.border).padding(.leading, 48)
+                    infoRow("tag", [price, p.summary.isEmpty ? nil : p.summary].compactMap { $0 }.joined(separator: " · "), nil).padding(14)
+                } else if !p.summary.isEmpty, p.tips != nil || !p.recommendedItems.isEmpty {
+                    Divider().overlay(Theme.border).padding(.leading, 48)
+                    infoRow("text.quote", p.summary, nil).padding(14)
+                }
+            }
+        }
+    }
+
+    /// "Open today 8 AM – midnight", "Closed today".
+    private func todayHours(_ hours: OpeningHours) -> String {
+        guard let weekly = hours.weekly, weekly.count == 7 else { return hours.text.first ?? "Hours" }
+        let ranges = weekly[Hours.mondayIndex()]
+        if ranges.isEmpty { return "Closed today" }
+        return "Open today " + ranges.map { "\(Fmt.clock($0.open)) – \(Fmt.clock($0.close))" }.joined(separator: ", ")
+    }
+
+    /// Address, phone, website, then the rating.
+    private func details(_ p: Place) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            sectionTitle("Details")
+            Card {
+                let rows = detailRows(p)
+                if rows.isEmpty { infoRow("info.circle", "No details yet", nil).padding(14) }
+                ForEach(Array(rows.enumerated()), id: \.offset) { i, row in
+                    if i > 0 { Divider().overlay(Theme.border).padding(.leading, 48) }
+                    row
+                }
+            }
+        }
+    }
+
+    private func detailRows(_ p: Place) -> [AnyView] {
+        var rows: [AnyView] = []
+        if let address = p.address {
+            rows.append(AnyView(HStack(spacing: 12) {
+                infoRow("mappin", address, nil)
+                Button { UIPasteboard.general.string = address; store.show("Address copied") } label: {
+                    Image(systemName: "doc.on.doc").foregroundStyle(Theme.secondary).frame(width: 44, height: 44)
+                }
+                .accessibilityLabel("Copy address")
+            }.padding(.leading, 14).padding(.trailing, 4).padding(.vertical, 4)))
+        }
+        if let phone = p.phone {
+            rows.append(AnyView(Button { Links.open(URL(string: "tel:" + phone.filter { $0.isNumber || $0 == "+" })) } label: {
+                infoRow("phone", phone, nil).padding(14)
+            }.buttonStyle(.plain)))
+        }
+        if let site = p.website, let url = URL(string: site) {
+            rows.append(AnyView(Button { Links.open(url) } label: {
+                infoRow("globe", (url.host ?? site).replacingOccurrences(of: "www.", with: ""), nil).padding(14)
+            }.buttonStyle(.plain)))
+        }
+        if let rating = p.rating {
+            let reviews = p.ratingCount.map { " · \($0.formatted()) reviews" } ?? ""
+            rows.append(AnyView(Button { Links.open(p.googleMapsURL) } label: {
+                infoRow("star", String(format: "%.1f on Google", rating) + reviews, nil, quiet: true).padding(14)
+            }.buttonStyle(.plain)))
+        }
+        return rows
+    }
+
+    /// City (automatic), category and lists.
+    private func organize(_ p: Place, _ category: Category) -> some View {
+        let lists = store.folders.filter { p.folderIds.contains($0.id) }
+        let trips = store.realTrips.filter { p.tripIds.contains($0.id) }
+        return VStack(alignment: .leading, spacing: 0) {
+            sectionTitle("Organize")
+            Card {
+                organizeRow("City") {
+                    Text(store.isHome(p) ? "Around \(p.city) · automatic" : p.city.isEmpty ? "Unknown" : "\(p.city) · automatic")
+                        .foregroundStyle(Theme.secondary)
+                }
+                Divider().overlay(Theme.border).padding(.leading, 14)
+                organizeRow("Category") {
+                    Menu {
+                        ForEach(Category.allCases) { c in
+                            Button { Task { await store.patch(p, ["category": c.rawValue]) } } label: { Label(c.label, systemImage: c.symbol) }
+                        }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text(category.label).fontWeight(.medium)
+                            Image(systemName: "chevron.up.chevron.down").font(.caption)
+                        }
+                        .foregroundStyle(Theme.label)
+                    }
+                }
+                Divider().overlay(Theme.border).padding(.leading, 14)
+                organizeRow("Lists") {
+                    Button { sheet = .folders([p.id]) } label: {
+                        Text(lists.isEmpty ? "Add to a list" : lists.map(\.name).joined(separator: ", "))
+                            .fontWeight(.medium).foregroundStyle(lists.isEmpty ? Theme.accent : Theme.label).lineLimit(1)
+                    }
+                }
+                Divider().overlay(Theme.border).padding(.leading, 14)
+                organizeRow("Trips") {
+                    Button { sheet = .trips([p.id]) } label: {
+                        Text(trips.isEmpty ? "Add to a trip" : trips.map(\.name).joined(separator: ", "))
+                            .fontWeight(.medium).foregroundStyle(trips.isEmpty ? Theme.accent : Theme.label).lineLimit(1)
                     }
                 }
             }
+            .buttonStyle(.plain)
         }
     }
 
-    private func row(symbol: String, color: Color, title: String, value: String, chevron: Bool = false) -> some View {
-        HStack(spacing: 12) {
-            SymbolTile(symbol: symbol, color: color)
+    private func organizeRow<V: View>(_ title: String, @ViewBuilder value: () -> V) -> some View {
+        HStack {
+            Text(title).foregroundStyle(Theme.label)
+            Spacer(minLength: 12)
+            value()
+        }
+        .font(.subheadline)
+        .padding(.horizontal, 14).frame(minHeight: 48)
+    }
+
+    private func infoRow(_ symbol: String, _ text: String, _ sub: String?, quiet: Bool = false) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: symbol).frame(width: 22).foregroundStyle(Theme.secondary)
             VStack(alignment: .leading, spacing: 2) {
-                Text(title).foregroundStyle(Theme.label)
-                Text(value).font(.subheadline).foregroundStyle(Theme.secondary)
+                Text(text).font(.subheadline).foregroundStyle(quiet ? Theme.secondary : Theme.label).fixedSize(horizontal: false, vertical: true)
+                if let sub { Text(sub).font(.caption).foregroundStyle(Theme.secondary) }
             }
             Spacer(minLength: 0)
-            if chevron { Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(Theme.tertiary) }
         }
+        .contentShape(Rectangle())
     }
 
     // MARK: Notes and times
@@ -485,13 +713,7 @@ struct QuickLabel: View {
     let title: String
 
     var body: some View {
-        VStack(spacing: 6) {
-            SymbolTile(symbol: symbol, color: color, size: 34)
-            Text(title).font(.caption.weight(.medium)).foregroundStyle(Theme.label).lineLimit(1).minimumScaleFactor(0.8)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 12)
-        .background(Theme.cell, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        QuietTileLabel(symbol: symbol.replacingOccurrences(of: ".fill", with: ""), title: title)
     }
 }
 
@@ -511,7 +733,8 @@ struct DirectionsButton: View {
     }
 }
 
-/// Swipe through the place's photos, with its spot on the map as the last page.
+/// Swipe through the place's photos, with its spot on the map as the last page. Runs edge to edge under the
+/// navigation buttons.
 private struct Hero: View {
     let place: Place
     @State private var page = 0
@@ -519,40 +742,66 @@ private struct Hero: View {
     var body: some View {
         let photos = place.photos
         let pages = photos.count + (place.isLocated ? 1 : 0)
-        if pages > 0 {
-            TabView(selection: $page) {
-                ForEach(Array(photos.enumerated()), id: \.offset) { i, photo in
-                    Color.clear
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 300)
-                        .overlay { RemoteImage(url: photo.url(width: 1000)) { Theme.fill } }
-                        .clipped()
-                        .overlay(alignment: .bottomLeading) {
-                            if let credit = photo.attribution ?? (photo.source == "reel" ? "From the reel" : nil) {
-                                Text(credit).font(.caption2).foregroundStyle(.white.opacity(0.9))
-                                    .lineLimit(1).truncationMode(.middle)
-                                    .frame(maxWidth: 150, alignment: .leading)
-                                    .padding(.horizontal, 8).padding(.vertical, 4)
-                                    .background(.black.opacity(0.35), in: Capsule())
-                                    .padding(10)
+        Group {
+            if pages > 0 {
+                TabView(selection: $page) {
+                    ForEach(Array(photos.enumerated()), id: \.offset) { i, photo in
+                        Color.clear
+                            .overlay { RemoteImage(url: photo.url(width: 1200)) { Theme.raised } }
+                            .clipped()
+                            .overlay(alignment: .bottomLeading) {
+                                if let credit = photo.attribution ?? (photo.source == "reel" ? "From the Reel" : nil) {
+                                    Text(credit).font(.caption2).foregroundStyle(.white.opacity(0.9))
+                                        .lineLimit(1).truncationMode(.middle)
+                                        .frame(maxWidth: 150, alignment: .leading)
+                                        .padding(.horizontal, 8).padding(.vertical, 4)
+                                        .background(.black.opacity(0.35), in: Capsule())
+                                        .padding(.leading, 12).padding(.bottom, 28)
+                                }
                             }
-                        }
-                        .tag(i)
-                }
-                if let coordinate = place.coordinate {
-                    Map(initialPosition: .region(MKCoordinateRegion(center: coordinate, latitudinalMeters: 700, longitudinalMeters: 700))) {
-                        Marker(place.name, systemImage: Category(place.category).symbol, coordinate: coordinate)
-                            .tint(Category(place.category).color)
+                            .tag(i)
                     }
-                    .allowsHitTesting(false)
-                    .frame(height: 300)
-                    .tag(photos.count)
+                    if let coordinate = place.coordinate {
+                        Map(initialPosition: .region(MKCoordinateRegion(center: coordinate, latitudinalMeters: 700, longitudinalMeters: 700))) {
+                            Marker(place.name, systemImage: Category(place.category).symbol, coordinate: coordinate)
+                                .tint(Theme.accent)
+                        }
+                        .allowsHitTesting(false)
+                        .tag(photos.count)
+                    }
+                }
+                .tabViewStyle(.page(indexDisplayMode: pages > 1 ? .always : .never))
+            } else {
+                ZStack {
+                    Theme.raised
+                    Image(systemName: Category(place.category).symbol).font(.system(size: 40)).foregroundStyle(Theme.secondary)
                 }
             }
-            .tabViewStyle(.page(indexDisplayMode: pages > 1 ? .always : .never))
-            .frame(height: 300)
-            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-            .padding(.horizontal, 16)
         }
+        .frame(height: 340)
+        .frame(maxWidth: .infinity)
+        .overlay(alignment: .top) {
+            // keeps the status bar and buttons readable over a bright photo
+            LinearGradient(colors: [.black.opacity(0.35), .clear], startPoint: .top, endPoint: .bottom).frame(height: 110).allowsHitTesting(false)
+        }
+    }
+}
+
+/// The Reel a place was saved from: a frame from it (or its thumbnail) with a play mark.
+struct ReelThumb: View {
+    let reel: Reel
+    let place: Place
+
+    var body: some View {
+        let frame = place.photos.first { $0.source == "reel" }
+        let url = frame?.url(width: 240) ?? reel.thumbnailUrl.flatMap { API.shared.url($0) }
+        Color.clear
+            .frame(width: 64, height: 86)
+            .overlay { RemoteImage(url: url) { Theme.raised } }
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay {
+                Image(systemName: "play.fill").font(.system(size: 14)).foregroundStyle(.white)
+                    .frame(width: 30, height: 30).background(.black.opacity(0.4), in: Circle())
+            }
     }
 }

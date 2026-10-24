@@ -1,61 +1,68 @@
 import SwiftUI
 
-/// The Library tab: everything you've saved (with folders on top) and your trips.
+/// Want to go / Been: filters the whole Library.
+enum VisitFilter: String, CaseIterable, Identifiable {
+    case all, want, been
+    var id: String { rawValue }
+    var label: String { self == .all ? "All" : self == .want ? "Want to go" : "Been" }
+    func apply(_ places: [Place]) -> [Place] {
+        switch self {
+        case .all: places
+        case .want: places.filter { !$0.visited }
+        case .been: places.filter(\.visited)
+        }
+    }
+}
+
+/// The Library tab: your home city, trips as routes, every other city sorted automatically, and your own lists.
 struct LibraryView: View {
     @Environment(Store.self) private var store
     @Environment(Router.self) private var router
-    @AppStorage("library.segment") private var segment = "saved"
-    @AppStorage("library.sort") private var sort: PlaceSort = .popular
-    @State private var filter = PlaceFilter()
-    @State private var selecting = false
-    @State private var selection = Set<String>()
+    @AppStorage("library.visit") private var visit: VisitFilter = .all
+    @State private var query = ""
+    @State private var allCities = false
     @State private var sheet: LibrarySheet?
     @State private var newFolder = false
     @State private var folderName = ""
     @State private var deleting: Place?
-    @State private var location = Location.shared
 
     var body: some View {
-        List(selection: $selection) {
-            Section {
-                Picker("Show", selection: $segment) {
-                    Text("Saved").tag("saved")
-                    Text("Trips").tag("trips")
-                }
-                .pickerStyle(.segmented)
-                .listRowBackground(Color.clear)
-                .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
-                ForEach(store.jobs.filter(\.isActive)) { job in
-                    JobRow(job: job)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                header
+                if !store.loaded, let error = store.error {
+                    EmptyState(symbol: "wifi.slash", title: "Can't load your library", text: error) {
+                        Button("Try again") { Task { await store.refresh() } }.buttonStyle(PrimaryButtonStyle()).frame(maxWidth: 200)
+                    }
+                } else if !store.loaded {
+                    ProgressView().frame(maxWidth: .infinity).padding(.top, 60)
+                } else if !query.trimmingCharacters(in: .whitespaces).isEmpty {
+                    searchResults
+                } else if store.saved.isEmpty && store.realTrips.isEmpty {
+                    EmptyState(symbol: "bookmark", title: "Nothing saved yet",
+                               text: "Share a TikTok or Instagram Reel to The Travel Edit, paste a link, or search for a place. Places file themselves by city.") {
+                        Button { router.addRequest = Router.AddRequest() } label: { Label("Save a place", systemImage: "plus") }
+                            .buttonStyle(PrimaryButtonStyle()).frame(maxWidth: 220)
+                    }
+                    .padding(.top, 24)
+                } else {
+                    ForEach(store.jobs.filter(\.isActive)) { job in
+                        Card(padding: 12) { JobRow(job: job) }.padding(.top, 14)
+                    }
+                    aroundHome.padding(.top, 20)
+                    trips
+                    cities
+                    lists
                 }
             }
-            if !store.loaded, let error = store.error {
-                EmptyState(symbol: "wifi.slash", title: "Can't load your library", text: error) {
-                    Button("Try again") { Task { await store.refresh() } }.buttonStyle(PrimaryButtonStyle()).frame(maxWidth: 200)
-                }
-                .listRowBackground(Color.clear)
-            } else if !store.loaded {
-                ProgressView().frame(maxWidth: .infinity).listRowBackground(Color.clear)
-            } else if segment == "trips" {
-                TripsSection(sheet: $sheet)
-            } else {
-                savedSections
-            }
+            .padding(.horizontal, 20)
+            .padding(.bottom, 40)
         }
-        .listStyle(.insetGrouped)
-        .tripBackground()
-        .environment(\.editMode, .constant(selecting ? .active : .inactive))
-        .navigationTitle("Library")
-        .rootToolbar(add: true)
-        .searchable(text: $filter.query, placement: .navigationBarDrawer(displayMode: .automatic), prompt: "Search your saved places")
+        .background(Theme.background.ignoresSafeArea())
+        .toolbar(.hidden, for: .navigationBar)
         .refreshable { await store.refresh() }
-        .safeAreaInset(edge: .bottom) {
-            if selecting { selectionBar }
-        }
-        .sheet(item: $sheet) { sheet in
-            sheet.view.environment(store).environment(router)
-        }
-        .alert("New folder", isPresented: $newFolder) {
+        .sheet(item: $sheet) { sheet in sheet.view.environment(store).environment(router) }
+        .alert("New list", isPresented: $newFolder) {
             TextField("e.g. Date night", text: $folderName)
             Button("Cancel", role: .cancel) {}
             Button("Create") {
@@ -64,84 +71,368 @@ struct LibraryView: View {
                 Task { if let folder = await store.createFolder(name) { router.push(.folder(id: folder.id)) } }
             }
         }
-        .confirmationDialog("Delete this place everywhere? It leaves your saved places, folders and trips.",
+        .confirmationDialog("Delete this place everywhere? It leaves your Library, lists and trips.",
                             isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }), titleVisibility: .visible) {
             Button("Delete place", role: .destructive) {
                 if let place = deleting { Task { await store.delete(place) } }
             }
         }
-        .onChange(of: segment) { _, _ in selecting = false; selection = [] }
     }
 
-    // MARK: Saved
+    private var shown: [Place] { visit.apply(store.saved) }
 
-    @ViewBuilder private var savedSections: some View {
-        Section {
-            FolderStrip(folders: store.folders) { folderName = ""; newFolder = true }
-                .listRowInsets(EdgeInsets())
-                .listRowBackground(Color.clear)
-        } header: {
-            Text("Your folders")
+    // MARK: Header, search and filter
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 10) {
+                Spacer()
+                RoundIconButton(symbol: "plus", label: "Save a place") { router.addRequest = Router.AddRequest() }
+                ProfileButton()
+            }
+            .padding(.top, 8)
+            HStack {
+                Text("Library").font(Theme.serif(40)).foregroundStyle(Theme.label)
+                Spacer()
+                Button { router.push(.map) } label: {
+                    Label("Map", systemImage: "map").font(.subheadline.weight(.medium)).foregroundStyle(Theme.label)
+                        .padding(.horizontal, 14).frame(height: 40)
+                        .background(Theme.cell, in: Capsule())
+                        .overlay(Capsule().strokeBorder(Theme.raisedBorder))
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.top, 8)
+            HStack(spacing: 10) {
+                Image(systemName: "magnifyingglass").foregroundStyle(Theme.tertiary)
+                TextField("Places, cities, lists", text: $query)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .submitLabel(.search)
+                if !query.isEmpty {
+                    Button { query = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(Theme.quiet) }
+                        .accessibilityLabel("Clear search")
+                }
+            }
+            .padding(.horizontal, 16).frame(height: 48)
+            .background(Theme.cell, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Theme.border))
+            .padding(.top, 16)
+            VisitPicker(visit: $visit, places: store.saved).padding(.top, 14)
         }
-        if store.places.isEmpty {
-            EmptyState(symbol: "bookmark.fill", color: Theme.accent, title: "Nothing saved yet",
-                       text: "Share a TikTok or Instagram post to Travel Edit, paste a link, or search for a place. Everything you save lands here, ready to sort into folders and trips.") {
-                Button { router.addRequest = Router.AddRequest() } label: { Label("Add a place", systemImage: "plus") }
-                    .buttonStyle(PrimaryButtonStyle()).frame(maxWidth: 220)
+    }
+
+    // MARK: Search
+
+    @ViewBuilder private var searchResults: some View {
+        let q = PlaceFilter.normalize(query)
+        let places = shown.filter { PlaceFilter.normalize("\($0.name) \($0.neighborhood ?? "") \($0.city) \($0.venue ?? "")").contains(q) }
+        let folders = store.folders.filter { PlaceFilter.normalize($0.name).contains(q) }
+        let cityHits = store.cityGroups(shown).filter { PlaceFilter.normalize($0.name).contains(q) }
+        if places.isEmpty && folders.isEmpty && cityHits.isEmpty {
+            EmptyState(symbol: "magnifyingglass", title: "Nothing matches", text: "Nothing in your Library matches “\(query)”.")
+        }
+        if !cityHits.isEmpty || !folders.isEmpty {
+            SectionHeading("Cities and lists", size: 20).padding(.top, 20)
+            ForEach(cityHits) { city in
+                NavigationLink(value: Route.city(name: city.name)) {
+                    ListRow(title: city.name, subtitle: Fmt.plural(city.places.count, "place"), photo: city.places.first?.photos.first, symbol: "building.2")
+                }.buttonStyle(.plain)
             }
-            .listRowBackground(Color.clear)
-        } else {
-            let shown = sort.sorted(filter.apply(store.places), from: location.current)
-            Section {
-                PlaceFilterBar(places: store.places, filter: $filter, sort: $sort)
-                    .listRowInsets(EdgeInsets())
-                    .listRowBackground(Color.clear)
+            ForEach(folders) { folder in
+                NavigationLink(value: Route.folder(id: folder.id)) {
+                    ListRow(title: folder.name, subtitle: Fmt.plural(folder.placeCount, "place"), photo: folder.covers.first, symbol: "list.bullet")
+                }.buttonStyle(.plain)
             }
-            Section {
-                if shown.isEmpty {
-                    EmptyState(symbol: "mappin.slash", title: "Nothing matches",
-                               text: filter.query.isEmpty ? "Try fewer filters." : "No saved place matches “\(filter.query)”.") {
-                        Button("Clear filters") { filter = PlaceFilter() }.buttonStyle(PrimaryButtonStyle(tinted: true)).frame(maxWidth: 200)
-                    }
-                    .listRowBackground(Color.clear)
+        }
+        if !places.isEmpty {
+            SectionHeading(Fmt.plural(places.count, "place"), size: 20).padding(.top, 20)
+            ForEach(places) { place in
+                NavigationLink(value: Route.place(id: place.id, tripId: nil)) {
+                    PlaceRow(place: place).padding(.vertical, 6)
                 }
-                ForEach(shown) { place in
-                    NavigationLink(value: Route.place(id: place.id, tripId: nil)) {
-                        PlaceRow(place: place, distance: sort == .closest ? place.distance(from: location.current) : nil)
+                .buttonStyle(.plain)
+                .placeActions(place, onDelete: { deleting = place }, sheet: $sheet)
+                Divider().overlay(Theme.divider)
+            }
+        }
+    }
+
+    // MARK: Around home
+
+    @ViewBuilder private var aroundHome: some View {
+        if let home = store.home {
+            let places = shown.filter { store.isHome($0) }
+            let open = places.filter { Hours.status($0.openingHours)?.isOpen == true }.count
+            NavigationLink(value: Route.city(name: home.city)) {
+                Card(radius: 22, padding: 16) {
+                    HStack(alignment: .top) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Label { Text("YOUR CITY").kerning(1.6) } icon: { Image(systemName: "house") }
+                                .font(.system(size: 11, weight: .semibold)).foregroundStyle(Theme.accent)
+                            Text("Around \(home.city)").font(Theme.serif(24)).foregroundStyle(Theme.label)
+                            HStack(spacing: 0) {
+                                Text(Fmt.plural(places.count, "place")).foregroundStyle(Theme.secondary)
+                                if open > 0 { Text(" · ").foregroundStyle(Theme.secondary); Text("\(open) open now").foregroundStyle(Theme.open) }
+                            }
+                            .font(.footnote)
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(Theme.label)
+                            .frame(width: 36, height: 36).background(Theme.raised, in: Circle())
                     }
-                    .tag(place.id)
-                    .placeActions(place, onDelete: { deleting = place }, sheet: $sheet)
+                    if !places.isEmpty { PhotoStrip(places: places).padding(.top, 14) }
                 }
-            } header: {
-                HStack {
-                    Text(filter.isActive ? "\(Fmt.plural(shown.count, "place")) match" : Fmt.plural(shown.count, "place"))
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    // MARK: Trips
+
+    @ViewBuilder private var trips: some View {
+        let all = store.realTrips
+        SectionHeading(title: "Trips") {
+            AccentTextButton(title: "New trip") { sheet = .newTrip([], nil) }
+        }
+        .padding(.top, 28)
+        if all.isEmpty {
+            Text("Plan a trip from a city you've saved places in, or start one from scratch.")
+                .font(.subheadline).foregroundStyle(Theme.secondary)
+        }
+        ForEach(Array(all.enumerated()), id: \.element.id) { i, trip in
+            NavigationLink(value: Route.trip(id: trip.id)) {
+                if i == 0 { TripRouteCard(trip: trip) } else { TripRow(trip: trip) }
+            }
+            .buttonStyle(.plain)
+            .padding(.top, i == 0 ? 4 : 10)
+        }
+    }
+
+    // MARK: Cities
+
+    @ViewBuilder private var cities: some View {
+        let groups = store.cityGroups(shown)
+        if !groups.isEmpty {
+            SectionHeading(title: "Cities") {
+                Text("Sorted for you automatically").font(.caption).foregroundStyle(Theme.tertiary)
+            }
+            .padding(.top, 28)
+            let visible = allCities ? groups : Array(groups.prefix(4))
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], alignment: .leading, spacing: 16) {
+                ForEach(visible) { city in
+                    NavigationLink(value: Route.city(name: city.name)) { CityTile(city: city, trip: store.trip(forCity: city.name)) }
+                        .buttonStyle(.plain)
+                }
+            }
+            .padding(.top, 4)
+            if groups.count > 4 {
+                Button(allCities ? "Show fewer" : "See all \(groups.count) cities") { withAnimation { allCities.toggle() } }
+                    .font(.subheadline.weight(.semibold)).foregroundStyle(Theme.accent).frame(minHeight: 44)
+            }
+        }
+    }
+
+    // MARK: Lists
+
+    @ViewBuilder private var lists: some View {
+        SectionHeading(title: "Your lists") {
+            AccentTextButton(title: "New list") { folderName = ""; newFolder = true }
+        }
+        .padding(.top, 20)
+        if store.folders.isEmpty {
+            Text("Make lists for anything: date night, early risers, best croissants. A place can be on several.")
+                .font(.subheadline).foregroundStyle(Theme.secondary)
+        }
+        ForEach(Array(store.folders.enumerated()), id: \.element.id) { i, folder in
+            NavigationLink(value: Route.folder(id: folder.id)) {
+                ListRow(title: folder.name, subtitle: listSubtitle(folder), photo: folder.covers.first, symbol: "list.bullet")
+            }
+            .buttonStyle(.plain)
+            if i < store.folders.count - 1 { Divider().overlay(Theme.divider) }
+        }
+    }
+
+    private func listSubtitle(_ folder: Folder) -> String {
+        let cities = Array(Set(store.saved.filter { $0.folderIds.contains(folder.id) && !$0.city.isEmpty }.map(\.city))).sorted()
+        let where_ = cities.isEmpty ? nil : cities.count <= 2 ? cities.joined(separator: ", ") : "\(cities.count) cities"
+        return [Fmt.plural(folder.placeCount, "place"), where_].compactMap { $0 }.joined(separator: " · ")
+    }
+}
+
+/// All / Want to go / Been, with counts.
+struct VisitPicker: View {
+    @Binding var visit: VisitFilter
+    let places: [Place]
+
+    var body: some View {
+        HStack(spacing: 4) {
+            ForEach(VisitFilter.allCases) { option in
+                let on = option == visit
+                Button { withAnimation(.snappy) { visit = option } } label: {
+                    HStack(spacing: 4) {
+                        Text(option.label).fontWeight(on ? .semibold : .medium)
+                        Text("\(option.apply(places).count)").foregroundStyle(on ? Theme.background.opacity(0.8) : Theme.secondary)
+                    }
+                    .font(.subheadline)
+                    .foregroundStyle(on ? Theme.background : Theme.label)
+                    .frame(maxWidth: .infinity, minHeight: 36)
+                    .background(on ? Theme.label : .clear, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(on ? .isSelected : [])
+            }
+        }
+        .padding(4)
+        .background(Theme.cell, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Theme.border))
+    }
+}
+
+/// Three photos and "+9".
+struct PhotoStrip: View {
+    let places: [Place]
+
+    var body: some View {
+        let withPhotos = places.filter { !$0.photos.isEmpty }
+        let shown = Array((withPhotos.isEmpty ? places : withPhotos).prefix(places.count > 4 ? 3 : 4))
+        HStack(spacing: 8) {
+            ForEach(shown) { p in PhotoBox(place: p, width: nil, height: 72, radius: 12) }
+            if places.count > 4 {
+                Text("+\(places.count - 3)").font(.subheadline.weight(.semibold)).foregroundStyle(Theme.label)
+                    .frame(maxWidth: .infinity, minHeight: 72)
+                    .background(Theme.raised, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
+            ForEach(0..<max(0, 4 - shown.count - (places.count > 4 ? 1 : 0)), id: \.self) { _ in Color.clear.frame(maxWidth: .infinity, maxHeight: 72) }
+        }
+    }
+}
+
+/// The next trip, big: cover photo, countdown, dates and its route.
+struct TripRouteCard: View {
+    let trip: Trip
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Color.clear.frame(height: 120).frame(maxWidth: .infinity)
+                .overlay {
+                    RemoteImage(url: trip.coverPhoto?.url(width: 900)) {
+                        ZStack { Theme.raised; Image(systemName: "airplane").font(.title).foregroundStyle(Theme.secondary) }
+                    }
+                }
+                .clipped()
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(trip.name).font(Theme.serif(24)).foregroundStyle(Theme.label).lineLimit(1)
                     Spacer()
-                    Button(selecting ? "Done" : "Select") {
-                        withAnimation { selecting.toggle(); selection = [] }
-                    }
-                    .font(.subheadline.weight(.semibold))
-                    .textCase(nil)
+                    if let countdown = trip.countdown { Text(countdown).font(.footnote.weight(.semibold)).foregroundStyle(Theme.accent) }
                 }
+                Text([trip.dateRange ?? "No dates yet", Fmt.plural(trip.placeCount, "place")].joined(separator: " · "))
+                    .font(.footnote).foregroundStyle(Theme.secondary)
+                RouteStrip(stops: trip.stops).padding(.top, 8)
             }
+            .padding(EdgeInsets(top: 14, leading: 16, bottom: 16, trailing: 16))
+        }
+        .background(Theme.cell)
+        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).strokeBorder(Theme.border))
+    }
+}
+
+/// "Zürich —— St. Moritz —— Interlaken"
+struct RouteStrip: View {
+    let stops: [String]
+    var body: some View {
+        HStack(spacing: 6) {
+            ForEach(Array(stops.enumerated()), id: \.offset) { i, stop in
+                if i > 0 { Rectangle().fill(Theme.raisedBorder).frame(height: 1) }
+                Text(stop).font(.footnote.weight(.medium)).foregroundStyle(Theme.label).lineLimit(1).fixedSize()
+            }
+            if stops.count == 1 { Spacer() }
         }
     }
+}
 
-    private var selectionBar: some View {
-        let ids = Array(selection)
-        return HStack(spacing: 10) {
-            Text(selection.isEmpty ? "Tick places" : Fmt.plural(selection.count, "place"))
-                .font(.subheadline.weight(.semibold))
-            Spacer()
-            Button { sheet = .folders(ids) } label: { Label("Folder", systemImage: "folder.badge.plus") }
-            Button { sheet = .trips(ids) } label: { Label("Trip", systemImage: "airplane") }
-            Button { sheet = .newTrip(ids, nil) } label: { Label("New trip", systemImage: "plus") }
+extension Trip {
+    /// The cities on the trip, in order. One city until trips have several stops.
+    var stops: [String] { [city].filter { !$0.isEmpty } }
+}
+
+/// A smaller trip row: photo, name, dates and route.
+struct TripRow: View {
+    let trip: Trip
+    var body: some View {
+        HStack(spacing: 14) {
+            TripCover(trip: trip, size: 56)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(trip.name).font(Theme.serif(19)).foregroundStyle(Theme.label).lineLimit(1)
+                Text([trip.dateRange, trip.stops.joined(separator: " → ")].compactMap { $0?.isEmpty == false ? $0 : nil }.joined(separator: " · "))
+                    .font(.footnote).foregroundStyle(Theme.secondary).lineLimit(1)
+            }
+            Spacer(minLength: 0)
+            Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(Theme.quiet)
         }
-        .labelStyle(.iconOnly)
-        .font(.title3)
-        .disabled(selection.isEmpty)
-        .padding(.horizontal, 20).padding(.vertical, 14)
-        .background(.regularMaterial, in: Capsule())
-        .padding(.horizontal, 16).padding(.bottom, 8)
+        .padding(EdgeInsets(top: 10, leading: 10, bottom: 10, trailing: 14))
+        .background(Theme.cell, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(Theme.border))
+    }
+}
+
+/// A city in the grid: two photos, its name and whether a trip's planned.
+struct CityTile: View {
+    let city: Store.CityGroup
+    let trip: Trip?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            let photos = Array(city.places.filter { !$0.photos.isEmpty }.prefix(2))
+            HStack(spacing: 2) {
+                if photos.isEmpty {
+                    ZStack { Theme.raised; Image(systemName: "building.2").foregroundStyle(Theme.secondary) }.frame(height: 96)
+                } else {
+                    ForEach(photos) { p in PhotoBox(place: p, width: nil, height: 96, radius: 0) }
+                }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            Text(city.name).font(Theme.serif(19)).foregroundStyle(Theme.label).lineLimit(1).padding(.top, 6)
+            HStack(spacing: 0) {
+                Text(Fmt.plural(city.places.count, "place") + " · ").foregroundStyle(Theme.secondary)
+                if let trip, let start = trip.startDate.flatMap(Fmt.day) {
+                    Text("Trip " + start.formatted(.dateTime.day().month(.abbreviated))).foregroundStyle(Theme.accent)
+                } else if trip != nil {
+                    Text("On a trip").foregroundStyle(Theme.accent)
+                } else {
+                    Text("No trip yet").foregroundStyle(Theme.secondary)
+                }
+            }
+            .font(.footnote).lineLimit(1)
+        }
+    }
+}
+
+/// A row with a photo (or symbol), a title and a line under it, and a chevron.
+struct ListRow: View {
+    let title: String
+    let subtitle: String
+    let photo: PlacePhoto?
+    let symbol: String
+
+    var body: some View {
+        HStack(spacing: 14) {
+            RemoteImage(url: photo?.url(width: 150)) {
+                ZStack { Theme.raised; Image(systemName: symbol).foregroundStyle(Theme.secondary) }
+            }
+            .frame(width: 48, height: 48)
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.body.weight(.semibold)).foregroundStyle(Theme.label).lineLimit(1)
+                Text(subtitle).font(.footnote).foregroundStyle(Theme.secondary).lineLimit(1)
+            }
+            Spacer(minLength: 0)
+            Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(Theme.quiet)
+        }
+        .padding(.vertical, 10)
+        .contentShape(Rectangle())
     }
 }
 

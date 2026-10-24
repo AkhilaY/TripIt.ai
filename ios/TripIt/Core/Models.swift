@@ -221,6 +221,8 @@ struct AddPlaceResult: Codable {
 struct HomeSetting: Codable, Hashable {
     var city: String
     var country: String
+    var latitude: Double?
+    var longitude: Double?
 }
 
 struct TripShareLink: Codable {

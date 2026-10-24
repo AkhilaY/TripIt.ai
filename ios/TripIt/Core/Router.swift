@@ -2,7 +2,7 @@ import Foundation
 import Observation
 
 enum AppTab: Hashable {
-    case library, discover, map, bookings, concierge
+    case home, library, discover, bookings, concierge
 }
 
 /// Screens pushed onto a tab's navigation stack.
@@ -10,6 +10,10 @@ enum Route: Hashable {
     case place(id: String, tripId: String?)
     case trip(id: String)
     case folder(id: String)
+    /// Everything saved in one city (your home city is "Around <city>").
+    case city(name: String)
+    /// Your saved places on a map.
+    case map
     case imports
     /// The places saved from one post.
     case reel(id: String)
@@ -25,10 +29,10 @@ enum Route: Hashable {
 @MainActor
 @Observable
 final class Router {
-    var tab: AppTab = .library
+    var tab: AppTab = .home
+    var home: [Route] = []
     var library: [Route] = []
     var discover: [Route] = []
-    var map: [Route] = []
     var bookings: [Route] = []
     var concierge: [Route] = []
     var showProfile = false
@@ -46,9 +50,9 @@ final class Router {
     func push(_ route: Route) {
         if showProfile { profilePath.append(route); return }
         switch tab {
+        case .home: home.append(route)
         case .library: library.append(route)
         case .discover: discover.append(route)
-        case .map: map.append(route)
         case .bookings: bookings.append(route)
         case .concierge: concierge.append(route)
         }
@@ -80,7 +84,10 @@ final class Router {
             push(.folder(id: parts[1]))
         case "map":
             showProfile = false
-            tab = .map
+            push(.map)
+        case "home":
+            showProfile = false
+            tab = .home
         case "discover":
             showProfile = false
             tab = .discover

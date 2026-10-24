@@ -8,15 +8,15 @@ struct MainTabs: View {
 
     var body: some View {
         TabView(selection: $router.tab) {
+            NavigationStack(path: $router.home) { HomeView().withRoutes() }
+                .tabItem { Label("Home", systemImage: "house") }
+                .tag(AppTab.home)
             NavigationStack(path: $router.library) { LibraryView().withRoutes() }
                 .tabItem { Label("Library", systemImage: "bookmark") }
                 .tag(AppTab.library)
             NavigationStack(path: $router.discover) { WebScreen(hash: "#/discover", isRoot: true).withRoutes() }
                 .tabItem { Label("Discover", systemImage: "safari") }
                 .tag(AppTab.discover)
-            NavigationStack(path: $router.map) { MapTab().withRoutes() }
-                .tabItem { Label("Map", systemImage: "map") }
-                .tag(AppTab.map)
             NavigationStack(path: $router.bookings) { WebScreen(hash: "#/bookings", isRoot: true).withRoutes() }
                 .tabItem { Label("Bookings", systemImage: "ticket") }
                 .tag(AppTab.bookings)
@@ -78,6 +78,8 @@ struct RouteView: View {
         case .place(let id, let tripId): PlaceView(placeId: id, tripId: tripId)
         case .trip(let id): TripView(tripId: id)
         case .folder(let id): FolderView(folderId: id)
+        case .city(let name): CityView(city: name)
+        case .map: MapTab()
         case .imports: ImportsView()
         case .reel(let id): ReelPlacesView(reelId: id)
         case .menu(let placeId): MenuView(placeId: placeId)

@@ -11,6 +11,8 @@ final class Store {
     var trips: [Trip] = []
     var jobs: [Job] = []
     var tripDetails: [String: TripDetail] = [:]
+    /// Your home city: its places are "Around <city>" and never need a trip.
+    var home: HomeSetting?
     var loaded = false
     var error: String?
     /// A short message shown at the bottom of the screen ("Saved to Date night").
@@ -42,7 +44,9 @@ final class Store {
             async let f: [Folder] = api.get("/v1/folders")
             async let t: [Trip] = api.get("/v1/trips")
             async let j: [Job] = api.get("/v1/jobs?limit=30")
+            async let h = api.get("/v1/home", as: HomeSetting?.self)
             (places, folders, trips, jobs) = try await (p, f, t, j)
+            home = (try? await h) ?? home
             loaded = true
             error = nil
             if jobs.contains(where: \.isActive) { pollJobs() }
@@ -295,8 +299,126 @@ final class Store {
         } catch { fail(error); return false }
     }
 
+    func setHome(_ city: String) async -> Bool {
+        do {
+            home = try await api.put("/v1/home", ["city": city])
+            return true
+        } catch { fail(error); return false }
+    }
+
     func reset() {
-        places = []; folders = []; trips = []; jobs = []; tripDetails = [:]; loaded = false
+        places = []; folders = []; trips = []; jobs = []; tripDetails = [:]; home = nil; loaded = false
         pollTask?.cancel(); pollTask = nil
+    }
+}
+
+// MARK: - Cities, trips and filing
+
+extension Store {
+    struct CityGroup: Identifiable, Hashable {
+        let name: String
+        let country: String
+        let places: [Place]
+        var id: String { Store.cityKey(name) }
+    }
+
+    static func cityKey(_ city: String) -> String {
+        city.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: nil).trimmingCharacters(in: .whitespaces)
+    }
+
+    var homeKey: String? { home.map { Store.cityKey($0.city) } }
+
+    func isHome(_ place: Place) -> Bool {
+        guard let homeKey, !place.city.isEmpty else { return false }
+        return Store.cityKey(place.city) == homeKey
+    }
+
+    /// Saved places (not ones an AI plan suggested that you haven't kept).
+    var saved: [Place] { places.filter(\.saved) }
+
+    func places(inCity name: String) -> [Place] {
+        let key = Store.cityKey(name)
+        return saved.filter { Store.cityKey($0.city) == key }
+    }
+
+    /// Every city you've saved places in, except home, the biggest first.
+    func cityGroups(_ from: [Place]? = nil) -> [CityGroup] {
+        let source = (from ?? saved).filter { !$0.city.isEmpty && !isHome($0) }
+        return Dictionary(grouping: source) { Store.cityKey($0.city) }
+            .map { _, items in CityGroup(name: items[0].city, country: items[0].country, places: items) }
+            .sorted { $0.places.count != $1.places.count ? $0.places.count > $1.places.count : $0.name < $1.name }
+    }
+
+    /// Trips (not home collections), soonest first; ones without dates last.
+    var realTrips: [Trip] {
+        trips.filter { !$0.isLocal }.sorted { a, b in
+            switch (a.startDate, b.startDate) {
+            case let (x?, y?): return x < y
+            case (nil, _?): return false
+            case (_?, nil): return true
+            default: return a.createdAt > b.createdAt
+            }
+        }
+    }
+
+    /// Trips that haven't ended, soonest first.
+    var upcomingTrips: [Trip] {
+        let today = Fmt.iso(Date())
+        return realTrips.filter { t in
+            guard let start = t.startDate else { return false }
+            return t.lastDay.map { $0 >= today } ?? (start >= today)
+        }
+    }
+
+    func trip(forCity name: String) -> Trip? {
+        let key = Store.cityKey(name)
+        return upcomingTrips.first { Store.cityKey($0.city) == key } ?? realTrips.first { Store.cityKey($0.city) == key }
+    }
+
+    /// Where a place lives: "Around Atlanta", "Switzerland trip, Day 1", "on your wishlist".
+    func filing(_ place: Place) -> String {
+        let city = place.city.isEmpty ? nil : place.city
+        var where_: String
+        if isHome(place), let home { where_ = "Around \(home.city)" }
+        else if let trip = realTrips.first(where: { place.tripIds.contains($0.id) }) {
+            where_ = trip.name.lowercased().contains("trip") ? trip.name : "\(trip.name) trip"
+            if let day = tripDetails[trip.id]?.places.first(where: { $0.id == place.id })?.dayNumber { where_ += ", Day \(day)" }
+        } else if let folder = folders.first(where: { place.folderIds.contains($0.id) }) { where_ = folder.name }
+        else { where_ = "on your wishlist" }
+        return [city, where_].compactMap { $0 }.joined(separator: " · ")
+    }
+}
+
+extension Trip {
+    /// The trip's last day ("2026-11-06"), when it has dates.
+    var lastDay: String? {
+        guard let start = startDate.flatMap(Fmt.day), dayCount > 0,
+              let end = Calendar.current.date(byAdding: .day, value: dayCount - 1, to: start) else { return startDate }
+        return Fmt.iso(end)
+    }
+
+    /// "1–6 Nov", "28 Oct – 2 Nov", or nil without dates.
+    var dateRange: String? {
+        guard let start = startDate.flatMap(Fmt.day) else { return nil }
+        let end = lastDay.flatMap(Fmt.day) ?? start
+        let cal = Calendar.current
+        let d = DateFormatter(); d.setLocalizedDateFormatFromTemplate("d")
+        let dm = DateFormatter(); dm.setLocalizedDateFormatFromTemplate("d MMM")
+        if cal.isDate(start, inSameDayAs: end) { return dm.string(from: start) }
+        if cal.component(.month, from: start) == cal.component(.month, from: end) {
+            return "\(d.string(from: start))–\(dm.string(from: end))"
+        }
+        return "\(dm.string(from: start)) – \(dm.string(from: end))"
+    }
+
+    /// "In 9 days", "Tomorrow", "Now", or nil.
+    var countdown: String? {
+        guard let start = startDate.flatMap(Fmt.day) else { return nil }
+        let cal = Calendar.current
+        let days = cal.dateComponents([.day], from: cal.startOfDay(for: Date()), to: start).day ?? 0
+        if days > 1 { return "In \(days) days" }
+        if days == 1 { return "Tomorrow" }
+        if let end = lastDay, end >= Fmt.iso(Date()) { return "Now" }
+        return nil
     }
 }

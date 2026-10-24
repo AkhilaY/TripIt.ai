@@ -93,7 +93,7 @@ struct AddPlaceSheet: View {
                                         }
                                     }
                                     Spacer()
-                                    Image(systemName: "plus.circle.fill").foregroundStyle(Theme.accent)
+                                    Image(systemName: "plus.circle.fill").foregroundStyle(Theme.link)
                                 }
                             }
                         }

@@ -40,6 +40,8 @@ from .maplinks import parse as parse_map_link
 from .maplinks import resolve as resolve_map_link
 from .media import UnsupportedURLError, find_url, platform_for
 from .models import (
+    TripStopsRequest,
+    WeatherDay,
     AddFromLinkRequest,
     AddToDayRequest,
     Booking,
@@ -797,6 +799,48 @@ async def update_trip(trip_id: str, body: TripUpdate, request: Request) -> TripD
         if changes.get(key) is None:
             changes.pop(key, None)
     _db(request).update_trip(trip_id, **changes)
+    return _trip_or_404(request, trip_id)
+
+
+_WEATHER_CACHE: dict[tuple, tuple[float, Optional[WeatherDay]]] = {}
+
+
+@app.get("/v1/weather/today", response_model=Optional[WeatherDay], dependencies=[Auth])
+async def weather_today(request: Request, lat: float = Query(ge=-90, le=90), lon: float = Query(ge=-180, le=180),
+                        on: Optional[date] = None) -> Optional[WeatherDay]:
+    """The day's weather where you are (for Home during a trip); null when it isn't available. Kept for an hour."""
+    day = on or date.today()
+    key = (round(lat, 1), round(lon, 1), day.isoformat())
+    hit = _WEATHER_CACHE.get(key)
+    if hit and time.monotonic() - hit[0] < 3600:
+        return hit[1]
+    weather = request.app.state.packing.weather
+    found = await weather.days(lat, lon, day, 1)
+    result = found[0] if found else None
+    if len(_WEATHER_CACHE) > 500:
+        _WEATHER_CACHE.clear()
+    _WEATHER_CACHE[key] = (time.monotonic(), result)
+    return result
+
+
+@app.put("/v1/trips/{trip_id}/stops", response_model=TripDetail, dependencies=[Auth])
+async def set_trip_stops(trip_id: str, body: TripStopsRequest, request: Request) -> TripDetail:
+    """Sets the trip's route: its cities in order, how many days in each and how you travel between them.
+    The trip grows to fit; if it's longer, the last stop keeps the extra days (nothing on the plan moves)."""
+    trip = _trip_or_404(request, trip_id)
+    if trip.kind == "local":
+        raise HTTPException(status_code=422, detail="Your home city doesn't have a route")
+    total = sum(s.days for s in body.stops)
+    if total > 21:
+        raise HTTPException(status_code=422, detail="A trip can be up to 21 days")
+    stops = [{"city": s.city.strip(), "country": (s.country or "").strip(), "days": s.days,
+              **({"travel_mode": s.travel_mode} if s.travel_mode and i else {}),
+              **({"travel_minutes": s.travel_minutes} if s.travel_minutes is not None and i else {}),
+              **({"travel_note": s.travel_note.strip()} if s.travel_note and s.travel_note.strip() and i else {})}
+             for i, s in enumerate(body.stops)]
+    first = stops[0]
+    _db(request).update_trip(trip_id, stops=stops, city=first["city"], country=first["country"] or trip.country,
+                             day_count=max(trip.day_count, total))
     return _trip_or_404(request, trip_id)
 
 

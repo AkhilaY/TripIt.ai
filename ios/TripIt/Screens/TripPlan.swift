@@ -96,7 +96,7 @@ struct TripPlan: View {
     }
 
     @ViewBuilder private func daySection(_ day: Int) -> some View {
-        let stops = trip.stops(on: day)
+        let stops = trip.dayPlaces(day)
         let located = stops.filter(\.isLocated)
         Section {
             ForEach(dayBookings(day)) { booking in
@@ -171,7 +171,7 @@ struct TripPlan: View {
     // MARK: Changes
 
     private func move(_ place: Place, to day: Int) async {
-        let index = day == 0 ? 0 : trip.stops(on: day).count
+        let index = day == 0 ? 0 : trip.dayPlaces(day).count
         await store.tripCall("POST", "/v1/trips/\(trip.id)/move", ["place_id": place.id, "day": day, "index": index])
     }
 
@@ -192,7 +192,7 @@ struct TripPlan: View {
     private func addToDay(_ day: Int?) {
         let tripId = trip.id
         let onTrip = Set(trip.places.map(\.id))
-        let onDay = Set(day.map { trip.stops(on: $0).map(\.id) } ?? [])
+        let onDay = Set(day.map { trip.dayPlaces($0).map(\.id) } ?? [])
         librarySheet = .pick(title: day.map { "Add to Day \($0)" } ?? "Places for a new day", exclude: onDay, confirm: "Add", onDone: { ids in
             let missing = ids.filter { !onTrip.contains($0) }
             if !missing.isEmpty { await store.addToTrip(tripId, missing) }
@@ -203,11 +203,11 @@ struct TripPlan: View {
     // MARK: Travel times
 
     private var legsKey: String {
-        trip.id + travelMode + (1...max(trip.dayCount, 1)).map { trip.stops(on: $0).map(\.id).joined() }.joined(separator: "|")
+        trip.id + travelMode + (1...max(trip.dayCount, 1)).map { trip.dayPlaces($0).map(\.id).joined() }.joined(separator: "|")
     }
 
     private func loadLegs() async {
-        for day in 1...max(trip.dayCount, 1) where trip.stops(on: day).filter(\.isLocated).count > 1 {
+        for day in 1...max(trip.dayCount, 1) where trip.dayPlaces(day).filter(\.isLocated).count > 1 {
             guard let result: DayLegs = try? await API.shared.get("/v1/trips/\(trip.id)/days/\(day)/legs") else { continue }
             var byPair: [String: Leg] = [:]
             for leg in result.legs { byPair["\(leg.fromPlaceId ?? "")>\(leg.toPlaceId)"] = leg }

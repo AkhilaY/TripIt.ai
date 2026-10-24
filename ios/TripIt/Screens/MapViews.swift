@@ -16,7 +16,7 @@ struct PlacesMap: View {
             UserAnnotation()
             if route, located.count > 1 {
                 MapPolyline(coordinates: located.compactMap(\.coordinate))
-                    .stroke(Theme.accent.opacity(0.55), style: StrokeStyle(lineWidth: 3, lineCap: .round, dash: [6, 6]))
+                    .stroke(Theme.gold.opacity(0.55), style: StrokeStyle(lineWidth: 3, lineCap: .round, dash: [6, 6]))
             }
             ForEach(Array(located.enumerated()), id: \.element.id) { index, place in
                 let category = Category(place.category)
@@ -58,7 +58,7 @@ struct TripMapView: View {
     @State private var selected: String?
 
     var body: some View {
-        let shown = day == 0 ? trip.places : trip.stops(on: day)
+        let shown = day == 0 ? trip.places : trip.dayPlaces(day)
         let missing = shown.filter { !$0.isLocated }.count
         PlacesMap(places: shown, tripId: trip.id, route: day > 0, selected: $selected)
             .safeAreaInset(edge: .top) {

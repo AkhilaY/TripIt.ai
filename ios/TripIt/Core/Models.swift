@@ -100,6 +100,18 @@ struct Booking: Codable, Identifiable, Hashable {
     var placeId: String?
 }
 
+/// One city on a trip's route; stops cover the trip's days back to back.
+struct TripStop: Codable, Hashable {
+    var city: String
+    var country: String
+    var days: Int
+    var startDay: Int
+    var endDay: Int
+    var travelMode: String?
+    var travelMinutes: Int?
+    var travelNote: String?
+}
+
 struct Trip: Codable, Identifiable, Hashable {
     var id: String
     var name: String
@@ -117,6 +129,7 @@ struct Trip: Codable, Identifiable, Hashable {
     var categories: [String]
     var coverPhoto: PlacePhoto?
     var shareToken: String?
+    var stops: [TripStop]?
 
     var isLocal: Bool { kind == "local" }
 }
@@ -137,11 +150,12 @@ struct TripDetail: Codable, Identifiable, Hashable {
     var places: [Place]
     var reels: [Reel]
     var bookings: [Booking]
+    var stops: [TripStop]?
 
     var isLocal: Bool { kind == "local" }
 
-    /// The stops on a day, in order.
-    func stops(on day: Int) -> [Place] {
+    /// The places planned for a day, in order.
+    func dayPlaces(_ day: Int) -> [Place] {
         places.filter { $0.dayNumber == day }.sorted { $0.dayOrder < $1.dayOrder }
     }
 

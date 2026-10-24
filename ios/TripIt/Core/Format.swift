@@ -26,6 +26,13 @@ enum Fmt {
         return date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day())
     }
 
+    /// The date of a trip's day as "2026-11-16".
+    static func isoDay(start: String?, day number: Int) -> String? {
+        guard let start, let first = day(start),
+              let date = Calendar.current.date(byAdding: .day, value: number - 1, to: first) else { return nil }
+        return iso(date)
+    }
+
     /// "19:30" → "7:30 PM" in the phone's style
     static func clock(_ hhmm: String) -> String {
         let parts = hhmm.split(separator: ":").compactMap { Int($0) }

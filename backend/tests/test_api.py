@@ -3175,3 +3175,41 @@ async def test_google_calls_are_counted():
     await geocoder.search("Lucali")
     await geocoder.locate("Lucali", None, "New York", "USA")
     assert calls == ["search", "locate"]
+
+
+# ---------- Trip routes (several stops) ----------
+
+
+def test_trip_route_has_stops_covering_its_days(client):
+    trip = client.post("/v1/trips", json={"city": "London", "name": "Europe, November", "days": 5}, headers=H).json()
+    assert [(s["city"], s["start_day"], s["end_day"]) for s in trip["stops"]] == [("London", 1, 5)]
+    r = client.put(f"/v1/trips/{trip['id']}/stops", json={"stops": [
+        {"city": "London", "country": "UK", "days": 3, "travel_mode": "flight"},
+        {"city": "Paris", "days": 3, "travel_mode": "train", "travel_minutes": 135, "travel_note": "Eurostar from St Pancras"},
+        {"city": "London", "days": 2, "travel_mode": "train", "travel_minutes": 140},
+    ]}, headers=H)
+    assert r.status_code == 200, r.text
+    t = r.json()
+    assert t["day_count"] == 8 and t["city"] == "London"
+    assert [(s["city"], s["start_day"], s["end_day"]) for s in t["stops"]] == [("London", 1, 3), ("Paris", 4, 6), ("London", 7, 8)]
+    assert "travel_mode" not in t["stops"][0] or t["stops"][0]["travel_mode"] is None  # nothing before the first stop
+    assert t["stops"][1]["travel_note"] == "Eurostar from St Pancras" and t["stops"][1]["travel_minutes"] == 135
+    listed = next(x for x in client.get("/v1/trips", headers=H).json() if x["id"] == trip["id"])
+    assert [s["city"] for s in listed["stops"]] == ["London", "Paris", "London"]
+    # A shorter route never cuts days off the plan: the last stop keeps them.
+    t = client.put(f"/v1/trips/{trip['id']}/stops", json={"stops": [{"city": "Paris", "days": 2}]}, headers=H).json()
+    assert t["day_count"] == 8 and t["city"] == "Paris" and t["stops"] == [
+        {"city": "Paris", "country": "", "days": 8, "start_day": 1, "end_day": 8, "travel_mode": None, "travel_minutes": None, "travel_note": None}]
+    assert client.put(f"/v1/trips/{trip['id']}/stops", json={"stops": [{"city": "Rome", "days": 15}, {"city": "Milan", "days": 7}]}, headers=H).status_code == 422
+    assert client.put(f"/v1/trips/{trip['id']}/stops", json={"stops": []}, headers=H).status_code == 422
+
+
+def test_todays_weather_where_you_are(client):
+    from datetime import date
+    r = client.get("/v1/weather/today", params={"lat": 51.5, "lon": -0.12, "on": date.today().isoformat()}, headers=H)
+    assert r.status_code == 200 and r.json()["summary"] and r.json()["temp_max"] == 14.0
+    n = len(client.weather_log)
+    client.get("/v1/weather/today", params={"lat": 51.51, "lon": -0.12, "on": date.today().isoformat()}, headers=H)
+    assert len(client.weather_log) == n  # kept for an hour
+    client.weather_state["fail"] = True
+    assert client.get("/v1/weather/today", params={"lat": 40.7, "lon": -74.0}, headers=H).json() is None

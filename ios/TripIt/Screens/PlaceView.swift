@@ -129,7 +129,7 @@ struct PlaceView: View {
     private func header(_ p: Place, _ category: Category) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Eyebrow(text: [category.label, p.mustDo ? "Starred" : nil].compactMap { $0 }.joined(separator: " · "), color: Theme.tertiary)
-            Text(p.name).font(Theme.serif(34)).foregroundStyle(Theme.label).fixedSize(horizontal: false, vertical: true)
+            Text(p.name).font(Theme.serif(28)).foregroundStyle(Theme.label).fixedSize(horizontal: false, vertical: true)
             let loc = [p.neighborhood, p.city.isEmpty ? nil : p.city].compactMap { $0 }.joined(separator: ", ")
             if !loc.isEmpty { Text(loc).font(.subheadline).foregroundStyle(Theme.secondary) }
             statusLine(p)
@@ -164,7 +164,7 @@ struct PlaceView: View {
     private func suggestedBanner(_ p: Place, _ trip: TripDetail) -> some View {
         Card(padding: 14) {
             HStack(spacing: 12) {
-                Image(systemName: "sparkles").foregroundStyle(Theme.accent)
+                Image(systemName: "sparkles").foregroundStyle(Theme.link)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Suggested for this trip").font(.subheadline.weight(.semibold))
                     Text(p.suggestionNote ?? "Added by AI to fill a quiet day").font(.caption).foregroundStyle(Theme.secondary)
@@ -177,7 +177,7 @@ struct PlaceView: View {
                         store.show("Kept, and added to your Library")
                     }
                 }
-                .font(.subheadline.weight(.semibold)).foregroundStyle(Theme.accent)
+                .font(.subheadline.weight(.semibold)).foregroundStyle(Theme.link)
             }
         }
     }
@@ -192,18 +192,18 @@ struct PlaceView: View {
                     Task { await store.patch(p, ["visited": been]) }
                 } label: {
                     Label(been ? "Been here" : "Want to go", systemImage: been ? "checkmark" : "bookmark")
-                        .font(.subheadline.weight(on ? .semibold : .medium))
+                        .font(.footnote.weight(on ? .semibold : .medium))
                         .foregroundStyle(on ? Theme.background : Theme.label)
-                        .frame(maxWidth: .infinity, minHeight: 40)
-                        .background(on ? Theme.label : .clear, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+                        .frame(maxWidth: .infinity, minHeight: 32)
+                        .background(on ? Theme.label : .clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                 }
                 .buttonStyle(.plain)
                 .accessibilityAddTraits(on ? .isSelected : [])
             }
         }
-        .padding(4)
-        .background(Theme.cell, in: RoundedRectangle(cornerRadius: 15, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 15, style: .continuous).strokeBorder(Theme.border))
+        .padding(3)
+        .background(Theme.cell, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous).strokeBorder(Theme.border))
     }
 
     // MARK: Why you saved it
@@ -212,7 +212,7 @@ struct PlaceView: View {
         let reel = detail?.reels.first
         let quote = p.tips ?? p.recommendedItems.first.map { "Order the \($0)." } ?? (p.summary.isEmpty ? nil : p.summary)
         return VStack(alignment: .leading, spacing: 12) {
-            Text("Why you saved it").font(Theme.serif(22)).foregroundStyle(Theme.label)
+            Text("Why you saved it").font(Theme.serif(19)).foregroundStyle(Theme.label)
             Card(padding: 14) {
                 HStack(alignment: .top, spacing: 14) {
                     if let reel {
@@ -229,12 +229,12 @@ struct PlaceView: View {
                             Text("Saved \(Self.savedDate(p.createdAt))").font(.caption).foregroundStyle(Theme.secondary)
                         }
                         if let quote {
-                            Text("“\(quote)”").font(Theme.serif(17, weight: .regular)).italic().foregroundStyle(Theme.label)
+                            Text("“\(quote)”").font(Theme.serif(15, weight: .regular)).italic().foregroundStyle(Theme.label)
                                 .fixedSize(horizontal: false, vertical: true).padding(.top, 6)
                         }
                         if let reel {
                             Button("Watch the Reel") { Links.open(URL(string: reel.url)) }
-                                .font(.subheadline.weight(.semibold)).foregroundStyle(Theme.accent).frame(minHeight: 36)
+                                .font(.subheadline.weight(.semibold)).foregroundStyle(Theme.link).frame(minHeight: 36)
                         }
                         if p.mentionCount >= 2 {
                             Text("In \(p.mentionCount) of your saved Reels").font(.caption).foregroundStyle(Theme.secondary)
@@ -289,9 +289,9 @@ struct PlaceView: View {
                     Button { Links.open(p.googleDirectionsURL) } label: { Label("Google Maps", systemImage: "globe") }
                 } label: {
                     Label("Directions", systemImage: "arrow.triangle.turn.up.right.diamond")
-                        .font(.body.weight(.semibold)).foregroundStyle(Theme.accentInk)
-                        .frame(maxWidth: .infinity, minHeight: 50)
-                        .background(Theme.accent, in: RoundedRectangle(cornerRadius: 15, style: .continuous))
+                        .font(.subheadline.weight(.semibold)).foregroundStyle(Theme.accentInk)
+                        .frame(maxWidth: .infinity, minHeight: 42)
+                        .background(Theme.accent, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 }
             }
             if let need = needText(p) {
@@ -362,7 +362,7 @@ struct PlaceView: View {
     // MARK: Sections
 
     private func sectionTitle(_ text: String) -> some View {
-        Text(text).font(Theme.serif(22)).foregroundStyle(Theme.label).padding(.bottom, 10)
+        Text(text).font(Theme.serif(19)).foregroundStyle(Theme.label).padding(.bottom, 8)
     }
 
     private func eventSection(_ p: Place) -> some View {
@@ -396,7 +396,7 @@ struct PlaceView: View {
                 sectionTitle("On your trip")
                 Spacer()
                 Button(trip.name) { router.push(.trip(id: trip.id)) }
-                    .font(.subheadline.weight(.semibold)).foregroundStyle(Theme.accent).lineLimit(1)
+                    .font(.subheadline.weight(.semibold)).foregroundStyle(Theme.link).lineLimit(1)
             }
             Card {
                 if trip.dayCount > 0 {
@@ -460,7 +460,7 @@ struct PlaceView: View {
             if chevron { Image(systemName: "chevron.up.chevron.down").font(.caption).foregroundStyle(Theme.quiet) }
         }
         .font(.subheadline)
-        .padding(.horizontal, 14).frame(minHeight: 50)
+        .padding(.horizontal, 14).frame(minHeight: 44)
         .contentShape(Rectangle())
     }
 
@@ -510,7 +510,7 @@ struct PlaceView: View {
                                     .font(.caption).foregroundStyle(Theme.secondary)
                             }
                             Spacer(minLength: 8)
-                            Text(allHours ? "Less" : "All hours").font(.footnote.weight(.semibold)).foregroundStyle(Theme.accent)
+                            Text(allHours ? "Less" : "All hours").font(.footnote.weight(.semibold)).foregroundStyle(Theme.link)
                         }
                         .padding(14)
                         .contentShape(Rectangle())
@@ -627,14 +627,14 @@ struct PlaceView: View {
                 organizeRow("Lists") {
                     Button { sheet = .folders([p.id]) } label: {
                         Text(lists.isEmpty ? "Add to a list" : lists.map(\.name).joined(separator: ", "))
-                            .fontWeight(.medium).foregroundStyle(lists.isEmpty ? Theme.accent : Theme.label).lineLimit(1)
+                            .fontWeight(.medium).foregroundStyle(lists.isEmpty ? Theme.link : Theme.label).lineLimit(1)
                     }
                 }
                 Divider().overlay(Theme.border).padding(.leading, 14)
                 organizeRow("Trips") {
                     Button { sheet = .trips([p.id]) } label: {
                         Text(trips.isEmpty ? "Add to a trip" : trips.map(\.name).joined(separator: ", "))
-                            .fontWeight(.medium).foregroundStyle(trips.isEmpty ? Theme.accent : Theme.label).lineLimit(1)
+                            .fontWeight(.medium).foregroundStyle(trips.isEmpty ? Theme.link : Theme.label).lineLimit(1)
                     }
                 }
             }
@@ -649,7 +649,7 @@ struct PlaceView: View {
             value()
         }
         .font(.subheadline)
-        .padding(.horizontal, 14).frame(minHeight: 48)
+        .padding(.horizontal, 14).frame(minHeight: 42)
     }
 
     private func infoRow(_ symbol: String, _ text: String, _ sub: String?, quiet: Bool = false) -> some View {
@@ -764,7 +764,7 @@ private struct Hero: View {
                     if let coordinate = place.coordinate {
                         Map(initialPosition: .region(MKCoordinateRegion(center: coordinate, latitudinalMeters: 700, longitudinalMeters: 700))) {
                             Marker(place.name, systemImage: Category(place.category).symbol, coordinate: coordinate)
-                                .tint(Theme.accent)
+                                .tint(Theme.gold)
                         }
                         .allowsHitTesting(false)
                         .tag(photos.count)
@@ -778,7 +778,7 @@ private struct Hero: View {
                 }
             }
         }
-        .frame(height: 340)
+        .frame(height: 280)
         .frame(maxWidth: .infinity)
         .overlay(alignment: .top) {
             // keeps the status bar and buttons readable over a bright photo
@@ -796,12 +796,12 @@ struct ReelThumb: View {
         let frame = place.photos.first { $0.source == "reel" }
         let url = frame?.url(width: 240) ?? reel.thumbnailUrl.flatMap { API.shared.url($0) }
         Color.clear
-            .frame(width: 64, height: 86)
+            .frame(width: 52, height: 70)
             .overlay { RemoteImage(url: url) { Theme.raised } }
             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             .overlay {
-                Image(systemName: "play.fill").font(.system(size: 14)).foregroundStyle(.white)
-                    .frame(width: 30, height: 30).background(.black.opacity(0.4), in: Circle())
+                Image(systemName: "play.fill").font(.system(size: 11)).foregroundStyle(.white)
+                    .frame(width: 24, height: 24).background(.black.opacity(0.4), in: Circle())
             }
     }
 }

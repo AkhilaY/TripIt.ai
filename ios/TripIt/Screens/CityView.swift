@@ -23,7 +23,7 @@ struct CityView: View {
             Section {
                 VStack(alignment: .leading, spacing: 4) {
                     if isHome { Eyebrow(text: "Your city") }
-                    Text(isHome ? "Around \(city)" : city).font(Theme.serif(34)).foregroundStyle(Theme.label)
+                    Text(isHome ? "Around \(city)" : city).font(Theme.serif(28)).foregroundStyle(Theme.label)
                     Text(subtitle(all, trip: trip)).font(.subheadline).foregroundStyle(Theme.secondary)
                 }
                 .listRowBackground(Color.clear)

@@ -1,29 +1,30 @@
 import SwiftUI
 import UIKit
 
-/// The Travel Edit's look: warm ivory by day, deep espresso at night, one serif (Newsreader) for display type,
-/// one-colour icons, and colour only for status: green means open, coral means it needs your attention.
+/// The Travel Edit's look: warm ivory by day; by night the espresso and cream of the earlier versions. One serif
+/// (Newsreader) for display type, one-colour icons, and colour only for status: green means open, coral means it
+/// needs your attention. Light, Dark or the phone's setting is chosen in Profile → Appearance.
 /// Same palette as the web app (backend/app/static/styles.css).
 enum Theme {
-    static let accent = dynamic(0x84652F, 0xC9A46A)  // gold: the main button and active states
-    static let accentInk = dynamic(0xFFFDF9, 0x13100D)  // text on the accent
-    static let gold = accent
-    static let link = accent
-    static let background = dynamic(0xF6F1E9, 0x13100D)
-    static let cell = dynamic(0xFFFDF9, 0x1E1A16)  // cards
-    static let border = dynamic(0xE6DDCF, 0x2E2822)
-    static let raised = dynamic(0xEFE8DC, 0x2A241E)  // quiet buttons and tiles
-    static let raisedBorder = dynamic(0xDDD3C3, 0x3A322A)
-    static let divider = dynamic(0xE6DDCF, 0x2A241E)
-    static let label = dynamic(0x1C1813, 0xF2EBE0)
-    static let secondary = dynamic(0x6E6458, 0xA89D8F)
-    static let tertiary = dynamic(0x776C60, 0x958A7E)
-    static let quiet = dynamic(0xA39889, 0x6B6157)
+    static let accent = dynamic(0x84652F, 0xEADFCF)  // the main button: gold by day, cream by night
+    static let accentInk = dynamic(0xFFFDF9, 0x17110D)  // text on the accent
+    static let gold = dynamic(0x84652F, 0xC9A47A)  // highlights: eyebrows, countdowns, the selected tab
+    static let link = dynamic(0x84652F, 0xD3B08A)  // text buttons
+    static let background = dynamic(0xF6F1E9, 0x15100C)
+    static let cell = dynamic(0xFFFDF9, 0x211A14)  // cards
+    static let border = dynamic(0xE6DDCF, 0x30271F)
+    static let raised = dynamic(0xEFE8DC, 0x2C231C)  // quiet buttons and tiles
+    static let raisedBorder = dynamic(0xDDD3C3, 0x3A2F26)
+    static let divider = dynamic(0xE6DDCF, 0x2C231C)
+    static let label = dynamic(0x1C1813, 0xF0E7DA)
+    static let secondary = dynamic(0x6E6458, 0xA69684)
+    static let tertiary = dynamic(0x776C60, 0x8E7E6D)
+    static let quiet = dynamic(0xA39889, 0x6A5C4F)
     static let fill = raised
 
     // Status
-    static let open = dynamic(0x4A6B3E, 0xA3BE8C)
-    static let attention = dynamic(0xA14F37, 0xE59C7F)
+    static let open = dynamic(0x4A6B3E, 0x93B087)
+    static let attention = dynamic(0xA14F37, 0xD27A6E)
     static let ok = open
     static let warn = attention
     static let danger = attention
@@ -126,7 +127,7 @@ enum Category: String, CaseIterable, Identifiable {
     }
 
     /// Icons are one colour; categories are told apart by their symbol.
-    var color: Color { Theme.accent }
+    var color: Color { Theme.gold }
 
     /// Places that get a menu (and a Reserve button when the restaurant takes bookings online).
     var hasMenu: Bool { [.food, .cafe, .dessert, .drinks, .nightlife].contains(self) }

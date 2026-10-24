@@ -483,6 +483,15 @@ const byPriority = (a, b) => (b.must_do - a.must_do) || ((b.mention_count || 0) 
 const NATIVE = /TripItiOS\//.test(navigator.userAgent);
 /** One screen of the web app shown inside the native iOS app, which has its own tab bar and screens. */
 const EMBED = NATIVE && new URLSearchParams(location.search).has('embed');
+// Light, Dark or the device's setting (Profile → Appearance). Inside the iOS app, the app's own setting applies.
+const THEME_KEY = 'tripit.theme';
+function themeOf() { try { return localStorage.getItem(THEME_KEY) || 'system'; } catch { return 'system'; } }
+function applyTheme() {
+  const t = themeOf();
+  if (EMBED || t === 'system') delete document.documentElement.dataset.theme;
+  else document.documentElement.dataset.theme = t;
+}
+applyTheme();
 if (EMBED) document.documentElement.classList.add('embed');
 
 // ---------- Error reporting ----------
@@ -2798,6 +2807,10 @@ const VIEWS = {
       </div></div>` : `<div class="section"><div class="group tiles"><a class="row" href="#/signin">${tile('gold', 'person')}<span class="main"><span class="t">Create your account</span>
         <span class="s">Keeps your places private and lets you invite testers</span></span>${ICON.chev}</a></div></div>`}
 
+      ${EMBED ? '' : `<div class="section"><div class="section-h">Appearance</div>
+        <div class="visitseg" role="group" aria-label="Appearance">${[['system', 'System'], ['light', 'Light'], ['dark', 'Dark']].map(([k, label]) =>
+          `<button data-act="settheme" data-v="${k}" aria-pressed="${themeOf() === k}" class="${themeOf() === k ? 'on' : ''}">${label}</button>`).join('')}</div>
+        <div class="section-f">Light is warm ivory; Dark is espresso. System follows your device.</div></div>`}
       <div class="section"><div class="section-h">You</div><div class="group tiles">
         <button class="row" data-act="homecity">${tile('green', 'pin')}<span class="main"><span class="t">Home city</span>
           <span class="s">${esc(S.homeCity ? [S.homeCity.city, S.homeCity.country].filter(Boolean).join(', ') : 'Discover looks here first')}</span></span>${ICON.chev}</button>
@@ -4549,6 +4562,7 @@ async function onAction(act, el) {
       newTripSheet({ placeIds: savedOnly(S.places || []).filter((p) => p.city && cityKey(p.city) === k).map((p) => p.id) });
       return;
     }
+    case 'settheme': try { localStorage.setItem(THEME_KEY, el.dataset.v); } catch { /* this visit only */ } applyTheme(); render({ quiet: true }); return;
     case 'visit': try { localStorage.setItem('tripit.visit', el.dataset.v); } catch { /* per-visit only */ } render({ quiet: true }); return;
     case 'allcities': S.allCities = !S.allCities; redrawLibMain(); return;
     case 'shuffle': S.shuffle = (S.shuffle || 0) + 1; render({ quiet: true }); return;

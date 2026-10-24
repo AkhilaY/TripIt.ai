@@ -134,7 +134,7 @@ struct FolderPickerSheet: View {
                                     Text(Fmt.plural(folder.placeCount, "place")).font(.caption).foregroundStyle(Theme.secondary)
                                 }
                                 Spacer()
-                                if inside { Image(systemName: "checkmark").foregroundStyle(Theme.accent).fontWeight(.semibold) }
+                                if inside { Image(systemName: "checkmark").foregroundStyle(Theme.link).fontWeight(.semibold) }
                             }
                         }
                     }
@@ -201,7 +201,7 @@ struct TripPickerSheet: View {
                                         .font(.caption).foregroundStyle(Theme.secondary)
                                 }
                                 Spacer()
-                                if inside { Image(systemName: "checkmark").foregroundStyle(Theme.accent).fontWeight(.semibold) }
+                                if inside { Image(systemName: "checkmark").foregroundStyle(Theme.link).fontWeight(.semibold) }
                             }
                         }
                     }

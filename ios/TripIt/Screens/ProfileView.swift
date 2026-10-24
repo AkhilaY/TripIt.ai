@@ -15,6 +15,7 @@ struct ProfileView: View {
     @State private var deleting = false
     @State private var confirmSignOut = false
     @State private var sendingFeedback = false
+    @AppStorage(Appearance.key) private var appearance: Appearance = .system
 
     var body: some View {
         List {
@@ -44,6 +45,18 @@ struct ProfileView: View {
                 NavigationLink(value: Route.web(hash: "#/taste")) {
                     row("sparkles", Theme.gold, "Your travel taste", "Tailors your edits, briefings and concierge", chevron: false)
                 }
+            }
+            Section {
+                Picker("Appearance", selection: $appearance) {
+                    ForEach(Appearance.allCases) { Text($0.label).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .listRowBackground(Color.clear)
+                .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
+            } header: {
+                Text("Appearance")
+            } footer: {
+                Text("Light is warm ivory; Dark is espresso. System follows your iPhone's setting.")
             }
             Section {
                 Toggle(isOn: Binding(get: { notifications == .authorized }, set: { on in

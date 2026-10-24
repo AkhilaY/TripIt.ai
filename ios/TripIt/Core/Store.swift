@@ -372,7 +372,19 @@ extension Store {
 
     func trip(forCity name: String) -> Trip? {
         let key = Store.cityKey(name)
-        return upcomingTrips.first { Store.cityKey($0.city) == key } ?? realTrips.first { Store.cityKey($0.city) == key }
+        let visits = { (t: Trip) in t.cities.contains { Store.cityKey($0) == key } }
+        return upcomingTrips.first(where: visits) ?? realTrips.first(where: visits)
+    }
+
+    /// The trip you're on today, and which day of it.
+    var activeTrip: (trip: Trip, day: Int)? {
+        let today = Calendar.current.startOfDay(for: Date())
+        for t in realTrips {
+            guard let start = t.startDate.flatMap(Fmt.day), t.dayCount > 0,
+                  let n = Calendar.current.dateComponents([.day], from: Calendar.current.startOfDay(for: start), to: today).day else { continue }
+            if n + 1 >= 1 && n + 1 <= t.dayCount { return (t, n + 1) }
+        }
+        return nil
     }
 
     /// Where a place lives: "Around Atlanta", "Switzerland trip, Day 1", "on your wishlist".

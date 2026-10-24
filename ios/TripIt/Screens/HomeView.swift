@@ -25,9 +25,13 @@ struct HomeView: View {
                     ForEach(store.jobs.filter(\.isActive)) { job in
                         Card(padding: 12) { JobRow(job: job) }.padding(.top, 16)
                     }
-                    weekend.padding(.top, 24)
-                    openNow
-                    comingUp
+                    if let active = store.activeTrip {
+                        TravelHome(trip: active.trip, day: active.day)
+                    } else {
+                        weekend.padding(.top, 20)
+                        openNow
+                        comingUp
+                    }
                     recent
                 }
             }
@@ -55,14 +59,23 @@ struct HomeView: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Eyebrow(text: [Self.today.string(from: Date()), store.home?.city].compactMap { $0 }.joined(separator: " · "), color: Theme.secondary)
+                Eyebrow(text: [Self.today.string(from: Date()), headerCity].compactMap { $0 }.joined(separator: " · "), color: Theme.secondary)
                 Spacer()
                 RoundIconButton(symbol: "plus", label: "Save a place") { router.addRequest = Router.AddRequest() }
                 ProfileButton()
             }
-            Text(greeting).font(Theme.serif(34)).foregroundStyle(Theme.label)
+            Text(greeting).font(Theme.serif(28)).foregroundStyle(Theme.label)
         }
         .padding(.top, 8)
+    }
+
+    /// Where you are: today's stop during a trip, otherwise home.
+    private var headerCity: String? {
+        if let active = store.activeTrip {
+            let stops = active.trip.stops ?? []
+            return stops.first { active.day >= $0.startDay && active.day <= $0.endDay }?.city ?? active.trip.city
+        }
+        return store.home?.city
     }
 
     private static let today: DateFormatter = {
@@ -81,20 +94,20 @@ struct HomeView: View {
     @ViewBuilder private var weekend: some View {
         if let home = store.home {
             let picks = WeekendPicks.make(from: store.saved.filter { store.isHome($0) && !$0.visited }, seed: shuffle)
-            Card(radius: 24, padding: 20) {
+            Card(radius: 18, padding: 16) {
                 Eyebrow(text: "This weekend · \(WeekendPicks.label())")
-                Text("Your \(home.city) weekend").font(Theme.serif(26)).foregroundStyle(Theme.label).padding(.top, 6)
+                Text("Your \(home.city) weekend").font(Theme.serif(22)).foregroundStyle(Theme.label).padding(.top, 6)
                 if picks.isEmpty {
                     Text("Save places around \(home.city) and we'll pick a couple for the weekend from the ones you haven't been to.")
                         .font(.subheadline).foregroundStyle(Theme.secondary).padding(.top, 4)
                 } else {
                     Text("Picked from places you've saved but haven't been to yet")
                         .font(.footnote).foregroundStyle(Theme.secondary).padding(.top, 4)
-                    VStack(spacing: 14) {
+                    VStack(spacing: 10) {
                         ForEach(picks, id: \.place.id) { pick in
                             NavigationLink(value: Route.place(id: pick.place.id, tripId: nil)) {
                                 HStack(spacing: 12) {
-                                    PlaceThumb(place: pick.place, size: 56)
+                                    PlaceThumb(place: pick.place, size: 46)
                                     VStack(alignment: .leading, spacing: 2) {
                                         Eyebrow(text: pick.slot, color: Theme.tertiary)
                                         Text(pick.place.name).font(.body.weight(.semibold)).foregroundStyle(Theme.label).lineLimit(1)
@@ -106,21 +119,21 @@ struct HomeView: View {
                             .buttonStyle(.plain)
                         }
                     }
-                    .padding(.top, 16)
-                    HStack(spacing: 10) {
+                    .padding(.top, 12)
+                    HStack(spacing: 8) {
                         Button("Plan the weekend") { Task { await planWeekend(picks.map(\.place)) } }
                             .buttonStyle(PrimaryButtonStyle())
                         Button { withAnimation { shuffle += 1 } } label: { Label("Shuffle", systemImage: "shuffle") }
                             .buttonStyle(PrimaryButtonStyle(tinted: true))
                             .fixedSize()
                     }
-                    .padding(.top, 18)
+                    .padding(.top, 14)
                 }
             }
         } else {
-            Card(radius: 24, padding: 20) {
+            Card(radius: 18, padding: 16) {
                 Eyebrow(text: "Your city")
-                Text("Where's home?").font(Theme.serif(26)).foregroundStyle(Theme.label).padding(.top, 6)
+                Text("Where's home?").font(Theme.serif(22)).foregroundStyle(Theme.label).padding(.top, 6)
                 Text("Set your home city and places you save there are kept as Around your city, with weekend picks and what's open now.")
                     .font(.subheadline).foregroundStyle(Theme.secondary).padding(.top, 4)
                 Button("Set home city") { homeCity = ""; settingHome = true }
@@ -165,15 +178,15 @@ struct HomeView: View {
                     ForEach(open) { p in
                         NavigationLink(value: Route.place(id: p.id, tripId: nil)) {
                             VStack(alignment: .leading, spacing: 3) {
-                                PhotoBox(place: p, width: 164, height: 120)
-                                Text(p.name).font(.body.weight(.semibold)).foregroundStyle(Theme.label).lineLimit(1).padding(.top, 7)
+                                PhotoBox(place: p, width: 136, height: 96, radius: 12)
+                                Text(p.name).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.label).lineLimit(1).padding(.top, 6)
                                 HStack(spacing: 0) {
                                     OpenStatusText(hours: p.openingHours)
                                     if let d = p.distance(from: location.current) { Text(" · " + Fmt.distance(d)).foregroundStyle(Theme.secondary) }
                                 }
                                 .font(.footnote).lineLimit(1)
                             }
-                            .frame(width: 164, alignment: .leading)
+                            .frame(width: 136, alignment: .leading)
                         }
                         .buttonStyle(.plain)
                     }
@@ -204,11 +217,11 @@ struct HomeView: View {
             NavigationLink(value: Route.trip(id: trip.id)) {
                 Card(padding: 14) {
                     HStack(spacing: 14) {
-                        TripCover(trip: trip, size: 64)
+                        TripCover(trip: trip, size: 50)
                         VStack(alignment: .leading, spacing: 3) {
                             if let countdown = trip.countdown { Eyebrow(text: countdown) }
-                            Text(trip.name).font(Theme.serif(21)).foregroundStyle(Theme.label).lineLimit(1)
-                            Text([trip.city, trip.dateRange].compactMap { $0 }.joined(separator: " · "))
+                            Text(trip.name).font(Theme.serif(18)).foregroundStyle(Theme.label).lineLimit(1)
+                            Text([trip.cities.joined(separator: " → "), trip.dateRange].compactMap { $0 }.joined(separator: " · "))
                                 .font(.footnote).foregroundStyle(Theme.secondary).lineLimit(1)
                         }
                         Spacer(minLength: 0)
@@ -220,7 +233,7 @@ struct HomeView: View {
                             Text("\(need.name) still needs \(need.bookingKind == "tickets" ? "tickets" : "a table")")
                                 .font(.subheadline).foregroundStyle(Theme.label).lineLimit(1)
                             Spacer()
-                            Text("Book").font(.subheadline.weight(.semibold)).foregroundStyle(Theme.accent)
+                            Text("Book").font(.subheadline.weight(.semibold)).foregroundStyle(Theme.link)
                         }
                     }
                 }
@@ -249,9 +262,9 @@ struct HomeView: View {
                 ForEach(Array(shown.enumerated()), id: \.element.id) { i, p in
                     NavigationLink(value: Route.place(id: p.id, tripId: nil)) {
                         HStack(spacing: 14) {
-                            PlaceThumb(place: p, size: 48)
+                            PlaceThumb(place: p, size: 40)
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(p.name).font(.body.weight(.semibold)).foregroundStyle(Theme.label).lineLimit(1)
+                                Text(p.name).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.label).lineLimit(1)
                                 Text(store.filing(p)).font(.footnote).foregroundStyle(Theme.secondary).lineLimit(1)
                             }
                             Spacer(minLength: 0)
@@ -281,10 +294,12 @@ struct ProfileButton: View {
 
     var body: some View {
         Button { router.showProfile = true } label: {
-            Text(initial).font(Theme.serif(19)).foregroundStyle(Theme.accent)
-                .frame(width: 44, height: 44)
+            Text(initial).font(Theme.serif(16)).foregroundStyle(Theme.link)
+                .frame(width: 34, height: 34)
                 .background(Theme.raised, in: Circle())
                 .overlay(Circle().strokeBorder(Theme.raisedBorder))
+                .frame(width: 40, height: 40)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Profile and settings")

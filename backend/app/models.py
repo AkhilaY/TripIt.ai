@@ -599,6 +599,34 @@ class Reel(BaseModel):
     place_count: int = 0
 
 
+TravelMode = Literal["train", "flight", "drive", "bus", "ferry", "walk", "other"]
+
+
+class TripStop(BaseModel):
+    """One city on a trip's route, in order. Stops cover the trip's days back to back."""
+    city: str
+    country: str = ""
+    days: int = 1
+    start_day: int = 1
+    end_day: int = 1
+    travel_mode: Optional[TravelMode] = None  # how you get here from the stop before
+    travel_minutes: Optional[int] = None
+    travel_note: Optional[str] = None  # e.g. "Eurostar from St Pancras"
+
+
+class TripStopIn(BaseModel):
+    city: str = Field(min_length=1, max_length=120)
+    country: Optional[str] = Field(default=None, max_length=80)
+    days: int = Field(ge=1, le=21)
+    travel_mode: Optional[TravelMode] = None
+    travel_minutes: Optional[int] = Field(default=None, ge=0, le=3000)
+    travel_note: Optional[str] = Field(default=None, max_length=120)
+
+
+class TripStopsRequest(BaseModel):
+    stops: list[TripStopIn] = Field(min_length=1, max_length=12)
+
+
 class Trip(BaseModel):
     id: str
     name: str
@@ -616,6 +644,7 @@ class Trip(BaseModel):
     categories: list[PlaceCategory] = []
     cover_photo: Optional[PlacePhoto] = None
     share_token: Optional[str] = None  # set while a public link to the trip exists
+    stops: list[TripStop] = []  # the route; one stop (the trip's city) until you add more
 
 
 class TripDetail(Trip):

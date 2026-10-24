@@ -92,11 +92,11 @@ struct LibraryView: View {
             }
             .padding(.top, 8)
             HStack {
-                Text("Library").font(Theme.serif(40)).foregroundStyle(Theme.label)
+                Text("Library").font(Theme.serif(32)).foregroundStyle(Theme.label)
                 Spacer()
                 Button { router.push(.map) } label: {
-                    Label("Map", systemImage: "map").font(.subheadline.weight(.medium)).foregroundStyle(Theme.label)
-                        .padding(.horizontal, 14).frame(height: 40)
+                    Label("Map", systemImage: "map").font(.footnote.weight(.medium)).foregroundStyle(Theme.label)
+                        .padding(.horizontal, 12).frame(height: 32)
                         .background(Theme.cell, in: Capsule())
                         .overlay(Capsule().strokeBorder(Theme.raisedBorder))
                 }
@@ -114,11 +114,12 @@ struct LibraryView: View {
                         .accessibilityLabel("Clear search")
                 }
             }
-            .padding(.horizontal, 16).frame(height: 48)
-            .background(Theme.cell, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Theme.border))
-            .padding(.top, 16)
-            VisitPicker(visit: $visit, places: store.saved).padding(.top, 14)
+            .font(.subheadline)
+            .padding(.horizontal, 12).frame(height: 38)
+            .background(Theme.cell, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.border))
+            .padding(.top, 12)
+            VisitPicker(visit: $visit, places: store.saved).padding(.top, 10)
         }
     }
 
@@ -165,12 +166,12 @@ struct LibraryView: View {
             let places = shown.filter { store.isHome($0) }
             let open = places.filter { Hours.status($0.openingHours)?.isOpen == true }.count
             NavigationLink(value: Route.city(name: home.city)) {
-                Card(radius: 22, padding: 16) {
+                Card(radius: 16, padding: 14) {
                     HStack(alignment: .top) {
                         VStack(alignment: .leading, spacing: 4) {
                             Label { Text("YOUR CITY").kerning(1.6) } icon: { Image(systemName: "house") }
-                                .font(.system(size: 11, weight: .semibold)).foregroundStyle(Theme.accent)
-                            Text("Around \(home.city)").font(Theme.serif(24)).foregroundStyle(Theme.label)
+                                .font(.system(size: 11, weight: .semibold)).foregroundStyle(Theme.link)
+                            Text("Around \(home.city)").font(Theme.serif(20)).foregroundStyle(Theme.label)
                             HStack(spacing: 0) {
                                 Text(Fmt.plural(places.count, "place")).foregroundStyle(Theme.secondary)
                                 if open > 0 { Text(" · ").foregroundStyle(Theme.secondary); Text("\(open) open now").foregroundStyle(Theme.open) }
@@ -179,9 +180,9 @@ struct LibraryView: View {
                         }
                         Spacer()
                         Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(Theme.label)
-                            .frame(width: 36, height: 36).background(Theme.raised, in: Circle())
+                            .frame(width: 28, height: 28).background(Theme.raised, in: Circle())
                     }
-                    if !places.isEmpty { PhotoStrip(places: places).padding(.top, 14) }
+                    if !places.isEmpty { PhotoStrip(places: places).padding(.top, 12) }
                 }
             }
             .buttonStyle(.plain)
@@ -228,7 +229,7 @@ struct LibraryView: View {
             .padding(.top, 4)
             if groups.count > 4 {
                 Button(allCities ? "Show fewer" : "See all \(groups.count) cities") { withAnimation { allCities.toggle() } }
-                    .font(.subheadline.weight(.semibold)).foregroundStyle(Theme.accent).frame(minHeight: 44)
+                    .font(.subheadline.weight(.semibold)).foregroundStyle(Theme.link).frame(minHeight: 44)
             }
         }
     }
@@ -274,18 +275,18 @@ struct VisitPicker: View {
                         Text(option.label).fontWeight(on ? .semibold : .medium)
                         Text("\(option.apply(places).count)").foregroundStyle(on ? Theme.background.opacity(0.8) : Theme.secondary)
                     }
-                    .font(.subheadline)
+                    .font(.footnote)
                     .foregroundStyle(on ? Theme.background : Theme.label)
-                    .frame(maxWidth: .infinity, minHeight: 36)
-                    .background(on ? Theme.label : .clear, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .frame(maxWidth: .infinity, minHeight: 30)
+                    .background(on ? Theme.label : .clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                 }
                 .buttonStyle(.plain)
                 .accessibilityAddTraits(on ? .isSelected : [])
             }
         }
-        .padding(4)
-        .background(Theme.cell, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Theme.border))
+        .padding(3)
+        .background(Theme.cell, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous).strokeBorder(Theme.border))
     }
 }
 
@@ -297,13 +298,13 @@ struct PhotoStrip: View {
         let withPhotos = places.filter { !$0.photos.isEmpty }
         let shown = Array((withPhotos.isEmpty ? places : withPhotos).prefix(places.count > 4 ? 3 : 4))
         HStack(spacing: 8) {
-            ForEach(shown) { p in PhotoBox(place: p, width: nil, height: 72, radius: 12) }
+            ForEach(shown) { p in PhotoBox(place: p, width: nil, height: 58, radius: 10) }
             if places.count > 4 {
                 Text("+\(places.count - 3)").font(.subheadline.weight(.semibold)).foregroundStyle(Theme.label)
-                    .frame(maxWidth: .infinity, minHeight: 72)
-                    .background(Theme.raised, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .frame(maxWidth: .infinity, minHeight: 58)
+                    .background(Theme.raised, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             }
-            ForEach(0..<max(0, 4 - shown.count - (places.count > 4 ? 1 : 0)), id: \.self) { _ in Color.clear.frame(maxWidth: .infinity, maxHeight: 72) }
+            ForEach(0..<max(0, 4 - shown.count - (places.count > 4 ? 1 : 0)), id: \.self) { _ in Color.clear.frame(maxWidth: .infinity, maxHeight: 58) }
         }
     }
 }
@@ -314,7 +315,7 @@ struct TripRouteCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Color.clear.frame(height: 120).frame(maxWidth: .infinity)
+            Color.clear.frame(height: 96).frame(maxWidth: .infinity)
                 .overlay {
                     RemoteImage(url: trip.coverPhoto?.url(width: 900)) {
                         ZStack { Theme.raised; Image(systemName: "airplane").font(.title).foregroundStyle(Theme.secondary) }
@@ -323,19 +324,19 @@ struct TripRouteCard: View {
                 .clipped()
             VStack(alignment: .leading, spacing: 4) {
                 HStack(alignment: .firstTextBaseline) {
-                    Text(trip.name).font(Theme.serif(24)).foregroundStyle(Theme.label).lineLimit(1)
+                    Text(trip.name).font(Theme.serif(20)).foregroundStyle(Theme.label).lineLimit(1)
                     Spacer()
-                    if let countdown = trip.countdown { Text(countdown).font(.footnote.weight(.semibold)).foregroundStyle(Theme.accent) }
+                    if let countdown = trip.countdown { Text(countdown).font(.footnote.weight(.semibold)).foregroundStyle(Theme.link) }
                 }
                 Text([trip.dateRange ?? "No dates yet", Fmt.plural(trip.placeCount, "place")].joined(separator: " · "))
                     .font(.footnote).foregroundStyle(Theme.secondary)
-                RouteStrip(stops: trip.stops).padding(.top, 8)
+                RouteStrip(stops: trip.cities).padding(.top, 8)
             }
-            .padding(EdgeInsets(top: 14, leading: 16, bottom: 16, trailing: 16))
+            .padding(EdgeInsets(top: 12, leading: 14, bottom: 14, trailing: 14))
         }
         .background(Theme.cell)
-        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).strokeBorder(Theme.border))
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Theme.border))
     }
 }
 
@@ -354,8 +355,11 @@ struct RouteStrip: View {
 }
 
 extension Trip {
-    /// The cities on the trip, in order. One city until trips have several stops.
-    var stops: [String] { [city].filter { !$0.isEmpty } }
+    /// The cities on the trip's route, in order ("London", "Paris", "London").
+    var cities: [String] {
+        let route = (stops ?? []).map(\.city).filter { !$0.isEmpty }
+        return route.isEmpty ? [city].filter { !$0.isEmpty } : route
+    }
 }
 
 /// A smaller trip row: photo, name, dates and route.
@@ -363,18 +367,18 @@ struct TripRow: View {
     let trip: Trip
     var body: some View {
         HStack(spacing: 14) {
-            TripCover(trip: trip, size: 56)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(trip.name).font(Theme.serif(19)).foregroundStyle(Theme.label).lineLimit(1)
-                Text([trip.dateRange, trip.stops.joined(separator: " → ")].compactMap { $0?.isEmpty == false ? $0 : nil }.joined(separator: " · "))
+            TripCover(trip: trip, size: 44)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(trip.name).font(Theme.serif(17)).foregroundStyle(Theme.label).lineLimit(1)
+                Text([trip.dateRange, trip.cities.joined(separator: " → ")].compactMap { $0?.isEmpty == false ? $0 : nil }.joined(separator: " · "))
                     .font(.footnote).foregroundStyle(Theme.secondary).lineLimit(1)
             }
             Spacer(minLength: 0)
             Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(Theme.quiet)
         }
-        .padding(EdgeInsets(top: 10, leading: 10, bottom: 10, trailing: 14))
-        .background(Theme.cell, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(Theme.border))
+        .padding(EdgeInsets(top: 8, leading: 8, bottom: 8, trailing: 12))
+        .background(Theme.cell, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Theme.border))
     }
 }
 
@@ -388,19 +392,19 @@ struct CityTile: View {
             let photos = Array(city.places.filter { !$0.photos.isEmpty }.prefix(2))
             HStack(spacing: 2) {
                 if photos.isEmpty {
-                    ZStack { Theme.raised; Image(systemName: "building.2").foregroundStyle(Theme.secondary) }.frame(height: 96)
+                    ZStack { Theme.raised; Image(systemName: "building.2").foregroundStyle(Theme.secondary) }.frame(height: 80)
                 } else {
-                    ForEach(photos) { p in PhotoBox(place: p, width: nil, height: 96, radius: 0) }
+                    ForEach(photos) { p in PhotoBox(place: p, width: nil, height: 80, radius: 0) }
                 }
             }
-            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-            Text(city.name).font(Theme.serif(19)).foregroundStyle(Theme.label).lineLimit(1).padding(.top, 6)
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            Text(city.name).font(Theme.serif(17)).foregroundStyle(Theme.label).lineLimit(1).padding(.top, 6)
             HStack(spacing: 0) {
                 Text(Fmt.plural(city.places.count, "place") + " · ").foregroundStyle(Theme.secondary)
                 if let trip, let start = trip.startDate.flatMap(Fmt.day) {
-                    Text("Trip " + start.formatted(.dateTime.day().month(.abbreviated))).foregroundStyle(Theme.accent)
+                    Text("Trip " + start.formatted(.dateTime.day().month(.abbreviated))).foregroundStyle(Theme.link)
                 } else if trip != nil {
-                    Text("On a trip").foregroundStyle(Theme.accent)
+                    Text("On a trip").foregroundStyle(Theme.link)
                 } else {
                     Text("No trip yet").foregroundStyle(Theme.secondary)
                 }
@@ -422,10 +426,10 @@ struct ListRow: View {
             RemoteImage(url: photo?.url(width: 150)) {
                 ZStack { Theme.raised; Image(systemName: symbol).foregroundStyle(Theme.secondary) }
             }
-            .frame(width: 48, height: 48)
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .frame(width: 40, height: 40)
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
             VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.body.weight(.semibold)).foregroundStyle(Theme.label).lineLimit(1)
+                Text(title).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.label).lineLimit(1)
                 Text(subtitle).font(.footnote).foregroundStyle(Theme.secondary).lineLimit(1)
             }
             Spacer(minLength: 0)

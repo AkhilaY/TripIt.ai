@@ -284,7 +284,7 @@ MIGRATIONS = {
         ("saved", "INTEGER NOT NULL DEFAULT 1"),  # 0 for a place an AI plan suggested that you haven't kept
         ("user_id", "TEXT"),
     ],
-    "trips": [("share_token", "TEXT"), ("kind", "TEXT NOT NULL DEFAULT 'trip'"), ("user_id", "TEXT")],
+    "trips": [("share_token", "TEXT"), ("kind", "TEXT NOT NULL DEFAULT 'trip'"), ("user_id", "TEXT"), ("stops", "TEXT")],
     "folders": [("user_id", "TEXT")],
     "reels": [("user_id", "TEXT")],
     "jobs": [("user_id", "TEXT")],
@@ -306,7 +306,7 @@ BOOKING_COLUMNS = (
     "kind", "title", "start_at", "end_at", "origin", "destination", "address", "confirmation", "party_size",
     "notes", "place_id", "source",
 )
-TRIP_COLUMNS = ("name", "city", "country", "start_date", "day_count", "day_titles", "plan_notes", "planned_by", "share_token", "kind")
+TRIP_COLUMNS = ("name", "city", "country", "start_date", "day_count", "day_titles", "plan_notes", "planned_by", "share_token", "kind", "stops")
 # Places plus the reels that mention them.
 # Whose data a request may see. Set by the auth check for each request (and copied into the background tasks it
 # starts); every read and write of trips, places, folders, reels, jobs and push subscriptions is limited to it.
@@ -315,6 +315,26 @@ CURRENT_USER: ContextVar[Optional[str]] = ContextVar("current_user", default=Non
 OWNED_TABLES = ("trips", "places", "folders", "reels", "jobs", "push_subscriptions")
 # Settings that belong to a person rather than to the server.
 USER_SETTINGS = ("taste_profile", "home", "calendar_feed_token", "packing_unused")
+
+
+def trip_stops(row: sqlite3.Row) -> list[dict]:
+    """The trip's route with each stop's days numbered. Without a saved route it's one stop: the trip's city.
+    Days past the last stop belong to it, so every day of the trip has a stop."""
+    if (row["kind"] or "trip") == "local":
+        return []
+    keys = row.keys()
+    saved = json.loads(row["stops"]) if "stops" in keys and row["stops"] else []
+    day_count = row["day_count"] or 0
+    if not saved:
+        saved = [{"city": row["city"], "country": row["country"] or "", "days": max(day_count, 1)}]
+    out, day = [], 1
+    for i, s in enumerate(saved):
+        days = max(int(s.get("days") or 1), 1)
+        if i == len(saved) - 1 and day + days - 1 < day_count:
+            days = day_count - day + 1
+        out.append({**s, "days": days, "start_day": day, "end_day": day + days - 1})
+        day += days
+    return out
 
 
 def _uid() -> Optional[str]:
@@ -336,7 +356,7 @@ TRIP_PLACE_SELECT = (PLACE_SELECT[:-len("FROM places p")] + ", tp.trip_id AS m_t
                      "tp.day_order AS m_day_order, tp.time_of_day AS m_time_of_day, tp.day_note AS m_day_note, "
                      "tp.start_time AS m_start_time, tp.suggested AS m_suggested, tp.suggestion_note AS m_suggestion_note "
                      "FROM places p JOIN trip_places tp ON tp.place_id = p.id")
-JSON_COLUMNS = {"recommended_items", "day_titles", "warnings", "opening_hours", "photos"}
+JSON_COLUMNS = {"recommended_items", "day_titles", "warnings", "opening_hours", "photos", "stops"}
 
 
 def now() -> datetime:
@@ -592,6 +612,7 @@ class Database:
             categories=sorted({s["category"] for s in stats}),
             cover_photo=cover,
             share_token=row["share_token"],
+            stops=trip_stops(row),
         )
 
     # ---------- Places ----------

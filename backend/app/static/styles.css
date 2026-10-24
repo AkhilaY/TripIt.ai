@@ -1218,3 +1218,36 @@ a.krow, button.krow { cursor: pointer; }
 .cline svg { width: 14px; height: 14px; flex-shrink: 0; }
 .cline.attn { color: var(--danger); font-weight: 500; }
 .cline .tlink { margin-left: auto; min-height: 0; font-size: 12px; }
+
+/* ---------- Discover ---------- */
+.areabtn { margin-top: 10px; align-self: flex-start; display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px; border-radius: 16px;
+  border: 1px solid var(--border-strong); background: var(--cell); color: var(--label); font: inherit; font-size: 13px; font-weight: 500; cursor: pointer; }
+.areabtn svg { width: 14px; height: 14px; }
+.areabtn svg:last-child { width: 11px; height: 11px; color: var(--secondary); }
+.sub.tight { margin-top: 6px; font-size: 12px; color: var(--tertiary); }
+.sub.small { font-size: 12px; margin-top: 12px; }
+.page .fchips { margin: 12px -20px 0; padding: 0 20px; }
+.ecard { margin-top: 4px; display: block; color: var(--label); text-decoration: none; background: var(--cell); border: 1px solid var(--border); border-radius: 16px; overflow: hidden; }
+.eimgs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 2px; height: 100px; }
+.eimgs img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.ecard .b { display: flex; flex-direction: column; gap: 3px; padding: 12px 14px 14px; }
+.ecard .eyebrow { color: var(--gold); }
+.ecard .t { font-size: 19px; line-height: 1.2; }
+.ecard .s { font-size: 13px; color: var(--secondary); line-height: 1.4; }
+.rows .eyebrow { color: var(--gold); }
+.rows .t.serif { font-family: var(--serif); font-weight: 500; font-size: 17px; }
+.drows { list-style: none; margin: 4px 0 0; padding: 0; }
+.drow { display: flex; gap: 12px; align-items: flex-start; padding: 10px 0; }
+.drow + .drow { border-top: 1px solid var(--sep); }
+.drow .m { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.drow .t { font-size: 15px; font-weight: 600; }
+.drow .s { font-size: 12.5px; color: var(--secondary); }
+.drow .why { font-size: 13px; color: var(--label); line-height: 1.35; margin-top: 2px; }
+.drow .award { font-size: 11.5px; color: var(--gold); display: inline-flex; gap: 4px; align-items: center; }
+.drow .award svg { width: 12px; height: 12px; }
+.bmk { width: 36px; height: 36px; border-radius: 50%; border: 1px solid var(--border); background: var(--cell); color: var(--label); display: grid; place-items: center; cursor: pointer; flex-shrink: 0; }
+.bmk svg { width: 16px; height: 16px; }
+.bmk.on { background: var(--label); color: var(--bg); border-color: var(--label); }
+.bmk.on svg path { fill: currentColor; }
+.drow .why { font-style: normal; }
+.drow .award { background: none; padding: 0; border-radius: 0; text-transform: none; letter-spacing: 0; font-weight: 600; align-self: flex-start; }

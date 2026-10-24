@@ -1157,45 +1157,73 @@ async function loadDiscover(force = false) {
 }
 
 function discoverCard(it) {
-  const meta = [it.kind_label, it.price_level ? PRICE_SIGNS[it.price_level] : null, it.distance_m != null ? `${fmtDistance(it.distance_m)} away` : null].filter(Boolean);
-  const rating = it.rating ? `<span class="s">★ ${it.rating.toFixed(1)}${it.rating_count ? ` · ${it.rating_count.toLocaleString()} reviews` : ''}</span>` : '';
-  const img = it.photo ? `<span class="dthumb"><img src="${esc(it.photo)}" alt="" loading="lazy" decoding="async" onerror="this.remove()"></span>` : `<span class="dthumb">${ICON.pin}</span>`;
-  const save = it.saved ? `<span class="saved-tag">${ICON.check}Saved</span>`
-    : `<button class="btn tint small" data-act="discsave" data-id="${esc(it.id)}">Save</button>`;
-  return `<div class="row prow dcard">${img}<span class="main">
-    <span class="t">${esc(it.name)}</span><span class="s">${esc(meta.join(' · '))}</span>${rating}
-    ${it.award ? `<span class="award">${ICON.sparkle}${esc(it.award)}</span>` : ''}
-    ${it.why ? `<span class="s why">${esc(it.why)}</span>` : ''}
-    ${it.maps_url ? `<a class="s link" href="${esc(it.maps_url)}" target="_blank" rel="noopener">Open in Google Maps</a>` : ''}</span>${save}</div>`;
+  const hood = it.address ? it.address.split(',').slice(-3, -2)[0] : '';
+  const meta = [it.kind_label, it.price_level ? PRICE_SIGNS[it.price_level] : null, it.distance_m != null ? fmtDistance(it.distance_m) : null].filter(Boolean);
+  const img = it.photo ? `<img class="sthumb" style="--sz:64px" src="${esc(it.photo)}" alt="" loading="lazy" decoding="async" onerror="this.remove()">` : `<span class="sthumb ph" style="--sz:64px">${ICON.pin}</span>`;
+  return `<li class="drow">${img}<span class="m"><span class="t">${esc(it.name)}</span>
+      <span class="s">${esc([hood && hood.trim(), ...meta].filter(Boolean).join(' · '))}</span>
+      ${it.award ? `<span class="award">${ICON.sparkle}${esc(it.award)}</span>` : ''}
+      ${it.why ? `<span class="why">${esc(it.why)}</span>` : ''}</span>
+    <button class="bmk${it.saved ? ' on' : ''}" data-act="discsave" data-id="${esc(it.id)}" aria-pressed="${!!it.saved}" aria-label="${it.saved ? `Saved: ${esc(it.name)}` : `Save ${esc(it.name)}`}">${ICON.bookmark}</button></li>`;
+}
+
+/** The edits for where you're looking: your city's, or the trip's. */
+function discoverEdits(cityName, tripId) {
+  const all = background(S.allEdits, 'alledits', loadAllEdits) || [];
+  const trips = S.trips || [];
+  const matches = all.filter((te) => {
+    if (tripId) return te.trip_id === tripId;
+    const t = trips.find((x) => x.id === te.trip_id);
+    return cityName && t && tripStops(t).some((c) => cityKey(c) === cityKey(cityName));
+  });
+  const cards = matches.flatMap((te) => te.edits.map((e) => ({ te, e }))).slice(0, 4);
+  if (!cards.length) return '';
+  const [first, ...rest] = cards;
+  const photos = first.e.entries.map((x) => x.photo).filter(Boolean).slice(0, 3);
+  return `<div class="h2row"><h2 class="h2">The edits${cityName ? ` · ${esc(cityName)}` : ''}</h2></div>
+    <a class="ecard" href="#/edit/${first.te.trip_id}/${first.e.id}">${photos.length ? `<span class="eimgs">${photos.map((ph) => `<img src="${esc(photoUrl(ph, 400))}" alt="" loading="lazy">`).join('')}</span>` : ''}
+      <span class="b"><span class="eyebrow">The edit · ${plural(first.e.entries.length, 'place')}</span><span class="t serif">${esc(first.e.title)}</span>
+      ${first.e.dek ? `<span class="s">${esc(first.e.dek)}</span>` : ''}</span></a>
+    ${rest.length ? `<ul class="rows">${rest.map(({ te, e }) => `<li><a href="#/edit/${te.trip_id}/${e.id}"><span class="m"><span class="eyebrow">The edit · ${plural(e.entries.length, 'place')}</span><span class="t serif">${esc(e.title)}</span></span>${ICON.chev}</a></li>`).join('')}</ul>` : ''}`;
 }
 
 async function discoverView() {
   const d = S.disc;
   if (S.homeCity === undefined) S.homeCity = await api('/v1/home').catch(() => null);
+  if (S.me === undefined) S.me = await api('/v1/me').catch(() => null);
+  const allTrips = await cachedTrips();
+  const trips = allTrips.filter((t) => t.kind !== 'local' && t.place_count);
+  // While you're travelling, Discover looks around your trip unless you picked somewhere.
+  const onTrip = activeTrip(realTrips(allTrips));
+  if (!d.picked && onTrip && onTrip.trip.place_count) { d.area = 'trip'; d.tripId = onTrip.trip.id; }
   if (d.area === 'home' && !S.homeCity) d.area = 'here';
-  const trips = (await cachedTrips()).filter((t) => t.kind !== 'local' && t.place_count);
   if (d.area === 'trip' && !trips.some((t) => t.id === d.tripId)) d.area = S.homeCity ? 'home' : 'here';
   loadDiscover();
   const res = d.data[discKey()];
-  const areaLabel = d.area === 'home' ? S.homeCity.city : d.area === 'here' ? 'Near me' : (trips.find((t) => t.id === d.tripId) || {}).name;
-  const chips = `<div class="fchips" role="group" aria-label="Kind of place">${DISC_KINDS.map(([k, label]) =>
-    `<button class="fchip${d.kind === k ? ' on' : ''}" data-act="disckind" data-kind="${k}" aria-pressed="${d.kind === k}">${label}</button>`).join('')}</div>`;
-  const controls = `<div class="homectl"><button class="pillbtn" data-act="discarea">${ICON.pin}${esc(areaLabel || 'Choose area')}</button>
-    <button class="pillbtn" data-act="discrefresh">Refresh</button></div>`;
+  const trip = d.area === 'trip' ? trips.find((t) => t.id === d.tripId) : null;
+  const cityName = d.area === 'home' ? S.homeCity.city : trip ? (onTrip && onTrip.trip.id === trip.id
+    ? (((trip.stops || []).find((x) => onTrip.day >= x.start_day && onTrip.day <= x.end_day) || {}).city || trip.city) : trip.city) : '';
+  const areaLabel = d.area === 'home' ? `Near you · ${S.homeCity.city}` : d.area === 'here' ? 'Near you' : `${trip ? trip.name : 'Trip'}${cityName ? ` · ${cityName}` : ''}`;
+  const head = `<div class="tophead end"><span class="tbtns">${roundBtn('add', 'plus', 'Save a place')}${profileBtn()}</span></div>
+    <div class="libtitle"><h1 data-anchor>Discover</h1></div>
+    <button class="areabtn" data-act="discarea">${ICON.locate}<span>${esc(areaLabel)}</span>${ICON.down}</button>
+    <p class="sub tight">Switches to your trip city when you travel</p>
+    <div class="fchips" role="group" aria-label="Kind of place">${DISC_KINDS.map(([k, label]) =>
+      `<button class="fchip${d.kind === k ? ' on' : ''}" data-act="disckind" data-kind="${k}" aria-pressed="${d.kind === k}">${label}</button>`).join('')}</div>`;
   let body;
   if (res === undefined || res === null) body = '<div class="empty"><span class="spinner"></span><p>Finding the best nearby…</p></div>';
   else if (res.status === 'disabled') body = emptyState('gray', 'compass', 'Discover isn’t switched on', 'It needs a Google Maps key on the server (GOOGLE_MAPS_API_KEY).');
-  else if (res.status === 'no_area') body = emptyState('gray', 'pin', 'Where should we look?', 'Set your home city in your profile, or choose Near me.',
+  else if (res.status === 'no_area') body = emptyState('gray', 'pin', 'Where should we look?', 'Set your home city in your profile, or choose Near you.',
     '<a class="btn" href="#/profile">Open your profile</a>');
   else if (res.status === 'error') body = emptyState('gray', 'warn', 'Couldn’t load recommendations', esc(res.message || 'Try again in a moment.'),
     '<button class="btn tint" data-act="discrefresh">Try again</button>');
   else if (!res.items.length) body = emptyState('gray', 'pinslash', 'Nothing well-rated found here', 'Try another kind of place or a wider area.');
   else {
-    body = `<div class="section"><div class="group thumbs">${res.items.map(discoverCard).join('')}</div>
-      <div class="section-f">Ranked by Google ratings and your taste. Awards such as Michelin stars come from Claude’s own knowledge, not a live feed, so check the Michelin Guide before you go.</div></div>`;
+    body = `<div class="h2row"><h2 class="h2">Popular near ${d.area === 'trip' ? esc(cityName || 'your trip') : 'you'}</h2><button class="tbtn" data-act="discrefresh">Refresh</button></div>
+      <ul class="drows">${res.items.map(discoverCard).join('')}</ul>
+      <p class="sub small">Well rated on Google and picked for your taste. Awards such as Michelin stars come from Claude’s knowledge, not a live feed, so check before you go.</p>`;
   }
-  return `${rootNav('Discover')}<h1 class="largetitle" data-anchor>Discover</h1>
-    <div class="subtitle"><span>Well-rated places${areaLabel ? ` · ${esc(areaLabel)}` : ''}</span></div>${chips}${controls}${body}`;
+  return `<div class="page">${head}${discoverEdits(cityName, trip ? trip.id : null)}${body}</div>`;
 }
 
 // ---------- Calendar ----------
@@ -4503,7 +4531,7 @@ async function onAction(act, el) {
         },
       });
       return;
-    case 'add': { const r = route(); addSheet({ tripId: ['trip', 'today'].includes(r.name) ? r.id : '' }); return; }
+    case 'add': { if (EMBED) { toNative({ open: '#/add' }); return; } const r = route(); addSheet({ tripId: ['trip', 'today'].includes(r.name) ? r.id : '' }); return; }
     case 'addtrip': S.sheet.st.trip = el.value; if (S.sheet.st.text) addInputChanged(S.sheet.st.text); return;
     case 'addresult': await addPlace('/v1/places', { candidate_id: el.dataset.id, trip_id: S.sheet.st.trip || null }); return;
     case 'addname': await addByName(S.sheet.st.text.trim(), S.sheet.st.trip); return;
@@ -4817,16 +4845,16 @@ async function onAction(act, el) {
       const trips = (S.trips || []).filter((t) => t.kind !== 'local' && t.place_count);
       const mark = (on) => (on ? '✓ ' : '');
       openSheet({ type: 'actions', title: 'Look near', actions: [
-        { label: `${mark(S.disc.area === 'here')}My location`, run: () => { S.disc.area = 'here'; render(); } },
-        ...(S.homeCity ? [{ label: `${mark(S.disc.area === 'home')}${S.homeCity.city} (home)`, run: () => { S.disc.area = 'home'; render(); } }] : []),
-        ...trips.map((t) => ({ label: `${mark(S.disc.area === 'trip' && S.disc.tripId === t.id)}${t.name}`, run: () => { S.disc.area = 'trip'; S.disc.tripId = t.id; render(); } })),
+        { label: `${mark(S.disc.area === 'here')}My location`, run: () => { S.disc.area = 'here'; S.disc.picked = true; render(); } },
+        ...(S.homeCity ? [{ label: `${mark(S.disc.area === 'home')}${S.homeCity.city} (home)`, run: () => { S.disc.area = 'home'; S.disc.picked = true; render(); } }] : []),
+        ...trips.map((t) => ({ label: `${mark(S.disc.area === 'trip' && S.disc.tripId === t.id)}${t.name}`, run: () => { S.disc.area = 'trip'; S.disc.tripId = t.id; S.disc.picked = true; render(); } })),
       ] });
       return;
     }
     case 'discsave': {
       const res = S.disc.data[discKey()];
       const it = res && res.items.find((x) => x.id === el.dataset.id);
-      if (!it) return;
+      if (!it || it.saved) return;
       el.disabled = true;
       try {
         const out = await api('/v1/places', { method: 'POST', body: { candidate_id: it.id, trip_id: S.disc.area === 'trip' ? S.disc.tripId : null } });

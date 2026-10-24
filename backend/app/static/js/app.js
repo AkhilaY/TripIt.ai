@@ -2070,6 +2070,105 @@ function organizeBlock(p) {
   </div>`;
 }
 
+// ---------- Home during a trip ----------
+
+const TOD_MINUTE = { morning: 570, lunch: 750, afternoon: 900, dinner: 1170, evening: 1260 };
+function slotMinute(p) {
+  if (p.start_time) { const [h, m] = p.start_time.split(':').map(Number); return h * 60 + m; }
+  return TOD_MINUTE[p.time_of_day] ?? 720;
+}
+const minuteClock = (m) => fmtClock(`${String(Math.floor(m / 60) % 24).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`);
+function walkMins(p, prev) {
+  if (S.pos && located(p)) { const d = meters(S.pos.latitude, S.pos.longitude, p.latitude, p.longitude); if (d < 5000) return Math.max(1, Math.round(d / 80)); }
+  if (prev && located(prev) && located(p)) { const d = meters(prev.latitude, prev.longitude, p.latitude, p.longitude); if (d < 5000) return Math.max(1, Math.round(d / 80)); }
+  return null;
+}
+function hours(min) { if (min < 60) return `${min} min`; const q = Math.round(min / 15); return `${Math.floor(q / 4)}${['', '¼', '½', '¾'][q % 4]} hr`; }
+const temp = (c) => Math.round(USE_MILES ? (c * 9) / 5 + 32 : c);
+
+async function loadTodayWeather(t, places) {
+  const key = `${t.id}:${todayIso()}`;
+  if (S.weatherToday && S.weatherToday.key === key) return;
+  S.weatherToday = { key, w: null };
+  const at = S.pos || places.find(located);
+  if (!at) return;
+  try {
+    S.weatherToday.w = await api(`/v1/weather/today?lat=${at.latitude}&lon=${at.longitude}&on=${todayIso()}`);
+    render({ quiet: true });
+  } catch { /* no weather */ }
+}
+
+function travelHomeHtml(t, day) {
+  const detail = S.trip[t.id];
+  const route = (t.stops && t.stops.length) ? t.stops : [{ city: t.city, start_day: 1, end_day: t.day_count }];
+  const si = Math.max(0, route.findIndex((x) => day >= x.start_day && day <= x.end_day));
+  const city = route[si].city;
+  const list = detail ? stops(detail, day) : [];
+  if (detail) loadTodayWeather(t, list.length ? list : detail.places);
+  const now = new Date().getHours() * 60 + new Date().getMinutes();
+  const next = list.find((p) => !p.visited && slotMinute(p) >= now - 30) || list.find((p) => !p.visited);
+  const booked = new Set(((detail && detail.bookings) || []).map((b) => b.place_id).filter(Boolean));
+  const hoods = [...new Set(list.map((p) => p.neighborhood).filter(Boolean))];
+  const title = (detail && detail.day_titles && detail.day_titles[day - 1] && !/^Day \d+$/.test(detail.day_titles[day - 1])) ? detail.day_titles[day - 1]
+    : hoods.length >= 2 ? `${hoods[0]}, then ${hoods[1]}` : hoods[0] || `Day ${day} in ${city}`;
+  const w = S.weatherToday && S.weatherToday.w;
+
+  // Dinner gap: nothing after 6 PM, so offer saved food places close to where the day ends.
+  let gap = [];
+  if (detail && list.length && !list.some((p) => slotMinute(p) >= 1080)) {
+    const planned = new Set(detail.places.filter((p) => p.day_number).map((p) => p.id));
+    const anchor = [...list].reverse().find(located);
+    gap = savedOnly(S.places || []).filter((p) => ['food', 'drinks'].includes(p.category) && !planned.has(p.id) && p.city && cityKey(p.city) === cityKey(city)
+      && (!anchor || !located(p) || meters(anchor.latitude, anchor.longitude, p.latitude, p.longitude) < 2500));
+  }
+  const rows = list.map((p, i) => {
+    const m = slotMinute(p);
+    const walk = walkMins(p, list[i - 1]);
+    const isNext = next && p.id === next.id;
+    const leave = isNext && walk != null ? m - walk - now : null;
+    const what = p.time_of_day === 'morning' ? 'Breakfast' : p.time_of_day ? cap(p.time_of_day) : CATS[p.category];
+    const warn = p.booking_need && !booked.has(p.id) && MENU_CATS.has(p.category)
+      ? `<span class="tl-warn">${p.booking_need === 'required' ? 'No table booked yet' : 'No table booked · expect a queue'}</span>` : '';
+    return `<a class="tl${isNext ? ' next' : ''}${p.visited ? ' done' : ''}" href="#/place/${p.id}?trip=${t.id}"><span class="tl-time">${esc(minuteClock(m))}</span><i class="tl-dot"></i>
+      <span class="tl-body">${isNext ? `<span class="eyebrow">Next${leave != null && leave > 0 && leave <= 90 ? ` · leave in ${leave} min` : ''}</span>` : ''}
+        <span class="tl-name serif">${esc(p.name)}</span><span class="tl-meta">${esc([what, walk != null ? `${walk} min walk` : ''].filter(Boolean).join(' · '))}</span>${warn}</span></a>`;
+  }).join('');
+  const gapRow = gap.length ? `<div class="tl gap"><span class="tl-time">${esc(minuteClock(1170))}</span><i class="tl-dot dashed"></i>
+    <span class="tl-body"><span class="tl-name">Dinner isn't planned</span><span class="tl-meta">${plural(gap.length, 'saved place')} ${gap.length === 1 ? 'is' : 'are'} close to where you'll be</span>
+    <button class="tlink" data-act="dinnergap" data-trip="${t.id}" data-day="${day}" data-ids="${gap.slice(0, 8).map((p) => p.id).join(',')}">Choose one</button></span></div>` : '';
+  const links = next ? mapsLinks(next, detail) : null;
+  const todayHtml = `<section class="tcard"><div class="tc-head"><span class="m"><span class="eyebrow">${route.length > 1 ? `Today · stop ${si + 1} of ${route.length}` : 'Today'}</span>
+      <span class="t serif">${esc(title)}</span></span>${w ? `<span class="wx"><b>${temp(w.temp_max)}°</b><span>${esc(w.summary)}</span></span>` : ''}</div>
+    ${list.length ? `<div class="tline">${rows}${gapRow}</div>` : '<p class="sub">Nothing planned for today yet.</p>'}
+    <div class="wbtns"><a class="btn" href="#/today/${t.id}">Open today</a>
+      ${links ? `<button class="btn tint" data-act="directionsmenu" data-apple="${esc(links.apple)}" data-google="${esc(links.google)}">${ICON.fwd}Directions</button>` : `<a class="btn tint" href="#/trip/${t.id}">Plan today</a>`}</div></section>`;
+
+  const near = savedOnly(S.places || []).filter((p) => (S.pos && located(p) ? meters(S.pos.latitude, S.pos.longitude, p.latitude, p.longitude) < 3000 : !S.pos && p.city && cityKey(p.city) === cityKey(city)))
+    .sort((a, b) => (distanceOf(a) ?? 1e12) - (distanceOf(b) ?? 1e12)).slice(0, 8);
+  const nearHtml = near.length ? `<div class="h2row"><h2 class="h2">Near you now</h2><span class="hint">From your ${esc(city)} saves</span></div>
+    <div class="hscroll">${near.map((p) => { const st = openStatus(p.opening_hours); const wk = S.pos && located(p) ? Math.max(1, Math.round(meters(S.pos.latitude, S.pos.longitude, p.latitude, p.longitude) / 80)) : null; return `<a class="ocard sm" href="${placeHref(p)}">
+      ${p.photos && p.photos[0] ? `<img src="${esc(photoUrl(p.photos[0], 400))}" alt="" loading="lazy" decoding="async">` : `<span class="ph">${ICON[p.category] || ICON.pin}</span>`}
+      <span class="t">${esc(p.name)}</span><span class="s">${st ? `<span class="${st.state === 'open' ? 'open' : ''}">${st.state === 'open' ? 'Open' : 'Closed'}</span>` : ''}${wk ? `${st ? ' · ' : ''}${wk} min walk` : ''}</span></a>`; }).join('')}</div>` : '';
+
+  let nextHtml = '';
+  const ns = route[si + 1];
+  if (ns) {
+    const saved = savedOnly(S.places || []).filter((p) => p.city && cityKey(p.city) === cityKey(ns.city));
+    const inPlan = ((detail && detail.places) || []).filter((p) => p.day_number >= ns.start_day && p.day_number <= ns.end_day).length;
+    const date = dayDate(t.start_date, ns.start_day);
+    const iso = (() => { const d = dayOf(t.start_date); d.setDate(d.getDate() + ns.start_day - 1); return isoDate(d); })();
+    const hotel = ((detail && detail.bookings) || []).some((b) => b.kind === 'hotel' && (b.start_at || '').slice(0, 10) <= iso && iso <= ((b.end_at || b.start_at || '').slice(0, 10)));
+    const photo = saved.find((p) => p.photos && p.photos[0]);
+    const travel = [ns.travel_note || (ns.travel_mode ? cap(ns.travel_mode) : ''), ns.travel_minutes ? `about ${hours(ns.travel_minutes)}` : ''].filter(Boolean).join(' · ');
+    nextHtml = `<h2 class="h2">Next stop</h2><div class="ccard">
+      <span class="crow">${photo ? `<img class="sthumb" style="--sz:46px" src="${esc(photoUrl(photo.photos[0], 150))}" alt="">` : `<span class="sthumb ph" style="--sz:46px">${ICON.pin}</span>`}
+        <span class="m">${date ? `<span class="eyebrow">${esc(date)}</span>` : ''}<span class="t serif">${esc(ns.city)}</span>${travel ? `<span class="s">${esc(travel)}</span>` : ''}</span></span>
+      <span class="cline">${ICON.bookmark}${plural(saved.length, 'saved place')} · ${inPlan} in the plan</span>
+      ${hotel ? '' : `<span class="cline attn">${ICON.stay || ICON.bag}No hotel booked yet<a class="tlink" href="#/trip/${t.id}/bookings">Add a stay</a></span>`}</div>`;
+  }
+  return `<div class="tstrip"><b>Day ${day} of ${t.day_count}</b><span class="n">${esc(t.name)}</span><span class="r">${esc(tripStops(t).join(' → '))}</span></div>${todayHtml}${nearHtml}${nextHtml}`;
+}
+
 // ---------- Home, Library and cities ----------
 // Places file themselves by city: your home city is "Around <city>", every other city is sorted automatically,
 // trips are routes of stops, and lists are yours. "Want to go / Been" filters the whole Library.
@@ -2114,10 +2213,11 @@ function dateRange(a, b) {
   return a.getTime() === b.getTime() || !f.formatRange ? f.format(a) : f.formatRange(a, b);
 }
 const upcomingTrips = (trips) => realTrips(trips).filter((t) => t.start_date && (tripEnd(t) || t.start_date) >= todayIso());
-const tripStops = (t) => [t.city].filter(Boolean);
+const tripStops = (t) => ((t.stops && t.stops.length) ? t.stops.map((x) => x.city) : [t.city]).filter(Boolean);
 function tripForCity(trips, city) {
   const k = cityKey(city);
-  return upcomingTrips(trips).find((t) => cityKey(t.city) === k) || realTrips(trips).find((t) => cityKey(t.city) === k) || null;
+  const visits = (t) => tripStops(t).some((c) => cityKey(c) === k);
+  return upcomingTrips(trips).find(visits) || realTrips(trips).find(visits) || null;
 }
 
 /** "1–6 Nov", "28 Oct – 2 Nov". */
@@ -2231,7 +2331,9 @@ async function homeView() {
   const first = S.me && S.me.name ? S.me.name.split(' ')[0] : '';
   const greet = `${hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening'}${first ? `, ${esc(first)}` : ''}`;
   const date = new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' });
-  const head = `<div class="tophead"><span class="eyebrow quiet">${esc([date, S.homeCity && S.homeCity.city].filter(Boolean).join(' · '))}</span>
+  const onTrip = activeTrip(realTrips(trips));
+  const hereCity = onTrip ? (((onTrip.trip.stops || []).find((x) => onTrip.day >= x.start_day && onTrip.day <= x.end_day) || {}).city || onTrip.trip.city) : S.homeCity && S.homeCity.city;
+  const head = `<div class="tophead"><span class="eyebrow quiet">${esc([date, hereCity].filter(Boolean).join(' · '))}</span>
       <span class="tbtns">${roundBtn('add', 'plus', 'Save a place')}${profileBtn()}</span></div>
     <h1 class="greet" data-anchor>${greet}</h1>`;
   const jobs = S.jobs.filter((j) => ACTIVE.has(j.status));
@@ -2289,11 +2391,13 @@ async function homeView() {
     : (S.homeCity ? emptyState('accent', 'bookmark', 'Nothing saved yet', 'Share a TikTok or Instagram Reel to The Travel Edit, paste a link, or search for a place.',
       `<button class="btn" data-act="add">${ICON.plus}Save a place</button>`) : '');
 
-  // On a trip today: its day first.
-  const active = activeTrip(trips);
-  if (active && !S.trip[active.trip.id]) loadTrip(active.trip.id).then(() => render({ quiet: true })).catch(() => {});
-  const todayHtml = active && S.trip[active.trip.id] ? todayCard(active) : '';
-  return `<div class="page">${head}${jobsHtml}${todayHtml}${weekend}${openHtml}${coming}${recentHtml}${tasteInvite()}</div>`;
+  // On a trip today: today at this stop, what's near, and the next stop instead of the at-home sections.
+  const active = activeTrip(realTrips(trips));
+  if (active) {
+    if (!S.trip[active.trip.id]) loadTrip(active.trip.id).then(() => render({ quiet: true })).catch(() => {});
+    return `<div class="page">${head}${jobsHtml}${travelHomeHtml(active.trip, active.day)}${recentHtml}</div>`;
+  }
+  return `<div class="page">${head}${jobsHtml}${weekend}${openHtml}${coming}${recentHtml}${tasteInvite()}</div>`;
 }
 
 function libMain(places, trips, folders) {
@@ -4560,6 +4664,23 @@ async function onAction(act, el) {
     case 'citytrip': {
       const k = cityKey(el.dataset.city);
       newTripSheet({ placeIds: savedOnly(S.places || []).filter((p) => p.city && cityKey(p.city) === k).map((p) => p.id) });
+      return;
+    }
+    case 'dinnergap': {
+      const { trip: tripId, day } = el.dataset;
+      const ids = el.dataset.ids.split(',');
+      openSheet({ type: 'actions', title: 'Dinner tonight', actions: ids.map((id) => {
+        const p = (S.places || []).find((x) => x.id === id);
+        return { label: p ? p.name : id, run: async () => {
+          const t = S.trip[tripId];
+          if (!t.places.some((x) => x.id === id)) syncTrip(await api(`/v1/trips/${tripId}/places`, { method: 'POST', body: { place_ids: [id] } }));
+          syncTrip(await api(`/v1/trips/${tripId}/add-to-day`, { method: 'POST', body: { place_ids: [id], day: Number(day) } }));
+          await api(`/v1/places/${id}`, { method: 'PATCH', body: { time_of_day: 'dinner', trip_id: tripId } });
+          await loadTrip(tripId);
+          toast(`${p ? p.name : 'Place'} added for dinner`);
+          render({ quiet: true });
+        } };
+      }) });
       return;
     }
     case 'settheme': try { localStorage.setItem(THEME_KEY, el.dataset.v); } catch { /* this visit only */ } applyTheme(); render({ quiet: true }); return;

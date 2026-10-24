@@ -1035,7 +1035,7 @@ button.row.sel { cursor: pointer; }
 .wbtns .btn:first-child { flex: 1; }
 .wbtns .btn.tint { flex: none; padding: 0 14px; }
 
-.hscroll { display: flex; gap: 12px; overflow-x: auto; margin: 4px -20px 0; padding: 0 20px 4px; scroll-snap-type: x mandatory; scrollbar-width: none; }
+.hscroll { display: flex; gap: 10px; overflow-x: auto; margin: 4px -20px 0; padding: 0 20px 4px; scroll-padding-inline: 20px; scroll-snap-type: x mandatory; scrollbar-width: none; }
 .hscroll::-webkit-scrollbar { display: none; }
 .ocard { width: 136px; flex: none; color: var(--label); text-decoration: none; scroll-snap-align: start; display: flex; flex-direction: column; gap: 3px; }
 .ocard img, .ocard .ph { width: 136px; height: 96px; border-radius: 12px; object-fit: cover; background: var(--raised); display: grid; place-items: center; color: var(--secondary); }
@@ -1178,3 +1178,43 @@ a.krow, button.krow { cursor: pointer; }
 .pcard.why q { font-style: italic; }
 .pg .section { margin: 28px 0 0; }
 .pg .section-h { padding-left: 0; }
+
+/* ---------- Home during a trip ---------- */
+.tstrip { margin-top: 14px; display: flex; align-items: center; gap: 10px; padding: 6px 12px 6px 6px; border-radius: 999px; background: var(--cell); border: 1px solid var(--border);
+  font-size: 12px; min-width: 0; }
+.tstrip b { font-size: 11px; font-weight: 600; color: var(--gold); background: var(--gold-soft); padding: 3px 8px; border-radius: 999px; white-space: nowrap; }
+.tstrip .n { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tstrip .r { margin-left: auto; color: var(--secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tcard { margin-top: 14px; background: var(--cell); border: 1px solid var(--border); border-radius: 16px; padding: 14px; }
+.tc-head { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; }
+.tc-head .m { display: flex; flex-direction: column; gap: 4px; }
+.tc-head .t { font-size: 20px; line-height: 1.15; }
+.tc-head .eyebrow { color: var(--gold); }
+.wx { display: flex; flex-direction: column; align-items: flex-end; gap: 1px; flex-shrink: 0; }
+.wx b { font-size: 15px; font-weight: 600; }
+.wx span { font-size: 11px; color: var(--secondary); white-space: nowrap; }
+.tline { margin-top: 12px; display: flex; flex-direction: column; }
+.tl { display: grid; grid-template-columns: 52px 11px 1fr; gap: 10px; color: var(--label); text-decoration: none; position: relative; padding-bottom: 14px; }
+.tl:not(:last-child)::after { content: ""; position: absolute; left: 67px; top: 14px; bottom: 0; width: 1px; background: var(--border); }
+.tl-time { font-size: 11px; font-weight: 500; color: var(--secondary); text-align: right; padding-top: 2px; font-variant-numeric: tabular-nums; }
+.tl-dot { width: 9px; height: 9px; border-radius: 50%; border: 1.5px solid var(--tertiary); margin-top: 4px; box-sizing: border-box; background: var(--cell); position: relative; z-index: 1; }
+.tl.next .tl-dot { background: var(--gold); border-color: var(--gold); }
+.tl-dot.dashed { border-style: dashed; }
+.tl-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.tl-body .eyebrow { color: var(--gold); }
+.tl-name { font-size: 15px; line-height: 1.25; }
+.tl.next .tl-name { font-size: 17px; }
+.tl.done .tl-name { color: var(--secondary); text-decoration: line-through; }
+.tl.gap .tl-name { font-family: var(--font); font-size: 14px; font-weight: 600; }
+.tl-meta { font-size: 12px; color: var(--secondary); }
+.tl-warn { font-size: 12px; font-weight: 500; color: var(--danger); }
+.tl .tlink { min-height: 28px; font-size: 12px; align-self: flex-start; }
+.ocard.sm { width: 124px; }
+.ocard.sm img, .ocard.sm .ph { width: 124px; height: 88px; }
+.ocard.sm .t { font-size: 13px; }
+.ocard.sm .s { font-size: 11px; }
+.cline { display: flex; align-items: center; gap: 8px; font-size: 12px; margin-top: 10px; }
+.cline:first-of-type { padding-top: 10px; border-top: 1px solid var(--border); }
+.cline svg { width: 14px; height: 14px; flex-shrink: 0; }
+.cline.attn { color: var(--danger); font-weight: 500; }
+.cline .tlink { margin-left: auto; min-height: 0; font-size: 12px; }

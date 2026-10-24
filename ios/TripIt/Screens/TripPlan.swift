@@ -52,6 +52,7 @@ struct TripPlan: View {
                 if let notes = trip.planNotes {
                     Text(notes).font(.subheadline).foregroundStyle(Theme.label)
                 }
+                if !trip.route.isEmpty { RouteStrip(stops: trip.route) { sheet = .route } }
             }
             ForEach(1...trip.dayCount, id: \.self) { day in
                 daySection(day)
@@ -65,13 +66,24 @@ struct TripPlan: View {
             let unscheduled = trip.places.filter { $0.dayNumber == nil }
                 .sorted { $0.mustDo != $1.mustDo ? $0.mustDo : $0.mentionCount > $1.mentionCount }
             if !unscheduled.isEmpty {
-                Section("Not scheduled · \(unscheduled.count)") {
+                Section {
                     ForEach(unscheduled) { place in
                         NavigationLink(value: Route.place(id: place.id, tripId: trip.id)) {
                             PlaceRow(place: place)
                         }
                         .contextMenu { moveMenu(place) }
                     }
+                } header: {
+                    HStack {
+                        Text("Not on a day yet · \(unscheduled.count)")
+                        Spacer()
+                        if editMode?.wrappedValue.isEditing != true {
+                            Button { Task { await fitThemIn() } } label: { Label("Fit them in", systemImage: "wand.and.rays") }
+                                .font(.footnote.weight(.semibold)).foregroundStyle(Theme.link).textCase(nil)
+                        }
+                    }
+                } footer: {
+                    if !trip.route.isEmpty { Text("Each goes on the lightest day in its own city, on a day it's open.") }
                 }
             }
             Section {
@@ -98,7 +110,14 @@ struct TripPlan: View {
     @ViewBuilder private func daySection(_ day: Int) -> some View {
         let stops = trip.dayPlaces(day)
         let located = stops.filter(\.isLocated)
+        let stop = trip.stop(on: day)
+        let arriving = stop.flatMap { $0.startDay == day && $0.startDay > 1 ? $0 : nil }
         Section {
+            if let arriving, editMode?.wrappedValue.isEditing != true {
+                TravelDayRow(from: trip.stop(on: day - 1)?.city, stop: arriving, ticket: dayBookings(day).first { ["flight", "train"].contains($0.kind) }) {
+                    router.push(.web(hash: "#/trip/\(trip.id)/bookings"))
+                }
+            }
             ForEach(dayBookings(day)) { booking in
                 Button { router.push(.web(hash: "#/trip/\(trip.id)/bookings")) } label: {
                     HStack(spacing: 12) {
@@ -116,6 +135,9 @@ struct TripPlan: View {
                 VStack(alignment: .leading, spacing: 8) {
                     NavigationLink(value: Route.place(id: place.id, tripId: trip.id)) {
                         StopRow(place: place, number: index + 1)
+                    }
+                    if let closure = trip.closure(for: place.id), editMode?.wrappedValue.isEditing != true {
+                        ClosureLine(closure: closure) { day in Task { await move(place, to: day) } }
                     }
                     if editMode?.wrappedValue.isEditing != true,
                        let next = located.firstIndex(where: { $0.id == place.id }).flatMap({ $0 + 1 < located.count ? located[$0 + 1] : nil }),
@@ -138,6 +160,9 @@ struct TripPlan: View {
             }
         } header: {
             VStack(alignment: .leading, spacing: 2) {
+                if let stop, stop.startDay == day {
+                    StopHeading(stop: stop, start: trip.startDate).padding(.bottom, 10)
+                }
                 if let date = Fmt.tripDay(start: trip.startDate, day: day) {
                     Text(date.uppercased()).font(.caption.weight(.bold)).foregroundStyle(Theme.gold)
                 }
@@ -169,6 +194,14 @@ struct TripPlan: View {
     }
 
     // MARK: Changes
+
+    private func fitThemIn() async {
+        let before = trip.places.filter { $0.dayNumber == nil }.count
+        if let fresh = await store.tripCall("POST", "/v1/trips/\(trip.id)/fit") {
+            let left = fresh.places.filter { $0.dayNumber == nil }.count
+            store.show("Fitted in \(Fmt.plural(before - left, "place"))")
+        }
+    }
 
     private func move(_ place: Place, to day: Int) async {
         let index = day == 0 ? 0 : trip.dayPlaces(day).count
@@ -297,5 +330,111 @@ struct StopRow: View {
                 }
             }
         }
+    }
+}
+
+// MARK: - Multi-city pieces
+
+/// The trip's cities in a row, with how you travel between them. Tap to edit the route.
+struct RouteStrip: View {
+    let stops: [TripStop]
+    let onEdit: () -> Void
+
+    var body: some View {
+        Button(action: onEdit) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(Array(stops.enumerated()), id: \.offset) { i, stop in
+                        if i > 0 {
+                            HStack(spacing: 4) {
+                                Rectangle().fill(Theme.tertiary.opacity(0.6)).frame(width: 14, height: 1)
+                                Image(systemName: stop.travelSymbol).font(.system(size: 10, weight: .semibold))
+                                if let minutes = stop.travelMinutes, minutes > 0 { Text(TravelHome.duration(minutes)).font(.caption2) }
+                                Rectangle().fill(Theme.tertiary.opacity(0.6)).frame(width: 14, height: 1)
+                            }
+                            .foregroundStyle(Theme.secondary)
+                        }
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(stop.city).font(Theme.serif(17)).foregroundStyle(Theme.label)
+                            Text(Fmt.plural(stop.days, "day"))
+                                .font(.caption2).foregroundStyle(Theme.secondary)
+                        }
+                    }
+                }
+                .padding(.vertical, 2)
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Route: " + stops.map(\.city).joined(separator: ", then ") + ". Edit route")
+    }
+}
+
+/// Above a stop's first day: the city and its dates.
+struct StopHeading: View {
+    let stop: TripStop
+    let start: String?
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(stop.city).font(Theme.serif(28)).foregroundStyle(Theme.label)
+            Spacer()
+            Text(dates).font(.caption.weight(.semibold)).foregroundStyle(Theme.secondary)
+        }
+        .padding(.top, 10)
+        .overlay(alignment: .top) { Rectangle().fill(Theme.border).frame(height: 1) }
+    }
+
+    private var dates: String {
+        let days = stop.startDay == stop.endDay ? "Day \(stop.startDay)" : "Days \(stop.startDay)–\(stop.endDay)"
+        guard let first = Fmt.isoDay(start: start, day: stop.startDay).flatMap(Fmt.day),
+              let last = Fmt.isoDay(start: start, day: stop.endDay).flatMap(Fmt.day) else { return days }
+        return "\(days) · \(Fmt.range(first, last))"
+    }
+}
+
+/// The day you move to the next city: how you get there, and the ticket if it's booked.
+struct TravelDayRow: View {
+    let from: String?
+    let stop: TripStop
+    let ticket: Booking?
+    let onTicket: () -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            SymbolTile(symbol: stop.travelSymbol, color: Theme.blue)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Travel day · \(stop.travelLabel.lowercased()) to \(stop.city)").font(.subheadline.weight(.semibold)).foregroundStyle(Theme.label)
+                Text([from.map { "From \($0)" }, stop.travelMinutes.map { "about \(TravelHome.duration($0))" }, stop.travelNote]
+                    .compactMap { $0 }.joined(separator: " · "))
+                    .font(.caption).foregroundStyle(Theme.secondary).lineLimit(2)
+            }
+            Spacer(minLength: 4)
+            Button(action: onTicket) {
+                Text(ticket == nil ? "Add ticket" : "Ticket").font(.footnote.weight(.semibold)).foregroundStyle(ticket == nil ? Theme.link : Theme.ok)
+            }
+            .buttonStyle(.borderless)
+        }
+    }
+}
+
+/// "Closed on Sundays · Move it to Mon" under a stop planned on a day it's shut.
+struct ClosureLine: View {
+    let closure: TripClosure
+    let onMove: (Int) -> Void
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "exclamationmark.circle").font(.caption)
+            Text(closure.message).font(.caption.weight(.medium))
+            Spacer(minLength: 4)
+            if let day = closure.moveToDay {
+                Button { onMove(day) } label: {
+                    Text("Move it to \(closure.moveToLabel ?? "Day \(day)")").font(.caption.weight(.semibold)).foregroundStyle(Theme.link)
+                }
+                .buttonStyle(.borderless)
+            }
+        }
+        .foregroundStyle(Theme.danger)
+        .padding(.leading, 36)
     }
 }

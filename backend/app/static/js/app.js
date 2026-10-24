@@ -1460,7 +1460,7 @@ function eventWhen(p) {
 
 const loadAllBookings = () => once('allbookings', async () => { S.bookingsAll = await api('/v1/bookings'); fetchedAt.allbookings = Date.now(); return S.bookingsAll; });
 const cachedAllBookings = () => { if (!S.bookingsAll) return loadAllBookings(); revalidate('allbookings', loadAllBookings); return S.bookingsAll; };
-const BK_FILTERS = [['all', 'All'], ['flight', 'Flights'], ['hotel', 'Stays'], ['reservation', 'Tables'], ['car', 'Cars'], ['other', 'Other']];
+const BK_FILTERS = [['all', 'All'], ['flight', 'Flights'], ['hotel', 'Stays'], ['reservation', 'Tables'], ['tour', 'Tours'], ['car', 'Cars'], ['other', 'Other']];
 const bookingEnd = (b) => (b.end_at || b.start_at || '').slice(0, 10);
 
 /** The trip a new booking most likely belongs to: the one happening now, else the next one, else the newest. */
@@ -1510,12 +1510,60 @@ async function bookingsTab(r) {
   const chips = present.size > 1 ? `<div class="fchips" role="group" aria-label="Type">${BK_FILTERS.filter(([k]) => k === 'all' || present.has(k)).map(([k, label]) =>
     `<button class="fchip${b.kind === k ? ' on' : ''}" data-act="bkkind" data-k="${k}" aria-pressed="${b.kind === k}">${label}</button>`).join('')}</div>` : '';
   const ctl = tripsWith.length > 1 || b.trip !== 'all' ? `<div class="homectl"><button class="pillbtn" data-act="bktrip">${esc(b.trip === 'all' ? 'All trips' : tripName[b.trip])}</button></div>` : '';
-  const body = `${upcoming.length ? byDate(upcoming) : `<div class="calempty">Nothing coming up${b.kind !== 'all' || b.trip !== 'all' ? ' here' : ''}.</div>`}
-    ${undated.length ? `<div class="datehead">No date</div>${undated.map(card).join('')}` : ''}
+  const attention = bookingsAttention(all, trips.filter((t) => b.trip === 'all' || t.id === b.trip), b.kind);
+  const body = `${attention}${upcoming.length ? byDate(upcoming) : `<div class="calempty">Nothing coming up${b.kind !== 'all' || b.trip !== 'all' ? ' here' : ''}.</div>`}
+    ${undated.length ? `<div class="datehead">Needs a date</div>${undated.map((x) => card(x) + `<div class="bkfix"><button class="tlink" data-act="bkdate" data-id="${x.id}">${ICON.calendarPlus}Add date and time</button></div>`).join('')}` : ''}
     ${past.length ? `<div class="section"><button class="btn tint wide" data-act="bkpast" aria-expanded="${b.past}">${b.past ? 'Hide' : 'Show'} past bookings (${past.length})</button></div>
       ${b.past ? byDate(past) : ''}` : ''}
     <div class="section-f bkfoot">Bookings stay private: shared trip links never include them.</div>`;
   return `${head}<div class="subtitle"><span>${esc(subtitle)}</span></div>${chips}${ctl}${body}`;
+}
+
+const BK_KEEP = 'tripit.bkkeep';
+const keptBoth = () => { try { return JSON.parse(localStorage.getItem(BK_KEEP) || '[]'); } catch { return []; } };
+const addDays = (iso, n) => { const d = dayOf(iso); d.setDate(d.getDate() + n); return isoDate(d); };
+const shortDate = (iso) => dayOf(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+
+/** What needs doing before upcoming trips: a first flight that lands on another day than the trip starts, and nights
+ * with no stay booked (per city on a multi-city trip). */
+function bookingsAttention(all, trips, kind) {
+  const today = isoDate(new Date());
+  const kept = keptBoth();
+  const cards = [];
+  for (const t of realTrips(trips)) {
+    if (!t.start_date || !t.day_count) continue;
+    const end = addDays(t.start_date, t.day_count - 1);
+    if (end < today || t.start_date > addDays(today, 180)) continue;
+    const mine = all.filter((x) => x.trip_id === t.id);
+    const flight = mine.filter((x) => x.kind === 'flight' && x.start_at).sort((a, c) => a.start_at.localeCompare(c.start_at))[0];
+    if (flight && (kind === 'all' || kind === 'flight')) {
+      const lands = (flight.end_at || flight.start_at).slice(0, 10);
+      const gap = Math.round((dayOf(lands) - dayOf(t.start_date)) / 86400000);
+      const key = `${flight.id}:${t.start_date}`;
+      if (gap && Math.abs(gap) <= 3 && t.start_date > today && !kept.includes(key)) {
+        cards.push(`<div class="attcard"><span class="ic">${ICON.warn}</span><span class="m"><span class="t">${esc(flight.title)} lands ${esc(shortDay(lands))}, but your ${esc(t.name)} trip starts ${esc(shortDay(t.start_date))}</span>
+          <span class="acts"><button class="btn small" data-act="bkmovetrip" data-trip="${t.id}" data-date="${lands}">Move trip to ${esc(shortDate(lands))}</button>
+          <button class="tlink" data-act="bkkeep" data-key="${esc(key)}">Keep both</button></span></span></div>`);
+      }
+    }
+    if (kind !== 'all' && kind !== 'hotel') continue;
+    const stays = mine.filter((x) => x.kind === 'hotel' && x.start_at);
+    const covered = (iso) => stays.some((h) => h.start_at.slice(0, 10) <= iso && iso < (h.end_at ? h.end_at.slice(0, 10) : addDays(h.start_at.slice(0, 10), 1)));
+    const stops = (t.stops && t.stops.length ? t.stops : [{ city: t.city, start_day: 1, end_day: t.day_count }]);
+    for (const st of stops) {
+      // The nights you sleep in this city: its days, except the trip's last (you leave that day).
+      const nights = [];
+      for (let d = st.start_day; d <= Math.min(st.end_day, t.day_count - 1); d++) nights.push(addDays(t.start_date, d - 1));
+      const open = nights.filter((n) => n >= today && !covered(n));
+      if (!open.length) continue;
+      const first = open[0];
+      const out = addDays(open[open.length - 1], 1);
+      cards.push(`<div class="attcard"><span class="ic stay">${ICON.stay}</span><span class="m"><span class="t">No hotel booked yet${stops.length > 1 || st.city !== t.name ? ` in ${esc(st.city)}` : ''}</span>
+        <span class="s">${esc(t.name)} · ${esc(dateRange(dayOf(first), dayOf(out)))} · ${plural(open.length, 'night')}</span>
+        <span class="acts"><button class="btn small" data-act="bkaddstay" data-trip="${t.id}" data-city="${esc(st.city)}" data-in="${first}" data-out="${out}">${ICON.plus}Add a stay</button></span></span></div>`);
+    }
+  }
+  return cards.length ? `<div class="datehead">Needs your attention</div>${cards.join('')}` : '';
 }
 
 /** What you can do with a booking: lounges for a flight, edit, copy the reference, delete. */
@@ -3299,6 +3347,9 @@ function placesList(trip) {
     + selBar();
 }
 
+const TRAVEL_ICON = { train: ICON.transit, flight: ICON.plane, drive: ICON.drive, bus: ICON.transit, ferry: ICON.transit, walk: ICON.walk };
+const isoDayOf = (start, day) => { const d = dayOf(start); d.setDate(d.getDate() + day - 1); return isoDate(d); };
+
 function itinerary(trip) {
   if (!trip.day_count) {
     return emptyState('indigo', 'calendar', 'No itinerary yet',
@@ -3317,6 +3368,10 @@ function itinerary(trip) {
     <button class="linkbtn" data-act="editday">${S.editDay ? 'Done' : 'Edit'}</button></span></div>
     ${S.editDay ? '<div class="section"><div class="section-f" style="padding-top:0">Drag the handles to reorder stops or move them between days.</div></div>' : ''}`;
   if (trip.plan_notes) html += `<div class="section"><div class="group"><div class="notecard">${esc(trip.plan_notes)}</div></div></div>`;
+  const tripRoute = (trip.stops || []).length > 1 ? trip.stops : [];
+  if (tripRoute.length) html += `<div class="section"><button class="citystrip" data-act="editroute" data-id="${trip.id}" aria-label="Edit route">${tripRoute.map((x, i) =>
+    `${i ? `<span class="hop">${TRAVEL_ICON[x.travel_mode] || ICON.fwd}${x.travel_minutes ? `<span>${hours(x.travel_minutes)}</span>` : ''}</span>` : ''}<span class="cs"><span class="c">${esc(x.city)}</span><span class="n">${plural(x.days, 'day')}</span></span>`).join('')}</button></div>`;
+  const closures = Object.fromEntries((trip.closures || []).map((c) => [c.place_id, c]));
   const mode = currentMode();
   html += `<div class="travelbar">${segControl(`modes:${trip.id}`, MODES.map(([m, label]) => ({
     on: m === mode,
@@ -3328,9 +3383,21 @@ function itinerary(trip) {
     const date = dayDate(trip.start_date, d);
     const dayIdx = dayIndexFor(trip, d);
     const locatedList = list.filter(located);
+    const stop = tripRoute.find((x) => d >= x.start_day && d <= x.end_day);
+    if (stop && stop.start_day === d) {
+      const last = dayDate(trip.start_date, stop.end_day);
+      html += `<div class="stophead"><span class="c">${esc(stop.city)}</span><span class="d">${stop.start_day === stop.end_day ? `Day ${d}` : `Days ${stop.start_day}–${stop.end_day}`}${date && last ? ` · ${esc(dateRange(dayOf(isoDayOf(trip.start_date, stop.start_day)), dayOf(isoDayOf(trip.start_date, stop.end_day))))}` : ''}</span></div>`;
+    }
+    const arriving = stop && stop.start_day === d && d > 1 ? stop : null;
+    const ticket = arriving && dayBookings(trip, d).find((b) => b.kind === 'flight' || b.kind === 'train');
+    const from = arriving && tripRoute.find((x) => d - 1 >= x.start_day && d - 1 <= x.end_day);
+    const travelRow = arriving && !S.editDay ? `<div class="group travelday"><div class="row">${tile('blue', arriving.travel_mode === 'flight' ? 'plane' : arriving.travel_mode === 'drive' ? 'drive' : 'transit')}
+      <span class="main"><span class="t">Travel day · ${esc((arriving.travel_mode || 'travel').replace('other', 'travel'))} to ${esc(arriving.city)}</span>
+      <span class="s">${esc([from ? `From ${from.city}` : '', arriving.travel_minutes ? `about ${hours(arriving.travel_minutes)}` : '', arriving.travel_note || ''].filter(Boolean).join(' · '))}</span></span>
+      <a class="tlink${ticket ? ' open' : ''}" href="#/trip/${trip.id}/bookings">${ticket ? 'Ticket' : 'Add ticket'}</a></div></div>` : '';
     html += `<div class="section"><div class="dayhead"><div>${date ? `<div class="date">${date}</div>` : ''}<div class="d">Day ${d}</div>
       ${trip.day_titles[d - 1] && trip.day_titles[d - 1] !== `Day ${d}` ? `<div class="dt">${esc(trip.day_titles[d - 1])}</div>` : ''}</div><span class="daytravel" data-day="${d}"></span></div>
-      ${!S.editDay && dayBookings(trip, d).length ? bookingRows(dayBookings(trip, d)) : ''}
+      ${travelRow}${!S.editDay && dayBookings(trip, d).length ? bookingRows(dayBookings(trip, d)) : ''}
       <div class="group${S.editDay ? ' droplist' : ''}" data-day="${d}">${list.map((p, i) => {
         const conflict = slotConflict(p.opening_hours, dayIdx, p.time_of_day, p.start_time);
         const todays = dayIdx != null ? dayHours(p.opening_hours, dayIdx) : null;
@@ -3345,7 +3412,9 @@ function itinerary(trip) {
         const next = locatedList[locatedList.indexOf(p) + 1];
         const legRow = located(p) && next && !S.editDay
           ? `<div class="leg" data-day="${d}" data-from="${p.id}" data-to="${next.id}"><span class="spinner" style="width:14px;height:14px"></span></div>` : '';
-        return (S.editDay ? dragRow(p, inner) : `<a class="row" href="${placeHref(p)}">${inner}${ICON.chev}</a>`) + legRow;
+        const cl = closures[p.id];
+        const fix = cl && cl.move_to_day && !S.editDay ? `<div class="fixrow">${esc(cl.message)}<button class="tlink" data-act="closuremove" data-trip="${trip.id}" data-id="${p.id}" data-day="${cl.move_to_day}">Move it to ${esc(cl.move_to_label || `Day ${cl.move_to_day}`)}</button></div>` : '';
+        return (S.editDay ? dragRow(p, inner) : `<a class="row" href="${placeHref(p)}">${inner}${ICON.chev}</a>`) + fix + legRow;
       }).join('') || `<div class="row dropempty"><span class="s">${S.editDay ? 'Drop a place here' : 'Nothing planned yet.'}</span></div>`}${S.editDay ? '' : `<button class="row addrow" data-act="daypick" data-day="${d}" data-id="${trip.id}"><span class="addic">${ICON.plus}</span><span class="t link">Add places</span></button>`}</div></div>`;
   }
   if (!S.editDay && trip.day_count < 21) {
@@ -3361,7 +3430,8 @@ function itinerary(trip) {
       <div class="group droplist" data-day="0">${un.map((p) => dragRow(p, `${thumb(p, 52)}<span class="main"><span class="t">${esc(p.name)}${starMark(p)}</span>
         <span class="s">${esc(CATS[p.category])}</span></span>`)).join('')}<div class="row dropempty"><span class="s">Drag here to take a stop off the plan</span></div></div></div>`;
   } else if (un.length) {
-    html += `<div class="section"><h2 class="section-title">Not scheduled<span class="count">${un.length}</span></h2><div class="group thumbs">${un.map(placeRow).join('')}</div></div>`;
+    html += `<div class="section"><h2 class="section-title">Not on a day yet<span class="count">${un.length}</span><button class="tbtn fitbtn" data-act="fitin" data-id="${trip.id}">${ICON.sparkle}Fit them in</button></h2>
+      <div class="group thumbs">${un.map(placeRow).join('')}</div>${tripRoute.length ? '<div class="section-f">Each goes on the lightest day in its own city, on a day it’s open.</div>' : ''}</div>`;
   }
   html += '<div class="section"><div class="section-f">Open a place to set an exact time, like a reservation.</div></div>';
   return html;
@@ -3628,7 +3698,7 @@ function planSheet(trip) {
 // ---------- Bookings: flights, stays, tables and cars ----------
 
 const BOOKING_KINDS = {
-  flight: ['Flight', 'blue', 'plane'], hotel: ['Hotel', 'indigo', 'stay'], reservation: ['Table', 'gold', 'food'],
+  flight: ['Flight', 'blue', 'plane'], hotel: ['Stay', 'indigo', 'stay'], reservation: ['Table', 'gold', 'food'], tour: ['Tour', 'teal', 'ticket'],
   car: ['Car', 'green', 'drive'], other: ['Booking', 'gray', 'tag'],
 };
 const BOOKING_FIELDS = ['kind', 'title', 'start_at', 'end_at', 'origin', 'destination', 'address', 'confirmation', 'party_size', 'notes'];
@@ -3669,7 +3739,23 @@ function bookingDetails(b) {
   return { sub, meta };
 }
 
+/** A flight as a boarding pass: the airports large, departure and arrival times, then flight, date and reference. */
+function boardingPass(b, tripChip) {
+  const s = parseWhen(b.start_at);
+  const e = parseWhen(b.end_at);
+  const plus = s && e && e.date > s.date ? Math.round((dayOf(e.date) - dayOf(s.date)) / 86400000) : 0;
+  const ap = (code, when, extra = '') => `<span class="ap"><b>${esc(code || '—')}</b><span>${when && when.time ? esc(fmtClock(when.time)) : '&nbsp;'}${extra}</span></span>`;
+  const field = (k, v) => (v ? `<span><i>${k}</i>${esc(v)}</span>` : '');
+  return `<div class="bcard pass" data-act="bookingmenu" data-id="${b.id}" role="button" tabindex="0" aria-label="Flight ${esc(b.title)}${b.origin && b.destination ? ` from ${esc(b.origin)} to ${esc(b.destination)}` : ''}. Tap for options">
+    <div class="pass-route">${ap(b.origin, s)}<span class="line">${ICON.plane}</span>${ap(b.destination, e, plus ? `<sup>+${plus}</sup>` : '')}</div>
+    <div class="perf" aria-hidden="true"></div>
+    <div class="pass-meta">${field('Flight', b.title)}${field('Date', s ? fmtDay(s.day) : '')}${field('Confirmation', b.confirmation)}</div>
+    ${b.notes ? `<div class="meta"><span>${esc(b.notes)}</span></div>` : ''}
+    ${tripChip || b.origin ? `<div class="bactions">${tripChip}${b.origin ? `<button class="linkbtn pl" data-act="lounges" data-id="${b.id}">${ICON.sparkle}Lounges at ${esc(b.origin)}</button>` : ''}</div>` : ''}</div>`;
+}
+
 function bookingCard(b, { trip = null } = {}) {
+  if (b.kind === 'flight' && (b.origin || b.destination)) return boardingPass(b, trip ? `<a class="tripchip" href="#/trip/${b.trip_id}" data-act="link">${ICON.trips}${esc(trip)}</a>` : '');
   const [label, color, icon] = BOOKING_KINDS[b.kind] || BOOKING_KINDS.other;
   const { sub, meta } = bookingDetails(b);
   const tripChip = trip ? `<a class="tripchip" href="#/trip/${b.trip_id}" data-act="link">${ICON.trips}${esc(trip)}</a>` : '';
@@ -3768,7 +3854,7 @@ function addBookingSheet(trip, { choose = false } = {}) {
     body: () => `${picker}<div class="section"><div class="group tiles">
       ${opt('bkshot', 'green', 'photo', 'Screenshot or photo', 'Of a confirmation, e-ticket or itinerary')}
       ${opt('bktext', 'orange', 'note', 'Paste the email text', 'Claude reads flight, hotel and reservation details')}
-      ${opt('bkmanual', 'gray', 'plus', 'Enter it yourself', 'Flight, stay, car or table')}
+      ${opt('bkmanual', 'gray', 'plus', 'Enter it yourself', 'Flight, stay, table, tour or car')}
       </div><div class="section-f">Claude shows what it read so you can check it before saving. A confirmation number alone can’t be looked up, so The Travel Edit reads the confirmation itself.</div></div>`,
   });
 }
@@ -3825,13 +3911,14 @@ function nextDraft() {
   bookingForm(S.trip[f.tripId], { ...f.drafts[f.i], source: f.source }, { step: f.drafts.length > 1 ? `${f.i + 1} of ${f.drafts.length}` : null, flow: true });
 }
 
-const KIND_LABELS = { flight: 'Flight', hotel: 'Hotel', reservation: 'Table reservation', car: 'Car rental', other: 'Other' };
+const KIND_LABELS = { flight: 'Flight', hotel: 'Hotel or stay', reservation: 'Table reservation', tour: 'Tour or experience', car: 'Car rental', other: 'Other' };
 const FORM_FIELDS = {
   flight: { title: ['Flight number', 'BA 178'], origin: ['From', 'JFK'], destination: ['To', 'LHR'], start_at: ['Departs', 'datetime-local'], end_at: ['Arrives', 'datetime-local'] },
   hotel: { title: ['Hotel', 'The Hoxton'], address: ['Address', ''], start_at: ['Check-in', 'datetime-local'], end_at: ['Check-out', 'date'] },
   reservation: { title: ['Restaurant or venue', ''], start_at: ['Date and time', 'datetime-local'], party_size: ['Guests', 'number'], address: ['Address', ''] },
   car: { title: ['Rental company', 'Hertz'], origin: ['Pick-up location', ''], destination: ['Drop-off location', ''], start_at: ['Pick-up', 'datetime-local'], end_at: ['Drop-off', 'datetime-local'] },
-  other: { title: ['What is it?', 'Train, tour, event…'], start_at: ['When', 'datetime-local'], end_at: ['Until', 'datetime-local'], address: ['Where', ''] },
+  tour: { title: ['Tour or experience', 'Food tour, museum slot…'], start_at: ['Date and time', 'datetime-local'], party_size: ['Guests', 'number'], address: ['Meeting point', ''] },
+  other: { title: ['What is it?', 'Train, ferry, event…'], start_at: ['When', 'datetime-local'], end_at: ['Until', 'datetime-local'], address: ['Where', ''] },
 };
 
 /** Add or edit one booking. `initial` can be a draft Claude read, or a saved booking when `id` is given. */
@@ -5207,6 +5294,43 @@ async function onAction(act, el) {
     case 'maptrip': S.mapTrip = el.dataset.id; render(); return;
 
     case 'visited': await patchPlace(el.dataset.id, { visited: el.checked }, false); return;
+    case 'fitin': {
+      const before = ((S.trip[el.dataset.id] || {}).places || []).filter((p) => p.day_number == null).length;
+      const t = await api(`/v1/trips/${el.dataset.id}/fit`, { method: 'POST' });
+      const left = t.places.filter((p) => p.day_number == null).length;
+      S.trip[t.id] = t; fetchedAt.trips = 0;
+      toast(`Fitted in ${plural(Math.max(before - left, 0), 'place')}`);
+      render({ quiet: true }); return;
+    }
+    case 'closuremove': {
+      const t = await api(`/v1/trips/${el.dataset.trip}/move`, { method: 'POST', body: { place_id: el.dataset.id, day: Number(el.dataset.day), index: 999 } });
+      S.trip[t.id] = t; fetchedAt.trips = 0;
+      toast('Moved'); render({ quiet: true }); return;
+    }
+    case 'editroute': {
+      const t = S.trip[el.dataset.id];
+      if (t) routeSheet(t);
+      return;
+    }
+    case 'bkmovetrip': {
+      await api(`/v1/trips/${el.dataset.trip}`, { method: 'PATCH', body: { start_date: el.dataset.date } });
+      fetchedAt.trips = 0; delete S.trip[el.dataset.trip]; S.trips = null;
+      toast(`Trip now starts ${shortDate(el.dataset.date)}`); render({ quiet: true }); return;
+    }
+    case 'bkkeep': {
+      try { localStorage.setItem(BK_KEEP, JSON.stringify([...keptBoth(), el.dataset.key].slice(-50))); } catch { /* private mode */ }
+      render({ quiet: true }); return;
+    }
+    case 'bkaddstay': {
+      const t = await loadTrip(el.dataset.trip);
+      bookingForm(t, { kind: 'hotel', start_at: el.dataset.in, end_at: el.dataset.out }, { title: `A stay in ${el.dataset.city}` });
+      return;
+    }
+    case 'bkdate': {
+      const { trip, b } = await bookingWithTrip(el.dataset.id);
+      if (trip) bookingForm(trip, b, { id: b.id, title: 'Add date and time' });
+      return;
+    }
     case 'pvisit': await patchPlace(el.dataset.id, { visited: el.dataset.v === '1' }); return;
     case 'shownote': (S.noteOpen ||= {})[el.dataset.id] = true; await render({ quiet: true }); const n = $('#notes'); if (n) n.focus(); return;
     case 'allhours': (S.allHours ||= {})[el.dataset.id] = !(S.allHours[el.dataset.id]); render({ quiet: true }); return;

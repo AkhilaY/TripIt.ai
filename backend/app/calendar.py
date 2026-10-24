@@ -15,7 +15,7 @@ from .exports import SLOTS, _fold, _ics_text, maps_link
 from .models import CalendarFeed, CalendarItem, CalendarResult, Place, TripDetail
 from .photos import PhotoStore
 
-BOOKING_LABEL = {"flight": "Flight", "hotel": "Stay", "reservation": "Table", "car": "Car", "other": "Booking"}
+BOOKING_LABEL = {"flight": "Flight", "hotel": "Stay", "reservation": "Table", "tour": "Tour", "car": "Car", "other": "Booking"}
 FEED_SETTING = "calendar_feed_token"
 
 

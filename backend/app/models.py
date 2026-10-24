@@ -176,7 +176,7 @@ class PlanResult(BaseModel):
 
 # ---------- Bookings ----------
 
-BookingKind = Literal["flight", "hotel", "reservation", "car", "other"]
+BookingKind = Literal["flight", "hotel", "reservation", "tour", "car", "other"]
 # Local wall-clock time as printed on the booking, with no time zone: a flight leaves and lands in different ones.
 BOOKING_TIME = r"^\d{4}-\d{2}-\d{2}(T([01]\d|2[0-3]):[0-5]\d)?$"
 
@@ -647,10 +647,20 @@ class Trip(BaseModel):
     stops: list[TripStop] = []  # the route; one stop (the trip's city) until you add more
 
 
+class TripClosure(BaseModel):
+    """A place planned on a day it's closed, and the nearest day in the same city it's open."""
+    place_id: str
+    day: int
+    message: str  # "Closed on Sundays"
+    move_to_day: Optional[int] = None
+    move_to_label: Optional[str] = None  # "Mon"
+
+
 class TripDetail(Trip):
     places: list[Place] = []
     reels: list[Reel] = []
     bookings: list[Booking] = []
+    closures: list[TripClosure] = []  # filled in when the trip has a start date
 
 
 class TripUpdate(BaseModel):

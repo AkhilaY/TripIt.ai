@@ -30,6 +30,7 @@ from .discover import DiscoverService
 from .calendar import CalendarService
 from .events import EventsService, Ticketmaster
 from .lounges import LoungeService
+from . import tripcheck
 from .exports import ExportError, ics, kml, schedule
 from .geocode import GooglePlacesGeocoder, NoGeocoder, clean_website, make_geocoder
 from .jobs import JobStore
@@ -308,6 +309,7 @@ def _trip_or_404(request: Request, trip_id: str) -> TripDetail:
     trip = _db(request).get_trip_detail(trip_id)
     if trip is None:
         raise HTTPException(status_code=404, detail="Trip not found")
+    trip.closures = tripcheck.closures(trip)
     return trip
 
 
@@ -897,6 +899,18 @@ async def add_to_day(trip_id: str, body: AddToDayRequest, request: Request) -> T
         _library(request).add_to_day(trip_id, body.place_ids, body.day)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
+    return _trip_or_404(request, trip_id)
+
+
+@app.post("/v1/trips/{trip_id}/fit", response_model=TripDetail, dependencies=[Auth])
+async def fit_unplanned(trip_id: str, request: Request) -> TripDetail:
+    """Puts every place that isn't on a day yet onto a day in its own city's stop: the lightest day it's open."""
+    trip = _trip_or_404(request, trip_id)
+    if not trip.day_count:
+        raise HTTPException(status_code=422, detail="Set up the trip's days first")
+    library = _library(request)
+    for place_id, day in tripcheck.fit_plan(trip):
+        library.add_to_day(trip_id, [place_id], day)
     return _trip_or_404(request, trip_id)
 
 

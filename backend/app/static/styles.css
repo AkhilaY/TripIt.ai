@@ -1295,3 +1295,55 @@ a.krow, button.krow { cursor: pointer; }
 .beenbtn.on .ck { background: var(--ok); border-color: var(--ok); color: var(--cell); }
 .eyebrow.planned { margin-top: 4px; }
 .page.tight .planned + .trow { margin-top: -6px; }
+
+/* ---------- Multi-city trips ---------- */
+.citystrip { width: 100%; display: flex; align-items: center; gap: 8px; overflow-x: auto; scrollbar-width: none; padding: 12px 14px; border-radius: var(--r-group);
+  background: var(--cell); border: 0; box-shadow: inset 0 0 0 1px var(--border); color: var(--label); font: inherit; text-align: left; cursor: pointer; }
+.citystrip::-webkit-scrollbar { display: none; }
+.citystrip .cs { display: flex; flex-direction: column; flex-shrink: 0; }
+.citystrip .c { font-family: var(--serif); font-size: 20px; font-weight: 600; line-height: 1.1; }
+.citystrip .n { font-size: 11.5px; color: var(--secondary); }
+.citystrip .hop { flex: 1; min-width: 56px; display: flex; align-items: center; justify-content: center; gap: 4px; color: var(--secondary); font-size: 11.5px;
+  white-space: nowrap; position: relative; }
+.citystrip .hop::before, .citystrip .hop::after { content: ""; flex: 1; min-width: 6px; height: 1px; background: var(--border-strong); }
+.citystrip .hop svg { width: 13px; height: 13px; }
+.stophead { margin: 30px 20px -4px; padding-top: 14px; border-top: 1px solid var(--border-strong); display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.stophead .c { font-family: var(--serif); font-size: 32px; font-weight: 500; line-height: 1.05; }
+.stophead .d { font-size: 12.5px; font-weight: 600; color: var(--secondary); white-space: nowrap; }
+.group.travelday { margin-bottom: 10px; }
+.group.travelday .tlink { margin-left: auto; white-space: nowrap; }
+.group.travelday .tlink.open { color: var(--ok); }
+.fixrow { display: flex; align-items: center; gap: 8px; padding: 0 16px 10px 52px; margin-top: -4px; font-size: 13px; font-weight: 500; color: var(--danger); }
+.fixrow .tlink { margin-left: auto; min-height: 28px; font-size: 13px; }
+.section-title .fitbtn { margin-left: auto; font-family: var(--font); }
+
+/* ---------- Bookings: boarding pass and what needs attention ---------- */
+.bcard.pass { position: relative; gap: 12px; padding: 18px 18px 14px; }
+.pass-route { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 12px; }
+.pass-route .ap { display: flex; flex-direction: column; gap: 2px; }
+.pass-route .ap:last-child { text-align: right; }
+.pass-route .ap b { font-family: var(--serif); font-size: 38px; font-weight: 600; line-height: 1; letter-spacing: 0.02em; }
+.pass-route .ap span { font-size: 13px; color: var(--secondary); font-variant-numeric: tabular-nums; }
+.pass-route .ap sup { font-size: 10px; margin-left: 2px; color: var(--gold); font-weight: 600; }
+.pass-route .line { height: 1px; background: var(--border-strong); position: relative; }
+.pass-route .line svg { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 18px; height: 18px; background: var(--cell); color: var(--gold); padding: 0 5px; box-sizing: content-box; }
+.perf { margin: 0 -18px; height: 1px; background-image: linear-gradient(90deg, var(--border-strong) 50%, transparent 50%); background-size: 8px 1px; position: relative; }
+.perf::before, .perf::after { content: ""; position: absolute; top: -8px; width: 16px; height: 16px; border-radius: 50%; background: var(--bg); }
+.perf::before { left: -8px; }
+.perf::after { right: -8px; }
+.pass-meta { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.pass-meta span { display: flex; flex-direction: column; gap: 2px; font-size: 14px; font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
+.pass-meta i { font-style: normal; font-size: 10.5px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: var(--secondary); }
+.pass-meta span:last-child { font-family: ui-monospace, Menlo, monospace; letter-spacing: 0.08em; }
+.pass-meta span:last-child i { font-family: var(--font); letter-spacing: 0.12em; }
+.attcard { margin: 0 16px 10px; display: flex; gap: 12px; align-items: flex-start; padding: 14px; border-radius: 18px; background: var(--cell);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warn) 30%, transparent); }
+.attcard .ic { width: 30px; height: 30px; border-radius: 9px; flex-shrink: 0; display: grid; place-items: center; color: var(--warn); background: color-mix(in srgb, var(--warn) 13%, var(--cell)); }
+.attcard .ic.stay { color: var(--c-stay); background: color-mix(in srgb, var(--c-stay) 13%, var(--cell)); }
+.attcard .ic svg { width: 17px; height: 17px; }
+.attcard .m { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.attcard .t { font-size: 15px; font-weight: 600; line-height: 1.35; }
+.attcard .s { font-size: 13px; color: var(--secondary); }
+.attcard .acts { margin-top: 8px; display: flex; gap: 14px; flex-wrap: wrap; align-items: center; }
+.bkfix { margin: -4px 16px 12px; display: flex; justify-content: flex-end; }
+.bkfix .tlink svg { width: 15px; height: 15px; margin-right: 5px; }

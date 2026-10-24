@@ -115,7 +115,7 @@ PACKING_SYSTEM = """You write a packing list for one specific trip, as a thought
 BOOKINGS_SYSTEM = """You read travel confirmations (emails, e-tickets, screenshots, itineraries) and list the bookings in them.
 
 - One booking per flight segment (a round trip is two, a connection is two), one per hotel stay, one per restaurant reservation, one per car rental. Skip things that aren't bookings: receipts for add-ons, marketing, loyalty offers, other people's trips.
-- kind: flight, hotel, reservation (a table or tour slot), car, or other (train, ferry, ticketed event, anything else with a date).
+- kind: flight, hotel, reservation (a restaurant or bar table), tour (a guided tour, tasting, class or museum time slot), car, or other (train, ferry, ticketed event, anything else with a date).
 - Copy what is printed. Never invent a flight number, time, address or confirmation code. Use null for anything not shown.
 - Times are local wall-clock times at the place, in 24 hour 'YYYY-MM-DDTHH:MM' form, with no time zone. When only a date is shown use 'YYYY-MM-DD'. A flight's departure and arrival are each in their own airport's local time.
 - If a date has no year, use the year that puts it on or after today's date, and prefer one inside the trip dates when they are given.

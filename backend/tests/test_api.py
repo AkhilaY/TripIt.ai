@@ -3213,3 +3213,35 @@ def test_todays_weather_where_you_are(client):
     assert len(client.weather_log) == n  # kept for an hour
     client.weather_state["fail"] = True
     assert client.get("/v1/weather/today", params={"lat": 40.7, "lon": -74.0}, headers=H).json() is None
+
+
+def test_multi_city_trip_flags_closed_days_and_fits_places_in(client):
+    from app.main import app
+    from app.models import OpeningHours, TimeRange
+    trip = client.post("/v1/trips", json={"city": "London", "name": "Europe", "days": 4, "start_date": "2026-11-07"}, headers=H).json()
+    client.put(f"/v1/trips/{trip['id']}/stops", json={"stops": [
+        {"city": "London", "days": 2}, {"city": "Zürich", "days": 2, "travel_mode": "flight", "travel_minutes": 100}]}, headers=H)
+    made = [client.post("/v1/places", json={"name": n, "city": c}, headers=H).json()["place"]
+            for n, c in [("Bahnhofstrasse", "Zurich"), ("Kunsthaus", "Zürich"), ("Dishoom", "London"), ("Sketch", "London")]]
+    client.post(f"/v1/trips/{trip['id']}/places", json={"place_ids": [p["id"] for p in made]}, headers=H)
+    # Bahnhofstrasse's shops are shut on Sundays; day 4 is Tuesday 10 Nov, day 3 Monday, and 8 Nov a Sunday.
+    open_ = [TimeRange(open="10:00", close="20:00")]
+    app.state.db.update_place(made[0]["id"], opening_hours=OpeningHours(weekly=[open_] * 6 + [[]], source="google"))
+    t = client.post(f"/v1/trips/{trip['id']}/fit", headers=H).json()
+    days = {p["name"]: p["day_number"] for p in t["places"]}
+    assert days["Bahnhofstrasse"] in (3, 4) and days["Kunsthaus"] in (3, 4) and days["Bahnhofstrasse"] != days["Kunsthaus"]
+    assert {days["Dishoom"], days["Sketch"]} == {1, 2}
+    assert t["closures"] == []
+    # Put it on Sunday (day 2, in London) and the trip says so, with the nearest open day in Zürich.
+    t = client.post(f"/v1/trips/{trip['id']}/move", json={"place_id": made[0]["id"], "day": 2, "index": 0}, headers=H).json()
+    assert t["closures"] == [{"place_id": made[0]["id"], "day": 2, "message": "Closed on Sundays", "move_to_day": 3, "move_to_label": "Mon"}]
+    # Without a start date there's no weekday to check.
+    t = client.patch(f"/v1/trips/{trip['id']}", json={"start_date": None}, headers=H).json()
+    assert t["closures"] == []
+
+
+def test_tours_are_a_kind_of_booking(client):
+    trip = client.post("/v1/trips", json={"city": "Zürich", "days": 3}, headers=H).json()
+    t = client.post(f"/v1/trips/{trip['id']}/bookings", json={"kind": "tour", "title": "Chocolate tasting walk", "party_size": 2}, headers=H)
+    assert t.status_code in (200, 201), t.text
+    assert t.json()["bookings"][0]["kind"] == "tour" and t.json()["bookings"][0]["start_at"] is None

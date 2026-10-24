@@ -110,6 +110,24 @@ struct TripStop: Codable, Hashable {
     var travelMode: String?
     var travelMinutes: Int?
     var travelNote: String?
+
+    /// How you get here, for the route strip and travel days.
+    var travelSymbol: String {
+        ["train": "tram.fill", "flight": "airplane", "drive": "car.fill", "bus": "bus.fill", "ferry": "ferry.fill", "walk": "figure.walk"][travelMode ?? ""] ?? "arrow.right"
+    }
+
+    var travelLabel: String {
+        ["train": "Train", "flight": "Flight", "drive": "Drive", "bus": "Bus", "ferry": "Ferry", "walk": "Walk"][travelMode ?? ""] ?? "Travel"
+    }
+}
+
+/// A place planned on a day it's closed, with the nearest day in the same city it's open.
+struct TripClosure: Codable, Hashable {
+    var placeId: String
+    var day: Int
+    var message: String
+    var moveToDay: Int?
+    var moveToLabel: String?
 }
 
 struct Trip: Codable, Identifiable, Hashable {
@@ -130,8 +148,16 @@ struct Trip: Codable, Identifiable, Hashable {
     var coverPhoto: PlacePhoto?
     var shareToken: String?
     var stops: [TripStop]?
+    var closures: [TripClosure]?
 
     var isLocal: Bool { kind == "local" }
+
+    /// The route's cities when there's more than one.
+    var route: [TripStop] { (stops ?? []).count > 1 ? stops ?? [] : [] }
+
+    func stop(on day: Int) -> TripStop? { route.first { day >= $0.startDay && day <= $0.endDay } }
+
+    func closure(for placeId: String) -> TripClosure? { closures?.first { $0.placeId == placeId } }
 }
 
 struct TripDetail: Codable, Identifiable, Hashable {

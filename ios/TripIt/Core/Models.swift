@@ -148,16 +148,8 @@ struct Trip: Codable, Identifiable, Hashable {
     var coverPhoto: PlacePhoto?
     var shareToken: String?
     var stops: [TripStop]?
-    var closures: [TripClosure]?
 
     var isLocal: Bool { kind == "local" }
-
-    /// The route's cities when there's more than one.
-    var route: [TripStop] { (stops ?? []).count > 1 ? stops ?? [] : [] }
-
-    func stop(on day: Int) -> TripStop? { route.first { day >= $0.startDay && day <= $0.endDay } }
-
-    func closure(for placeId: String) -> TripClosure? { closures?.first { $0.placeId == placeId } }
 }
 
 struct TripDetail: Codable, Identifiable, Hashable {
@@ -177,8 +169,16 @@ struct TripDetail: Codable, Identifiable, Hashable {
     var reels: [Reel]
     var bookings: [Booking]
     var stops: [TripStop]?
+    var closures: [TripClosure]?
 
     var isLocal: Bool { kind == "local" }
+
+    /// The route's cities when there's more than one.
+    var route: [TripStop] { (stops ?? []).count > 1 ? stops ?? [] : [] }
+
+    func stop(on day: Int) -> TripStop? { route.first { day >= $0.startDay && day <= $0.endDay } }
+
+    func closure(for placeId: String) -> TripClosure? { closures?.first { $0.placeId == placeId } }
 
     /// The places planned for a day, in order.
     func dayPlaces(_ day: Int) -> [Place] {

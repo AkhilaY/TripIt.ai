@@ -2070,6 +2070,45 @@ function organizeBlock(p) {
   </div>`;
 }
 
+// ---------- A trip's route ----------
+
+const ROUTE_MODES = [['train', 'Train'], ['flight', 'Flight'], ['drive', 'Drive'], ['bus', 'Bus'], ['ferry', 'Ferry'], ['other', 'Other']];
+function readRoute(st) {
+  st.stops = st.stops.map((x, i) => ({
+    city: ($(`#rt-city-${i}`) || {}).value ?? x.city,
+    days: Math.max(1, Number(($(`#rt-days-${i}`) || {}).value ?? x.days) || 1),
+    travel_mode: ($(`#rt-mode-${i}`) || {}).value ?? x.travel_mode,
+    travel_minutes: Number(($(`#rt-mins-${i}`) || {}).value ?? x.travel_minutes) || null,
+    travel_note: ($(`#rt-note-${i}`) || {}).value ?? x.travel_note,
+  }));
+}
+function routeSheet(t) {
+  const route = (t.stops && t.stops.length) ? t.stops : [{ city: t.city, days: Math.max(t.day_count, 1) }];
+  const st = { stops: route.map((x) => ({ city: x.city, days: x.days, travel_mode: x.travel_mode || 'train', travel_minutes: x.travel_minutes || null, travel_note: x.travel_note || '' })) };
+  openSheet({ type: 'form', title: 'Route', confirm: 'Save', st,
+    body: () => `${st.stops.map((x, i) => `<div class="section"><div class="section-h hrow"><span>Stop ${i + 1}</span>
+        ${st.stops.length > 1 ? `<button class="linkbtn" data-act="routedel" data-i="${i}">Remove</button>` : ''}</div><div class="group">
+        ${i ? `<label class="row authrow" for="rt-mode-${i}"><span class="lbl">Getting there</span><select class="select" id="rt-mode-${i}">${ROUTE_MODES.map(([k, l]) => `<option value="${k}" ${x.travel_mode === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+          <label class="row authrow" for="rt-mins-${i}"><span class="lbl">Minutes</span><input class="field" id="rt-mins-${i}" type="number" min="0" max="3000" inputmode="numeric" value="${x.travel_minutes || ''}" placeholder="e.g. 135"></label>
+          <label class="row authrow" for="rt-note-${i}"><span class="lbl">Note</span><input class="field" id="rt-note-${i}" maxlength="120" value="${esc(x.travel_note || '')}" placeholder="e.g. Eurostar from St Pancras"></label>` : ''}
+        <label class="row authrow" for="rt-city-${i}"><span class="lbl">City</span><input class="field" id="rt-city-${i}" maxlength="120" value="${esc(x.city)}" placeholder="City"></label>
+        <label class="row authrow" for="rt-days-${i}"><span class="lbl">Days</span><input class="field" id="rt-days-${i}" type="number" min="1" max="21" inputmode="numeric" value="${x.days}"></label>
+      </div></div>`).join('')}
+      <div class="section"><button class="btn tint wide" data-act="routeadd">${ICON.plus}Add a stop</button>
+        <div class="section-f">If the trip is longer than its stops, the last stop keeps the extra days.</div></div>`,
+    async ok() {
+      readRoute(st);
+      if (st.stops.some((x) => !x.city.trim())) { toast('Give every stop a city', true); return; }
+      const body = { stops: st.stops.map((x, i) => ({ city: x.city.trim(), days: x.days,
+        ...(i ? { travel_mode: x.travel_mode, travel_minutes: x.travel_minutes || null, travel_note: (x.travel_note || '').trim() || null } : {}) })) };
+      S.sheet.busy = true; renderOverlay();
+      try {
+        S.trip[t.id] = await api(`/v1/trips/${t.id}/stops`, { method: 'PUT', body });
+        fetchedAt.trips = 0; closeSheet(); render();
+      } catch (e) { S.sheet.busy = false; renderOverlay(); toast(e.message, true); }
+    } });
+}
+
 // ---------- Home during a trip ----------
 
 const TOD_MINUTE = { morning: 570, lunch: 750, afternoon: 900, dinner: 1170, evening: 1260 };
@@ -4489,6 +4528,7 @@ async function onAction(act, el) {
         { label: 'Packing list', run: () => go(`#/packing/${t.id}`) },
         { label: 'Save for offline', run: () => saveOffline(t.id) },
         { label: 'Rename', run: () => renameSheet(t) },
+        { label: 'Edit route', run: () => routeSheet(t) },
         { label: 'Update hours, photos & ratings', run: async () => {
           toast('Looking up hours, photos and ratings…');
           S.trip[t.id] = await api(`/v1/trips/${t.id}/refresh-details`, { method: 'POST' });
@@ -4683,6 +4723,8 @@ async function onAction(act, el) {
       }) });
       return;
     }
+    case 'routeadd': { const st = S.sheet.st; readRoute(st); st.stops.push({ city: '', days: 2, travel_mode: 'train', travel_minutes: null, travel_note: '' }); renderOverlay(); return; }
+    case 'routedel': { const st = S.sheet.st; readRoute(st); st.stops.splice(Number(el.dataset.i), 1); renderOverlay(); return; }
     case 'settheme': try { localStorage.setItem(THEME_KEY, el.dataset.v); } catch { /* this visit only */ } applyTheme(); render({ quiet: true }); return;
     case 'visit': try { localStorage.setItem('tripit.visit', el.dataset.v); } catch { /* per-visit only */ } render({ quiet: true }); return;
     case 'allcities': S.allCities = !S.allCities; redrawLibMain(); return;

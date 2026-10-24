@@ -114,6 +114,9 @@ struct TripView: View {
             }
             Section {
                 Button { sheet = .details } label: { Label(trip.isLocal ? "Rename" : "Name and dates", systemImage: "pencil") }
+                if !trip.isLocal {
+                    Button { sheet = .route } label: { Label("Edit route", systemImage: "point.topleft.down.to.point.bottomright.curvepath") }
+                }
                 Button(role: .destructive) { confirmDelete = true } label: { Label("Delete trip", systemImage: "trash") }
             }
         } label: {
@@ -152,7 +155,7 @@ struct TripView: View {
 }
 
 enum TripSheet: String, Identifiable {
-    case plan, tidy, details
+    case plan, tidy, details, route
     var id: String { rawValue }
 
     @MainActor @ViewBuilder func view(trip: TripDetail) -> some View {
@@ -160,6 +163,7 @@ enum TripSheet: String, Identifiable {
         case .plan: PlanSheet(trip: trip)
         case .tidy: TidySheet(trip: trip)
         case .details: TripDetailsSheet(trip: trip)
+        case .route: RouteSheet(trip: trip)
         }
     }
 }
@@ -313,5 +317,103 @@ struct TripDetailsSheet: View {
             name = trip.name
             if let s = trip.startDate.flatMap(Fmt.day) { hasStart = true; start = s }
         }
+    }
+}
+
+
+/// The trip's route: cities in order, days in each, and how you get from one to the next.
+struct RouteSheet: View {
+    let trip: TripDetail
+    @Environment(Store.self) private var store
+    @Environment(\.dismiss) private var dismiss
+    @State private var stops: [Draft] = []
+    @State private var busy = false
+
+    struct Draft: Identifiable {
+        let id = UUID()
+        var city: String
+        var days: Int
+        var mode: String
+        var hours: Double
+        var note: String
+    }
+
+    static let modes = ["train", "flight", "drive", "bus", "ferry", "other"]
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                ForEach($stops) { $stop in
+                    let index = stops.firstIndex { $0.id == stop.id } ?? 0
+                    Section {
+                        if index > 0 {
+                            Picker("Getting there", selection: $stop.mode) {
+                                ForEach(Self.modes, id: \.self) { Text($0 == "drive" ? "Drive" : $0.capitalized).tag($0) }
+                            }
+                            Stepper(value: $stop.hours, in: 0...24, step: 0.25) {
+                                Text(stop.hours == 0 ? "Travel time not set" : "About \(TravelHome.duration(Int(stop.hours * 60)))")
+                            }
+                            TextField("Note, e.g. Eurostar from St Pancras", text: $stop.note)
+                        }
+                        TextField("City", text: $stop.city).textInputAutocapitalization(.words)
+                        Stepper(value: $stop.days, in: 1...21) { Text(Fmt.plural(stop.days, "day")) }
+                    } header: {
+                        HStack {
+                            Text("Stop \(index + 1)")
+                            Spacer()
+                            if stops.count > 1 {
+                                Button("Remove", role: .destructive) { stops.removeAll { $0.id == stop.id } }
+                                    .font(.footnote).textCase(nil)
+                            }
+                        }
+                    }
+                }
+                Section {
+                    Button { stops.append(Draft(city: "", days: 2, mode: "train", hours: 0, note: "")) } label: {
+                        Label("Add a stop", systemImage: "plus")
+                    }
+                } footer: {
+                    Text("\(Fmt.plural(stops.reduce(0) { $0 + $1.days }, "day")) in all. If the trip is longer, the last stop keeps the extra days.")
+                }
+            }
+            .tripBackground()
+            .navigationTitle("Route")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") { Task { await save() } }
+                        .disabled(busy || stops.contains { $0.city.trimmingCharacters(in: .whitespaces).isEmpty })
+                }
+            }
+        }
+        .onAppear {
+            guard stops.isEmpty else { return }
+            let route = trip.stops ?? []
+            stops = route.isEmpty
+                ? [Draft(city: trip.city, days: max(trip.dayCount, 1), mode: "train", hours: 0, note: "")]
+                : route.map { Draft(city: $0.city, days: $0.days, mode: $0.travelMode ?? "train",
+                                    hours: Double($0.travelMinutes ?? 0) / 60, note: $0.travelNote ?? "") }
+        }
+    }
+
+    private func save() async {
+        busy = true
+        defer { busy = false }
+        let body: [[String: Any]] = stops.enumerated().map { i, s in
+            var stop: [String: Any] = ["city": s.city.trimmingCharacters(in: .whitespaces), "days": s.days]
+            if i > 0 {
+                stop["travel_mode"] = s.mode
+                if s.hours > 0 { stop["travel_minutes"] = Int(s.hours * 60) }
+                if !s.note.isEmpty { stop["travel_note"] = s.note }
+            }
+            return stop
+        }
+        do {
+            let fresh: TripDetail = try await API.shared.put("/v1/trips/\(trip.id)/stops", ["stops": body])
+            store.apply(fresh)
+            await store.reloadTrips()
+            dismiss()
+        } catch { store.fail(error) }
     }
 }

@@ -183,27 +183,28 @@ struct PlaceView: View {
     }
 
     /// Want to go | Been here
+    /// One check button: tap to mark it visited (the circle fills in), tap again to undo.
     private func visitToggle(_ p: Place) -> some View {
-        HStack(spacing: 4) {
-            ForEach([false, true], id: \.self) { been in
-                let on = p.visited == been
-                Button {
-                    guard !on else { return }
-                    Task { await store.patch(p, ["visited": been]) }
-                } label: {
-                    Label(been ? "Been here" : "Want to go", systemImage: been ? "checkmark" : "bookmark")
-                        .font(.footnote.weight(on ? .semibold : .medium))
-                        .foregroundStyle(on ? Theme.background : Theme.label)
-                        .frame(maxWidth: .infinity, minHeight: 32)
-                        .background(on ? Theme.label : .clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                }
-                .buttonStyle(.plain)
-                .accessibilityAddTraits(on ? .isSelected : [])
+        let on = p.visited
+        return Button {
+            Task { await store.patch(p, ["visited": !on]) }
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: on ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 18, weight: .regular))
+                    .foregroundStyle(on ? Theme.ok : Theme.tertiary)
+                    .contentTransition(.symbolEffect(.replace))
+                Text("Been here").font(.footnote.weight(on ? .semibold : .medium))
+                    .foregroundStyle(on ? Theme.ok : Theme.label)
             }
+            .padding(.leading, 8).padding(.trailing, 14).frame(minHeight: 34)
+            .background(on ? Theme.ok.opacity(0.1) : .clear, in: Capsule())
+            .overlay(Capsule().strokeBorder(on ? Theme.ok.opacity(0.4) : Theme.border, lineWidth: 1))
         }
-        .padding(3)
-        .background(Theme.cell, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous).strokeBorder(Theme.border))
+        .buttonStyle(.plain)
+        .sensoryFeedback(.success, trigger: on) { _, new in new }
+        .accessibilityAddTraits(on ? .isSelected : [])
+        .accessibilityHint(on ? "Marks it as somewhere you still want to go" : "Marks it as visited")
     }
 
     // MARK: Why you saved it

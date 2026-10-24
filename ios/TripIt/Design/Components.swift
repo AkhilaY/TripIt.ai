@@ -61,21 +61,21 @@ struct CategoryTile: View {
     var size: CGFloat = 30
 
     var body: some View {
-        SymbolTile(symbol: category.symbol, size: size)
+        SymbolTile(symbol: category.symbol, color: category.color, size: size)
     }
 }
 
-/// A quiet square with a one-colour symbol, for list rows. (The colour argument is kept for older callers.)
+/// A softly tinted square with a coloured symbol, for list rows (like the web app's tiles).
 struct SymbolTile: View {
     let symbol: String
     var color: Color = Theme.gray
     var size: CGFloat = 30
 
     var body: some View {
-        RoundedRectangle(cornerRadius: size * 0.3, style: .continuous)
-            .fill(Theme.raised)
+        RoundedRectangle(cornerRadius: size * 0.28, style: .continuous)
+            .fill(color.opacity(0.14))
             .frame(width: size, height: size)
-            .overlay(Image(systemName: symbol).font(.system(size: size * 0.44, weight: .medium)).foregroundStyle(Theme.label))
+            .overlay(Image(systemName: symbol).font(.system(size: size * 0.44, weight: .semibold)).foregroundStyle(color))
     }
 }
 
@@ -87,12 +87,12 @@ struct PlaceThumb: View {
         let category = Category(place.category)
         RemoteImage(url: place.photos.first?.url(width: Int(size * 3))) {
             ZStack {
-                Theme.raised
-                Image(systemName: category.symbol).font(.system(size: size * 0.36, weight: .medium)).foregroundStyle(Theme.secondary)
+                category.color.opacity(0.14)
+                Image(systemName: category.symbol).font(.system(size: size * 0.36, weight: .semibold)).foregroundStyle(category.color)
             }
         }
         .frame(width: size, height: size)
-        .clipShape(RoundedRectangle(cornerRadius: min(size * 0.25, 16), style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: min(size * 0.22, 16), style: .continuous))
     }
 }
 
@@ -187,8 +187,8 @@ struct Chip: View {
             Text(text).font(.caption.weight(.semibold)).lineLimit(1)
         }
         .foregroundStyle(color)
-        .padding(.horizontal, 7).padding(.vertical, 2)
-        .background(Theme.raised, in: Capsule())
+        .padding(.horizontal, 6).padding(.vertical, 2)
+        .background(color.opacity(0.12), in: Capsule())
     }
 }
 
@@ -208,8 +208,8 @@ struct FilterChip: View {
                 if let count { Text("\(count)").font(.caption.weight(.semibold)).opacity(0.6) }
             }
             .padding(.horizontal, 12).padding(.vertical, 7)
-            .foregroundStyle(isOn ? Theme.background : Theme.label)
-            .background(isOn ? Theme.label : Theme.cell, in: Capsule())
+            .foregroundStyle(isOn ? Theme.accentInk : Theme.label)
+            .background(isOn ? Theme.accent : Theme.cell, in: Capsule())
             .overlay(Capsule().strokeBorder(Theme.border, lineWidth: isOn ? 0 : 1))
         }
         .buttonStyle(.plain)
@@ -219,19 +219,18 @@ struct FilterChip: View {
 
 // MARK: - Buttons, empty states, toasts
 
-/// The one main action on a screen (gold), or with `tinted` a quiet one.
+/// The one main action on a screen (an espresso pill), or with `tinted` a quiet one. `compact` is for buttons
+/// inside a card.
 struct PrimaryButtonStyle: ButtonStyle {
     var tinted = false
+    var compact = false
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.subheadline.weight(.semibold))
-            .padding(.horizontal, 16)
-            .frame(maxWidth: .infinity, minHeight: 42)
-            .foregroundStyle(tinted ? Theme.label : Theme.accentInk)
-            .background(tinted ? Theme.raised : Theme.accent, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay {
-                if tinted { RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.raisedBorder) }
-            }
+            .font(compact ? .subheadline.weight(.semibold) : .body.weight(.semibold))
+            .padding(.horizontal, compact ? 16 : 20).padding(.vertical, compact ? 9 : 13)
+            .frame(maxWidth: .infinity)
+            .foregroundStyle(tinted ? Theme.accent : Theme.accentInk)
+            .background(tinted ? Theme.fill : Theme.accent, in: Capsule())
             .opacity(configuration.isPressed ? 0.75 : 1)
     }
 }

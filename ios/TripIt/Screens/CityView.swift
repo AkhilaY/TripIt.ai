@@ -29,10 +29,15 @@ struct CityView: View {
                 .listRowBackground(Color.clear)
                 .listRowInsets(EdgeInsets(top: 4, leading: 20, bottom: 8, trailing: 20))
                 if let trip {
-                    NavigationLink(value: Route.trip(id: trip.id)) { TripRow(trip: trip) }
-                        .buttonStyle(.plain)
-                        .listRowBackground(Color.clear)
-                        .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+                    // A plain button, not a NavigationLink: in a List that adds a second chevron next to the row's own.
+                    VStack(alignment: .leading, spacing: 6) {
+                        Eyebrow(text: "Planned trip", color: Theme.secondary)
+                        Button { router.push(.trip(id: trip.id)) } label: { TripRow(trip: trip) }
+                            .buttonStyle(.plain)
+                    }
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+                    .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
                 } else if !isHome, !all.isEmpty {
                     Button { sheet = .newTrip(all.map(\.id), nil) } label: {
                         Label("Plan a trip to \(city)", systemImage: "airplane")

@@ -122,9 +122,9 @@ struct HomeView: View {
                     .padding(.top, 12)
                     HStack(spacing: 8) {
                         Button("Plan the weekend") { Task { await planWeekend(picks.map(\.place)) } }
-                            .buttonStyle(PrimaryButtonStyle())
+                            .buttonStyle(PrimaryButtonStyle(compact: true))
                         Button { withAnimation { shuffle += 1 } } label: { Label("Shuffle", systemImage: "shuffle") }
-                            .buttonStyle(PrimaryButtonStyle(tinted: true))
+                            .buttonStyle(PrimaryButtonStyle(tinted: true, compact: true))
                             .fixedSize()
                     }
                     .padding(.top, 14)

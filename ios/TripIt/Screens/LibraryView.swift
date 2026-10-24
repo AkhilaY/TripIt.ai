@@ -216,7 +216,18 @@ struct LibraryView: View {
         let groups = store.cityGroups(shown)
         if !groups.isEmpty {
             SectionHeading(title: "Cities") {
-                Text("Sorted for you automatically").font(.caption).foregroundStyle(Theme.tertiary)
+                if groups.count > 4 {
+                    Button { withAnimation { allCities.toggle() } } label: {
+                        HStack(spacing: 4) {
+                            Text(allCities ? "Show fewer" : "See all \(groups.count)")
+                            Image(systemName: allCities ? "chevron.up" : "chevron.down").font(.caption2.weight(.bold))
+                        }
+                        .font(.footnote.weight(.semibold)).foregroundStyle(Theme.link).frame(minHeight: 36)
+                    }
+                    .buttonStyle(.plain)
+                } else {
+                    Text("Sorted for you automatically").font(.caption).foregroundStyle(Theme.tertiary)
+                }
             }
             .padding(.top, 28)
             let visible = allCities ? groups : Array(groups.prefix(4))
@@ -227,10 +238,6 @@ struct LibraryView: View {
                 }
             }
             .padding(.top, 4)
-            if groups.count > 4 {
-                Button(allCities ? "Show fewer" : "See all \(groups.count) cities") { withAnimation { allCities.toggle() } }
-                    .font(.subheadline.weight(.semibold)).foregroundStyle(Theme.link).frame(minHeight: 44)
-            }
         }
     }
 

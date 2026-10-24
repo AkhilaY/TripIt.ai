@@ -38,7 +38,11 @@ struct TravelHome: View {
                 .background(Theme.gold.opacity(0.14), in: Capsule())
             Text(trip.name).font(.caption.weight(.medium)).foregroundStyle(Theme.label).lineLimit(1)
             Spacer(minLength: 4)
-            Text(trip.cities.joined(separator: " → ")).font(.caption).foregroundStyle(Theme.secondary).lineLimit(1)
+            // The route only when it adds something: a London trip called "London" shows London once.
+            let route = trip.cities.joined(separator: " → ")
+            if !route.isEmpty, Store.cityKey(route) != Store.cityKey(trip.name) {
+                Text(route).font(.caption).foregroundStyle(Theme.secondary).lineLimit(1)
+            }
         }
         .padding(.horizontal, 10).padding(.vertical, 6)
         .background(Theme.cell, in: Capsule())
@@ -108,20 +112,20 @@ struct TravelHome: View {
             }
             HStack(spacing: 8) {
                 Button("Open today") { router.push(.web(hash: "#/today/\(trip.id)")) }
-                    .buttonStyle(PrimaryButtonStyle())
+                    .buttonStyle(PrimaryButtonStyle(compact: true))
                 if let next = nextSlot?.place {
                     Menu {
                         Button { Links.open(next.directionsURL) } label: { Label("Apple Maps", systemImage: "map") }
                         Button { Links.open(next.googleDirectionsURL) } label: { Label("Google Maps", systemImage: "globe") }
                     } label: {
                         Label("Directions", systemImage: "arrow.up.right")
-                            .font(.subheadline.weight(.semibold)).foregroundStyle(Theme.label)
-                            .frame(maxWidth: .infinity, minHeight: 42)
-                            .background(Theme.raised, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.raisedBorder))
+                            .font(.subheadline.weight(.semibold)).foregroundStyle(Theme.accent)
+                            .padding(.horizontal, 16).padding(.vertical, 9)
+                            .frame(maxWidth: .infinity)
+                            .background(Theme.fill, in: Capsule())
                     }
                 } else {
-                    Button("Plan today") { router.push(.trip(id: trip.id)) }.buttonStyle(PrimaryButtonStyle(tinted: true))
+                    Button("Plan today") { router.push(.trip(id: trip.id)) }.buttonStyle(PrimaryButtonStyle(tinted: true, compact: true))
                 }
             }
             .padding(.top, 14)

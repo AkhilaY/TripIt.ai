@@ -1133,6 +1133,7 @@ function selBar() {
 
 const DISC_KINDS = [['restaurants', 'Restaurants'], ['coffee', 'Coffee'], ['bars', 'Bars'], ['dessert', 'Dessert'], ['things', 'Things to do']];
 const PRICE_SIGNS = ['', '$', '$$', '$$$', '$$$$'];
+const DISC_CAT = { restaurants: 'food', coffee: 'cafe', bars: 'drinks', dessert: 'dessert', things: 'activity' };
 
 function discKey() {
   const d = S.disc;
@@ -1159,7 +1160,8 @@ async function loadDiscover(force = false) {
 function discoverCard(it) {
   const hood = it.address ? it.address.split(',').slice(-3, -2)[0] : '';
   const meta = [it.kind_label, it.price_level ? PRICE_SIGNS[it.price_level] : null, it.distance_m != null ? fmtDistance(it.distance_m) : null].filter(Boolean);
-  const img = it.photo ? `<img class="sthumb" style="--sz:64px" src="${esc(it.photo)}" alt="" loading="lazy" decoding="async" onerror="this.remove()">` : `<span class="sthumb ph" style="--sz:64px">${ICON.pin}</span>`;
+  const ph = `<span class="sthumb ph" style="--sz:56px; --pc: var(--c-${DISC_CAT[S.disc.kind] || 'food'})">${ICON[DISC_CAT[S.disc.kind]] || ICON.pin}</span>`;
+  const img = it.photo ? `<img class="sthumb" style="--sz:56px" src="${esc(it.photo)}" alt="" loading="lazy" decoding="async" onerror="this.outerHTML=this.nextElementSibling.innerHTML"><template>${ph}</template>` : ph;
   return `<li class="drow">${img}<span class="m"><span class="t">${esc(it.name)}</span>
       <span class="s">${esc([hood && hood.trim(), ...meta].filter(Boolean).join(' · '))}</span>
       ${it.award ? `<span class="award">${ICON.sparkle}${esc(it.award)}</span>` : ''}
@@ -1181,7 +1183,7 @@ function discoverEdits(cityName, tripId) {
   const [first, ...rest] = cards;
   const photos = first.e.entries.map((x) => x.photo).filter(Boolean).slice(0, 3);
   return `<div class="h2row"><h2 class="h2">The edits${cityName ? ` · ${esc(cityName)}` : ''}</h2></div>
-    <a class="ecard" href="#/edit/${first.te.trip_id}/${first.e.id}">${photos.length ? `<span class="eimgs">${photos.map((ph) => `<img src="${esc(photoUrl(ph, 400))}" alt="" loading="lazy">`).join('')}</span>` : ''}
+    <a class="ecard" href="#/edit/${first.te.trip_id}/${first.e.id}">${photos.length ? `<span class="eimgs">${photos.map((ph) => `<img src="${esc(photoUrl(ph, 400))}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">`).join('')}</span>` : ''}
       <span class="b"><span class="eyebrow">The edit · ${plural(first.e.entries.length, 'place')}</span><span class="t serif">${esc(first.e.title)}</span>
       ${first.e.dek ? `<span class="s">${esc(first.e.dek)}</span>` : ''}</span></a>
     ${rest.length ? `<ul class="rows">${rest.map(({ te, e }) => `<li><a href="#/edit/${te.trip_id}/${e.id}"><span class="m"><span class="eyebrow">The edit · ${plural(e.entries.length, 'place')}</span><span class="t serif">${esc(e.title)}</span></span>${ICON.chev}</a></li>`).join('')}</ul>` : ''}`;
@@ -2205,7 +2207,7 @@ function travelHomeHtml(t, day) {
     <button class="tlink" data-act="dinnergap" data-trip="${t.id}" data-day="${day}" data-ids="${gap.slice(0, 8).map((p) => p.id).join(',')}">Choose one</button></span></div>` : '';
   const links = next ? mapsLinks(next, detail) : null;
   const todayHtml = `<section class="tcard"><div class="tc-head"><span class="m"><span class="eyebrow">${route.length > 1 ? `Today · stop ${si + 1} of ${route.length}` : 'Today'}</span>
-      <span class="t serif">${esc(title)}</span></span>${w ? `<span class="wx"><b>${temp(w.temp_max)}°</b><span>${esc(w.summary)}</span></span>` : ''}</div>
+      <span class="t serif">${esc(title)}</span></span>${w ? `<span class="twx"><b>${temp(w.temp_max)}°</b><span>${esc(w.summary)}</span></span>` : ''}</div>
     ${list.length ? `<div class="tline">${rows}${gapRow}</div>` : '<p class="sub">Nothing planned for today yet.</p>'}
     <div class="wbtns"><a class="btn" href="#/today/${t.id}">Open today</a>
       ${links ? `<button class="btn tint" data-act="directionsmenu" data-apple="${esc(links.apple)}" data-google="${esc(links.google)}">${ICON.fwd}Directions</button>` : `<a class="btn tint" href="#/trip/${t.id}">Plan today</a>`}</div></section>`;
@@ -2214,7 +2216,7 @@ function travelHomeHtml(t, day) {
     .sort((a, b) => (distanceOf(a) ?? 1e12) - (distanceOf(b) ?? 1e12)).slice(0, 8);
   const nearHtml = near.length ? `<div class="h2row"><h2 class="h2">Near you now</h2><span class="hint">From your ${esc(city)} saves</span></div>
     <div class="hscroll">${near.map((p) => { const st = openStatus(p.opening_hours); const wk = S.pos && located(p) ? Math.max(1, Math.round(meters(S.pos.latitude, S.pos.longitude, p.latitude, p.longitude) / 80)) : null; return `<a class="ocard sm" href="${placeHref(p)}">
-      ${p.photos && p.photos[0] ? `<img src="${esc(photoUrl(p.photos[0], 400))}" alt="" loading="lazy" decoding="async">` : `<span class="ph">${ICON[p.category] || ICON.pin}</span>`}
+      ${p.photos && p.photos[0] ? `<img src="${esc(photoUrl(p.photos[0], 400))}" alt="" loading="lazy" decoding="async">` : `<span class="ph" style="--pc: var(--c-${p.category})">${ICON[p.category] || ICON.pin}</span>`}
       <span class="t">${esc(p.name)}</span><span class="s">${st ? `<span class="${st.state === 'open' ? 'open' : ''}">${st.state === 'open' ? 'Open' : 'Closed'}</span>` : ''}${wk ? `${st ? ' · ' : ''}${wk} min walk` : ''}</span></a>`; }).join('')}</div>` : '';
 
   let nextHtml = '';
@@ -2233,7 +2235,10 @@ function travelHomeHtml(t, day) {
       <span class="cline">${ICON.bookmark}${plural(saved.length, 'saved place')} · ${inPlan} in the plan</span>
       ${hotel ? '' : `<span class="cline attn">${ICON.stay || ICON.bag}No hotel booked yet<a class="tlink" href="#/trip/${t.id}/bookings">Add a stay</a></span>`}</div>`;
   }
-  return `<div class="tstrip"><b>Day ${day} of ${t.day_count}</b><span class="n">${esc(t.name)}</span><span class="r">${esc(tripStops(t).join(' → '))}</span></div>${todayHtml}${nearHtml}${nextHtml}`;
+  // The route only when it adds something: a London trip called "London" shows London once.
+  const routeText = tripStops(t).join(' → ');
+  const showRoute = routeText && cityKey(routeText) !== cityKey(t.name);
+  return `<div class="tstrip"><b>Day ${day} of ${t.day_count}</b><span class="n">${esc(t.name)}</span>${showRoute ? `<span class="r">${esc(routeText)}</span>` : ''}</div>${todayHtml}${nearHtml}${nextHtml}`;
 }
 
 // ---------- Home, Library and cities ----------
@@ -2334,7 +2339,7 @@ function profileBtn() {
 }
 const smallThumb = (p, size = 48) => (p.photos && p.photos[0]
   ? `<img class="sthumb" style="--sz:${size}px" src="${esc(photoUrl(p.photos[0], size * 3))}" alt="" loading="lazy" decoding="async" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'sthumb ph',style:'--sz:${size}px'}))">`
-  : `<span class="sthumb ph" style="--sz:${size}px">${ICON[p.category] || ICON.pin}</span>`);
+  : `<span class="sthumb ph" style="--sz:${size}px; --pc: var(--c-${p.category})">${ICON[p.category] || ICON.pin}</span>`);
 function visitSeg(list) {
   const v = visitOf();
   return `<div class="visitseg" role="group" aria-label="Filter by status">${VISITS.map(([k, label]) => `<button data-act="visit" data-v="${k}" aria-pressed="${v === k}" class="${v === k ? 'on' : ''}">${label} <span>${byVisit(list, k).length}</span></button>`).join('')}</div>`;
@@ -2432,7 +2437,7 @@ async function homeView() {
   }).sort((a, b) => (distanceOf(a) ?? 1e12) - (distanceOf(b) ?? 1e12)).slice(0, 8);
   const openHtml = open.length ? `<h2 class="h2">Open now from your saves</h2>
     <div class="hscroll">${open.map((p) => { const st = openStatus(p.opening_hours); const d = distanceOf(p); return `<a class="ocard" href="${placeHref(p)}">
-      ${p.photos && p.photos[0] ? `<img src="${esc(photoUrl(p.photos[0], 500))}" alt="" loading="lazy" decoding="async">` : `<span class="ph">${ICON[p.category] || ICON.pin}</span>`}
+      ${p.photos && p.photos[0] ? `<img src="${esc(photoUrl(p.photos[0], 500))}" alt="" loading="lazy" decoding="async">` : `<span class="ph" style="--pc: var(--c-${p.category})">${ICON[p.category] || ICON.pin}</span>`}
       <span class="t">${esc(p.name)}</span><span class="s"><span class="open">${esc(st.label.replace(/^Open until/, 'Until'))}</span>${d != null ? ` · ${esc(miles(d))}` : ''}</span></a>`; }).join('')}</div>` : '';
 
   const next = upcomingTrips(trips)[0];
@@ -2494,9 +2499,10 @@ function libMain(places, trips, folders) {
     ${all.length ? all.map((t, i) => (i === 0 ? routeCard(t) : tripRowHtml(t))).join('') : '<p class="sub">Plan a trip from a city you’ve saved places in, or start one from scratch.</p>'}`;
   const groups = cityGroups(shown);
   const visible = S.allCities ? groups : groups.slice(0, 4);
-  const citiesHtml = groups.length ? `<div class="h2row"><h2 class="h2">Cities</h2><span class="hint">Sorted for you automatically</span></div>
-    <div class="cgrid">${visible.map((c) => cityTile(c, tripForCity(trips, c.name))).join('')}</div>
-    ${groups.length > 4 ? `<button class="tbtn" data-act="allcities">${S.allCities ? 'Show fewer' : `See all ${groups.length} cities`}</button>` : ''}` : '';
+  const citiesHtml = groups.length ? `<div class="h2row"><h2 class="h2">Cities</h2>${groups.length > 4
+    ? `<button class="tbtn" data-act="allcities" aria-expanded="${!!S.allCities}">${S.allCities ? `Show fewer${ICON.up}` : `See all ${groups.length}${ICON.down}`}</button>`
+    : '<span class="hint">Sorted for you automatically</span>'}</div>
+    <div class="citygrid">${visible.map((c) => cityTile(c, tripForCity(trips, c.name))).join('')}</div>` : '';
   const listsHtml = `<div class="h2row"><h2 class="h2">Your lists</h2><button class="tbtn" data-act="newfolder">${ICON.plus}New list</button></div>
     ${folders.length ? `<ul class="rows">${folders.map((f) => listRow(`#/folder/${f.id}`, f.name, listSub(f, places), null, f.covers[0])).join('')}</ul>`
       : '<p class="sub">Make lists for anything: date night, early risers, best croissants. A place can be on several.</p>'}`;
@@ -2507,7 +2513,7 @@ function photoStrip(list) {
   const withPhotos = list.filter((p) => p.photos && p.photos[0]);
   const src = withPhotos.length ? withPhotos : list;
   const n = list.length > 4 ? 3 : 4;
-  return `<span class="pstrip">${src.slice(0, n).map((p) => (p.photos && p.photos[0] ? `<img src="${esc(photoUrl(p.photos[0], 240))}" alt="" loading="lazy" decoding="async">` : `<span class="ph">${ICON[p.category] || ICON.pin}</span>`)).join('')}${list.length > 4 ? `<span class="more">+${list.length - 3}</span>` : ''}</span>`;
+  return `<span class="pstrip">${src.slice(0, n).map((p) => (p.photos && p.photos[0] ? `<img src="${esc(photoUrl(p.photos[0], 240))}" alt="" loading="lazy" decoding="async">` : `<span class="ph" style="--pc: var(--c-${p.category})">${ICON[p.category] || ICON.pin}</span>`)).join('')}${list.length > 4 ? `<span class="more">+${list.length - 3}</span>` : ''}</span>`;
 }
 function routeStrip(stops) { return `<span class="route">${stops.map((s, i) => `${i ? '<i></i>' : ''}<span>${esc(s)}</span>`).join('')}</span>`; }
 function routeCard(t) {
@@ -2583,7 +2589,7 @@ async function cityView(r) {
   const head = `${navbar(title, { back: '#/library', backLabel: 'Library', right: `<a class="gbtn" href="#/map" aria-label="Map">${ICON.map}</a>` })}
     ${home ? '<div class="eyebrow pad">Your city</div>' : ''}<h1 class="largetitle" data-anchor>${esc(title)}</h1>
     <div class="subtitle"><span>${esc(sub)}</span></div>
-    <div class="page tight">${trip ? tripRowHtml(trip) : (!home && all.length ? `<button class="btn wide" data-act="citytrip" data-city="${esc(name)}">${ICON.plane}Plan a trip to ${esc(name)}</button>` : '')}
+    <div class="page tight">${trip ? `<span class="eyebrow quiet planned">Planned trip</span>${tripRowHtml(trip)}` : (!home && all.length ? `<button class="btn wide" data-act="citytrip" data-city="${esc(name)}">${ICON.plane}Plan a trip to ${esc(name)}</button>` : '')}
     ${visitSeg(all)}</div>`;
   if (!all.length) return head + emptyState('gray', 'pin', 'Nothing here yet', `Places you save in ${esc(name)} land here automatically.`);
   return `${head}${libControls(scope, shown)}<div id="libbody" data-scope="${esc(scope)}">${libList(scope, shown)}</div>${selBar()}`;
@@ -2774,9 +2780,8 @@ const VIEWS = {
         ${p.suggested && trip.id ? `<div class="pcard sugg">${ICON.sparkle}<span class="m"><span class="t">Suggested for this trip</span>
           <span class="s">${esc(p.suggestion_note || 'Added by AI to fill a quiet day')}</span></span>
           <button class="tbtn" data-act="keepsugg" data-trip="${trip.id}" data-id="${p.id}">Keep</button></div>` : ''}
-        <div class="visitseg two" role="group" aria-label="Status">
-          <button data-act="pvisit" data-id="${p.id}" data-v="0" aria-pressed="${!p.visited}" class="${p.visited ? '' : 'on'}">${ICON.bookmark}Want to go</button>
-          <button data-act="pvisit" data-id="${p.id}" data-v="1" aria-pressed="${p.visited}" class="${p.visited ? 'on' : ''}">${ICON.check}Been here</button></div>
+        <button class="beenbtn${p.visited ? ' on' : ''}" data-act="pvisit" data-id="${p.id}" data-v="${p.visited ? 0 : 1}" aria-pressed="${!!p.visited}">
+          <span class="ck">${ICON.check}</span>Been here</button>
         ${whySaved(p, reels)}
         ${mainAction(p, slotTrip)}
         ${quietActions(p, slotTrip)}

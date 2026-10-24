@@ -322,7 +322,7 @@ extension Store {
         var id: String { Store.cityKey(name) }
     }
 
-    static func cityKey(_ city: String) -> String {
+    nonisolated static func cityKey(_ city: String) -> String {
         city.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: nil).trimmingCharacters(in: .whitespaces)
     }
 

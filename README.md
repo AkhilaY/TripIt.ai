@@ -114,6 +114,8 @@ Setup:
    - Add it as the secret `SENTRY_AUTH_TOKEN`.
    - Add two repository **variables**: `SENTRY_ORG` (your organization slug) and `SENTRY_PROJECT_IOS` (e.g. `travel-edit-ios`).
 
+To check it works, open **Profile → Send feedback** (on the web or in the app) and send a test message. Within a minute it appears in the server project's **Issues** as "Feedback: …" (filter `kind:feedback`). App crashes appear in the iOS project after the app next opens.
+
 ## 3. Set up your iPhone
 
 1. Open `https://<app>.fly.dev` in **Safari**, sign in (or create your account; see [Accounts](#accounts)), then tap **Share → Add to Home Screen**.

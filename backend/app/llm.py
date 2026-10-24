@@ -150,6 +150,7 @@ class ClaudeService:
     def __init__(self, settings: Settings, client: Optional[anthropic.AsyncAnthropic] = None):
         self.settings = settings
         self.client = client or anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key or None)
+        self.usage = None  # usage.Usage: records each call's cost and enforces the budgets and daily limits
 
     async def extract_places(
         self,
@@ -179,7 +180,7 @@ class ClaudeService:
         text_parts.append("Extract every place recommended in this post.")
         content.append({"type": "text", "text": "\n\n".join(text_parts)})
 
-        return await self._parse(EXTRACT_SYSTEM, content, ExtractionResult)
+        return await self._parse(EXTRACT_SYSTEM, content, ExtractionResult, feature="import")
 
     async def plan_itinerary(self, request: PlanRequest) -> PlanResult:
         payload = {
@@ -197,7 +198,7 @@ class ClaudeService:
                 + json.dumps(payload, indent=2),
             }
         ]
-        result = await self._parse(PLAN_SYSTEM, content, PlanResult)
+        result = await self._parse(PLAN_SYSTEM, content, PlanResult, feature="plan")
         return _sanitize_plan(result, request)
 
     async def tidy_itinerary(self, request: PlanRequest, instruction: Optional[str]) -> PlanResult:
@@ -211,19 +212,19 @@ class ClaudeService:
         text = "Tidy this itinerary:\n\n" + json.dumps(payload, indent=2)
         if instruction and instruction.strip():
             text += f"\n\nThe person's instruction: {instruction.strip()}"
-        result = await self._parse(TIDY_SYSTEM, [{"type": "text", "text": text}], PlanResult)
+        result = await self._parse(TIDY_SYSTEM, [{"type": "text", "text": text}], PlanResult, feature="tidy")
         return _sanitize_plan(result, request)
 
     async def pick_menu_links(self, name: str, items: list[tuple[str, str]]) -> list[int]:
         """items: (link text, address). Returns indices into items."""
         lines = "\n".join(f"{i}. {text[:80] or '(no text)'} — {url[:160]}" for i, (text, url) in enumerate(items))
         content = [{"type": "text", "text": f"Restaurant: {name}\n\nLinks:\n{lines}\n\nWhich links are its main menus?"}]
-        result = await self._parse(PICK_LINKS_SYSTEM, content, PickedLinks, effort="low")
+        result = await self._parse(PICK_LINKS_SYSTEM, content, PickedLinks, effort="low", feature="menu_links")
         return [n for n in dict.fromkeys(result.numbers) if 0 <= n < len(items)][:6]
 
     async def explain_discover(self, context: dict) -> DiscoverNotes:
         content = [{"type": "text", "text": "Notes for these places:\n\n" + json.dumps(context, indent=2, default=str)}]
-        return await self._parse(DISCOVER_SYSTEM, content, DiscoverNotes, effort="low")
+        return await self._parse(DISCOVER_SYSTEM, content, DiscoverNotes, effort="low", feature="discover")
 
     async def research_edits(self, context: dict, max_searches: int = 4) -> tuple[str, list[dict]]:
         """Searches the web for publications' recommendations in a city. Returns (notes, sources), where sources
@@ -232,6 +233,7 @@ class ClaudeService:
         tools = [{"type": "web_search_20260209", "name": "web_search", "max_uses": max_searches, "blocked_domains": RESEARCH_BLOCKED}]
         sources: dict[str, dict] = {}
         notes: list[str] = []
+        self._check("edits_research")
         for _ in range(3):  # a long search can pause; send the turn back to let it finish
             try:
                 response = await self.client.beta.messages.create(
@@ -248,6 +250,7 @@ class ClaudeService:
                 raise ClaudeError("Couldn't reach Claude") from e
             except anthropic.AnthropicError as e:
                 raise ClaudeError("Claude isn't configured on the server") from e
+            self._record("edits_research", response)
             if response.stop_reason == "refusal":
                 raise ClaudeError("Claude declined to research this")
             for block in response.content:
@@ -266,23 +269,23 @@ class ClaudeService:
 
     async def suggest_places(self, context: dict) -> SuggestionResult:
         content = [{"type": "text", "text": "Suggest places for the quiet days:\n\n" + json.dumps({k: v for k, v in context.items() if v}, indent=2, default=str)}]
-        return await self._parse(SUGGEST_SYSTEM, content, SuggestionResult, effort="low")
+        return await self._parse(SUGGEST_SYSTEM, content, SuggestionResult, effort="low", feature="suggest")
 
     async def lounges(self, airport: str) -> LoungeList:
         content = [{"type": "text", "text": f"Departure airport: {airport}"}]
-        return await self._parse(LOUNGE_SYSTEM, content, LoungeList, effort="low")
+        return await self._parse(LOUNGE_SYSTEM, content, LoungeList, effort="low", feature="lounges")
 
     async def booking_needs(self, places: list[dict]) -> BookingNeedResult:
         content = [{"type": "text", "text": "Which of these places need booking ahead?\n\n" + json.dumps(places, indent=2, default=str)}]
-        return await self._parse(BOOKING_NEED_SYSTEM, content, BookingNeedResult, effort="low")
+        return await self._parse(BOOKING_NEED_SYSTEM, content, BookingNeedResult, effort="low", feature="booking_needs")
 
     async def explain_events(self, context: dict) -> EventNotes:
         content = [{"type": "text", "text": "Explain why these events suit the traveller:\n\n" + json.dumps(context, indent=2, default=str)}]
-        return await self._parse(EVENTS_SYSTEM, content, EventNotes, effort="low")
+        return await self._parse(EVENTS_SYSTEM, content, EventNotes, effort="low", feature="events")
 
     async def plan_packing(self, context: dict) -> PackingResult:
         content = [{"type": "text", "text": "Write the packing list for this trip:\n\n" + json.dumps(context, indent=2, default=str)}]
-        return await self._parse(PACKING_SYSTEM, content, PackingResult, effort="low")
+        return await self._parse(PACKING_SYSTEM, content, PackingResult, effort="low", feature="packing")
 
     async def extract_bookings(self, text: Optional[str], images: list[bytes], today: str, trip_name: str,
                                trip_start: Optional[str]) -> BookingsResult:
@@ -293,10 +296,11 @@ class ClaudeService:
                                                         "data": base64.standard_b64encode(raw).decode("ascii")}})
         context = f"Today is {today}. The trip is '{trip_name}'" + (f", starting {trip_start}." if trip_start else ".")
         content.append({"type": "text", "text": context + ("\n\nPasted text:\n" + text if text else "") + "\n\nList the bookings."})
-        return await self._parse(BOOKINGS_SYSTEM, content, BookingsResult, effort="low")
+        return await self._parse(BOOKINGS_SYSTEM, content, BookingsResult, effort="low", feature="bookings")
 
-    async def extract_menu(self, place, materials: list, from_photos: bool) -> MenuResult:
-        """materials: menus.Material items (page text, images, PDFs) gathered for this place."""
+    async def extract_menu(self, place, materials: list, from_photos: bool, feature: str = "menu") -> MenuResult:
+        """materials: menus.Material items (page text, images, PDFs) gathered for this place. A lookup's later tries
+        use feature "menu_retry", so the daily limit counts lookups rather than every read."""
         content: list[dict] = [{"type": "text", "text": f"Venue: {place.name}, {place.city}{', ' + place.country if place.country else ''} ({place.category.value})"}]
         for m in materials:
             where = f" ({m.url})" if m.url else ""
@@ -311,10 +315,19 @@ class ClaudeService:
                 content.append({"type": "document", "source": {"type": "base64", "media_type": "application/pdf",
                                                                "data": base64.standard_b64encode(m.data).decode("ascii")}})
         content.append({"type": "text", "text": "Extract the menu."})
-        return await self._parse(MENU_PHOTOS_SYSTEM if from_photos else MENU_SYSTEM, content, MenuResult, effort="low")
+        return await self._parse(MENU_PHOTOS_SYSTEM if from_photos else MENU_SYSTEM, content, MenuResult, effort="low", feature=feature)
+
+    def _check(self, feature: str) -> None:
+        if self.usage is not None:
+            self.usage.check(feature)  # raises when a budget or today's limit is used up
+
+    def _record(self, feature: str, response) -> None:
+        if self.usage is not None:
+            self.usage.record(feature, getattr(response, "usage", None))
 
     async def _parse(self, system: str, content: list[dict], output_type: type[T], effort: Optional[str] = None,
-                     messages: Optional[list[dict]] = None) -> T:
+                     messages: Optional[list[dict]] = None, feature: str = "other") -> T:
+        self._check(feature)
         try:
             response = await self.client.beta.messages.parse(
                 model=self.settings.claude_model,
@@ -338,6 +351,7 @@ class ClaudeService:
             log.error("Claude client error: %s", e)
             raise ClaudeError("Claude isn't configured on the server") from e
 
+        self._record(feature, response)
         if response.stop_reason == "refusal":
             raise ClaudeError("Claude declined to process this post")
         if response.stop_reason == "max_tokens" or response.parsed_output is None:

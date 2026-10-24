@@ -35,6 +35,25 @@ class Settings(BaseSettings):
     weather_api_key: str = ""
     weather_base_url: str = ""
 
+    # Cost caps. AI pauses for everyone once the month's spend reaches monthly_budget_usd (alerts go to Sentry at
+    # 50%, 80% and 100%). Each person also has a daily spend cap and daily limits per feature; the owner skips
+    # those. 0 turns a limit off. The owner can change all of these on the Usage page without redeploying.
+    monthly_budget_usd: float = 150.0
+    user_daily_budget_usd: float = 3.0
+    limit_imports_per_day: int = 25
+    limit_plans_per_day: int = 15  # AI plans, tidies and suggestions
+    limit_concierge_per_day: int = 50
+    limit_menus_per_day: int = 20
+    limit_bookings_per_day: int = 20
+    limit_packing_per_day: int = 10
+    limit_edits_per_day: int = 10
+    # Claude prices used for the estimates: $ per million tokens, and $ per 1,000 web searches.
+    price_input_mtok: float = 4.0
+    price_output_mtok: float = 20.0
+    price_cache_read_mtok: float = 0.20
+    price_cache_write_mtok: float = 5.0
+    price_web_search_k: float = 10.0
+
     # Transcription (faster-whisper). "base" is a good CPU default; "small" is more accurate.
     whisper_model: str = "base"
     whisper_device: str = "cpu"

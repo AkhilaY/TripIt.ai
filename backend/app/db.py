@@ -147,6 +147,21 @@ CREATE TABLE IF NOT EXISTS feedback (
     created_at TEXT NOT NULL
 );
 
+-- What AI (and Google Maps) calls cost, per UTC day, person ('' for none) and feature.
+CREATE TABLE IF NOT EXISTS usage (
+    day TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    feature TEXT NOT NULL,
+    calls INTEGER NOT NULL DEFAULT 0,
+    input_tokens INTEGER NOT NULL DEFAULT 0,
+    output_tokens INTEGER NOT NULL DEFAULT 0,
+    cache_read INTEGER NOT NULL DEFAULT 0,
+    cache_write INTEGER NOT NULL DEFAULT 0,
+    searches INTEGER NOT NULL DEFAULT 0,
+    cost_usd REAL NOT NULL DEFAULT 0,
+    PRIMARY KEY (day, user_id, feature)
+);
+
 CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
@@ -888,6 +903,43 @@ class Database:
         return [{"id": r["id"], "user_id": r["user_id"], "message": r["message"], "context": json.loads(r["context"]),
                  "created_at": r["created_at"]}
                 for r in self._rows("SELECT * FROM feedback ORDER BY created_at DESC LIMIT ?", (limit,))]
+
+    # ---------- Usage and costs ----------
+
+    def add_usage(self, day: str, user_id: str, feature: str, calls: int = 1, input_tokens: int = 0, output_tokens: int = 0,
+                  cache_read: int = 0, cache_write: int = 0, searches: int = 0, cost: float = 0.0) -> None:
+        self._exec(
+            "INSERT INTO usage (day, user_id, feature, calls, input_tokens, output_tokens, cache_read, cache_write, searches, cost_usd) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (day, user_id, feature) DO UPDATE SET "
+            "calls = calls + excluded.calls, input_tokens = input_tokens + excluded.input_tokens, "
+            "output_tokens = output_tokens + excluded.output_tokens, cache_read = cache_read + excluded.cache_read, "
+            "cache_write = cache_write + excluded.cache_write, searches = searches + excluded.searches, "
+            "cost_usd = cost_usd + excluded.cost_usd",
+            (day, user_id, feature, calls, input_tokens, output_tokens, cache_read, cache_write, searches, cost),
+        )
+
+    def usage_cost(self, since_day: str, user_id: Optional[str] = None) -> float:
+        """AI spend from since_day on (everyone's, or one person's); Google Maps calls aren't included."""
+        sql = "SELECT COALESCE(SUM(cost_usd), 0) AS c FROM usage WHERE day >= ? AND feature NOT LIKE 'google:%'"
+        params: tuple = (since_day,)
+        if user_id is not None:
+            sql, params = sql + " AND user_id = ?", params + (user_id,)
+        return self._rows(sql, params)[0]["c"]
+
+    def usage_calls(self, day: str, user_id: str, features: Iterable[str]) -> int:
+        features = tuple(features)
+        marks = ", ".join("?" * len(features))
+        return self._rows(f"SELECT COALESCE(SUM(calls), 0) AS n FROM usage WHERE day = ? AND user_id = ? AND feature IN ({marks})",
+                          (day, user_id) + features)[0]["n"]
+
+    def usage_rows(self, since_day: str) -> list[dict]:
+        return [dict(r) for r in self._rows("SELECT * FROM usage WHERE day >= ? ORDER BY day", (since_day,))]
+
+    def is_admin(self, user_id: str) -> bool:
+        return bool(self._rows("SELECT 1 FROM users WHERE id = ? AND is_admin = 1", (user_id,)))
+
+    def user_emails(self) -> dict[str, str]:
+        return {r["id"]: r["email"] for r in self._rows("SELECT id, email FROM users")}
 
     def save_push_subscription(self, endpoint: str, keys: dict, origin: str) -> None:
         self._exec(

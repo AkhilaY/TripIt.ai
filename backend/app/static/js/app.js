@@ -209,7 +209,7 @@ function route() {
   if (parts[0] === 'events' && parts[1]) return { name: 'events', id: parts[1], params };
   if (parts[0] === 'edit' && parts[1] && parts[2]) return { name: 'edit', id: parts[1], editId: parts[2], params };
   if (parts[0] === 'editplace' && parts[3]) return { name: 'editplace', id: parts[1], editId: parts[2], entryId: parts[3], params };
-  if (['map', 'imports', 'profile', 'signin', 'add', 'concierge', 'taste', 'discover', 'bookings', 'calendar'].includes(parts[0])) return { name: parts[0], params };
+  if (['map', 'imports', 'profile', 'signin', 'add', 'concierge', 'taste', 'discover', 'bookings', 'calendar', 'usage'].includes(parts[0])) return { name: parts[0], params };
   return { name: 'trips', params };
 }
 
@@ -221,7 +221,7 @@ const TAB_FOR = {
 const tabOf = (name) => TAB_FOR[name] || S.lastTab || 'trips';
 const TAB_INDEX = { trips: 0, discover: 1, map: 2, bookings: 3, concierge: 4 };
 const TAB_LABEL = { trips: 'Library', discover: 'Discover', map: 'Map', bookings: 'Bookings', concierge: 'Concierge' };
-const DEPTH = { profile: 1, calendar: 1, imports: 2, taste: 2, folder: 1, trip: 1, today: 1, taste: 1, packing: 1, events: 1, edit: 2, editplace: 3, place: 2 };
+const DEPTH = { profile: 1, calendar: 1, imports: 2, usage: 2, taste: 2, folder: 1, trip: 1, today: 1, taste: 1, packing: 1, events: 1, edit: 2, editplace: 3, place: 2 };
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
 let renderToken = 0;
 let lastKey = '';
@@ -1838,6 +1838,58 @@ async function newTripSheet({ placeIds = [], folderId = null } = {}) {
   });
 }
 
+// ---------- Usage & costs (owner only) ----------
+
+const FEATURE_LABEL = {
+  import: 'Imports', plan: 'AI plans', tidy: 'Tidy with AI', suggest: 'Suggestions', concierge: 'Concierge',
+  menu: 'Menus', menu_retry: 'Menus (extra tries)', menu_links: 'Menus (finding links)', bookings: 'Reading bookings',
+  packing: 'Packing lists', edits: 'Edits', edits_research: 'Edits (web research)', discover: 'Discover notes',
+  lounges: 'Lounges', booking_needs: 'Booking checks', events: 'What’s on', briefing: 'Daily briefings', other: 'Other',
+};
+const GOOGLE_LABEL = {
+  locate: 'Place lookups', search: 'Place search', nearby: 'Discover nearby', details: 'Place details',
+  menu_photos: 'Menu photo search', photo: 'Photos', routes: 'Travel times (per route)',
+};
+const money = (n) => (n > 0 && n < 0.01 ? '<$0.01' : `$${(n || 0).toFixed(2)}`);
+const count = (n) => (n || 0).toLocaleString();
+
+async function usageView() {
+  const u = S.usage = await api('/v1/admin/usage');
+  const budget = u.monthly_budget;
+  const pct = budget ? Math.min(100, (u.month_cost / budget) * 100) : 0;
+  const month = new Date(`${u.month}-01T12:00:00Z`).toLocaleDateString(undefined, { month: 'long', year: 'numeric', timeZone: 'UTC' });
+  const day = (d) => new Date(`${d}T12:00:00Z`).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' });
+  const rows = (items, fn) => (items.length ? `<div class="group tiles">${items.map(fn).join('')}</div>` : '<div class="section-f">Nothing yet.</div>');
+  const row = (t, s, v) => `<div class="row"><span class="main"><span class="t">${esc(t)}</span>${s ? `<span class="s">${esc(s)}</span>` : ''}</span><span class="val">${esc(v)}</span></div>`;
+  const limits = Object.entries(u.limit_labels).map(([k, label]) => `${u.config[`limit_${k}`] || 'no limit'} ${label}`).join(' · ');
+  return `${navbar('Usage & costs', { back: '#/profile', backLabel: 'Profile' })}
+    <h1 class="largetitle" data-anchor>Usage & costs</h1>
+    <div class="subtitle"><span>AI spend in ${esc(month)} (UTC), estimated from Claude’s token counts</span></div>
+
+    <div class="section"><div class="group tiles">
+      <div class="row"><span class="main"><span class="t">${money(u.month_cost)} of ${budget ? money(budget) : 'no budget'}</span>
+        <span class="s">${u.paused ? 'Budget used up: AI is paused until next month' : budget ? `${Math.round(pct)}% of this month’s budget` : 'No monthly budget set'}</span>
+        ${budget ? `<span class="progress big" style="margin-top:8px"><i style="width:${pct}%;${u.paused || pct >= 80 ? 'background:var(--danger)' : ''}"></i></span>` : ''}</span></div>
+      ${row('Today', null, money(u.today_cost))}
+      <button class="row" data-act="usagelimits">${tile('gray', 'lock')}<span class="main"><span class="t">Budgets and limits</span>
+        <span class="s">${esc(`${money(u.config.user_daily_budget_usd)} a day per person · ${limits}`)}</span></span>${ICON.chev}</button>
+    </div><div class="section-f">Emails from Sentry at 50%, 80% and 100% of the monthly budget. Your own use counts toward it, but per-person limits don’t apply to you.</div></div>
+
+    <div class="section"><div class="section-h">By day</div>
+      ${rows(u.days, (d) => row(day(d.day), `${count(d.calls)} AI calls`, money(d.cost)))}</div>
+
+    <div class="section"><div class="section-h">By feature this month</div>
+      ${rows(u.features, (f) => row(FEATURE_LABEL[f.feature] || f.feature,
+        `${count(f.calls)} calls · ${count(f.input_tokens + f.output_tokens)} tokens${f.searches ? ` · ${count(f.searches)} web searches` : ''}`, money(f.cost)))}</div>
+
+    <div class="section"><div class="section-h">By person this month</div>
+      ${rows(u.people, (p) => row(p.email, `${count(p.calls)} AI calls · ${money(p.cost_today)} today`, money(p.cost_month)))}</div>
+
+    <div class="section"><div class="section-h">Google Maps this month</div>
+      ${rows(u.google, (g) => row(GOOGLE_LABEL[g.kind] || g.kind, `${count(g.calls)} calls`, money(g.cost)))}
+      ${u.google.length ? `<div class="section-f">About ${money(u.google_cost)} at Google’s list prices, before its free monthly allowance (most small apps pay nothing). Billed by Google; not part of the AI budget.</div>` : ''}</div>`;
+}
+
 const VIEWS = {
   async folder(r) { return folderView(r); },
 
@@ -2251,6 +2303,8 @@ const VIEWS = {
         : emptyState('blue', 'tray', 'Nothing imported yet', 'Reels you share to Travel Edit show up here while they’re processed.')}`;
   },
 
+  async usage() { return usageView(); },
+
   async profile() {
     if (!S.config) { S.config = await api('/v1/config'); configureMaps({ googleMapsKey: S.config.google_maps_key }); }
     if (!S.profile) await loadProfile().catch(() => {});
@@ -2277,7 +2331,9 @@ const VIEWS = {
         ${me.is_admin ? `<button class="row" data-act="invites">${tile('gold', 'plus')}<span class="main"><span class="t">Invite people</span>
           <span class="s">Make a one-time code for each tester</span></span>${ICON.chev}</button>
         <button class="row" data-act="people">${tile('blue', 'person')}<span class="main"><span class="t">People</span>
-          <span class="s">Everyone with an account; reset a forgotten password</span></span>${ICON.chev}</button>` : ''}
+          <span class="s">Everyone with an account; reset a forgotten password</span></span>${ICON.chev}</button>
+        <a class="row" href="#/usage">${tile('green', 'tag')}<span class="main"><span class="t">Usage & costs</span>
+          <span class="s">AI spend by day, feature and person; budgets and daily limits</span></span>${ICON.chev}</a>` : ''}
         <button class="row" data-act="feedback">${tile('indigo', 'sparkle')}<span class="main"><span class="t">Send feedback</span>
           <span class="s">Something broken, confusing or missing? Tell us</span></span>${ICON.chev}</button>
         <button class="row" data-act="signout">${tile('red', 'signout')}<span class="main"><span class="t" style="color:var(--danger)">Sign out</span></span></button>
@@ -4526,6 +4582,28 @@ async function onAction(act, el) {
           <button class="copybtn" data-act="copy" data-value="${esc(key)}" aria-label="Copy key">Copy</button></div></div>
           <div class="section-f">Paste it as the X-API-Key header in your Travel Edit Shortcut. It's shown only now, and it can only send links and screenshots to your library.</div></div>`,
         ok() { closeSheet(); render({ quiet: true }); } });
+      return;
+    }
+    case 'usagelimits': {
+      const { config, limit_labels: labels } = S.usage;
+      const field = (key, label, step) => `<label class="row authrow" for="lim-${key}"><span class="lbl">${esc(label)}</span>
+        <input class="field" id="lim-${key}" type="number" inputmode="decimal" min="0" step="${step}" value="${config[key]}"></label>`;
+      openSheet({ type: 'form', title: 'Budgets and limits', confirm: 'Save', st: {},
+        body: () => `<div class="section"><div class="section-h">Budgets (US$)</div><div class="group tiles">
+            ${field('monthly_budget_usd', 'Monthly, everyone', '1')}${field('user_daily_budget_usd', 'Daily, per person', '0.5')}</div>
+            <div class="section-f">AI pauses for everyone once the month's spend reaches the monthly budget. You skip the per-person limits.</div></div>
+          <div class="section"><div class="section-h">Per person, per day</div><div class="group tiles">
+            ${Object.entries(labels).map(([k, label]) => field(`limit_${k}`, cap(label), '1')).join('')}</div>
+            <div class="section-f">0 turns a limit off. Limits reset at midnight UTC.</div></div>`,
+        async ok() {
+          const body = {};
+          for (const key of Object.keys(config)) {
+            const v = parseFloat(($(`#lim-${key}`) || {}).value);
+            if (Number.isFinite(v) && v >= 0) body[key] = v;
+          }
+          S.usage.config = await api('/v1/admin/usage/limits', { method: 'PUT', body });
+          closeSheet(); render({ quiet: true });
+        } });
       return;
     }
     case 'invites': {

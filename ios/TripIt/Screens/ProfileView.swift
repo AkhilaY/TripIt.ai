@@ -73,6 +73,9 @@ struct ProfileView: View {
                     NavigationLink(value: Route.web(hash: "#/profile")) {
                         row("person.2.fill", Theme.indigo, "Invites and people", "Invite testers; reset a forgotten password", chevron: false)
                     }
+                    NavigationLink(value: Route.web(hash: "#/usage")) {
+                        row("dollarsign.circle.fill", Theme.green, "Usage & costs", "AI spend, budgets and daily limits", chevron: false)
+                    }
                 }
                 Button { sendingFeedback = true } label: {
                     row("bubble.left.and.text.bubble.right.fill", Theme.indigo, "Send feedback", "Something broken, confusing or missing? Tell us")

@@ -9,7 +9,7 @@ estimates are only given for longer hops and are rough.
 import asyncio
 import logging
 import math
-from typing import Optional
+from typing import Callable, Optional
 
 import httpx
 
@@ -59,6 +59,7 @@ class Router:
         self.key = settings.google_maps_api_key if settings.routing != "estimate" else ""
         self.client = client or httpx.AsyncClient(timeout=20)
         self.google_off_reason: Optional[str] = None
+        self.meter: Optional[Callable[[str, int], None]] = None  # counts billable route elements (usage.Usage.record_google)
 
     @property
     def provider(self) -> str:
@@ -71,6 +72,8 @@ class Router:
         waypoint = lambda p: {"waypoint": {"location": {"latLng": {"latitude": p[0], "longitude": p[1]}}}}
         body = {"origins": [waypoint(o) for o in origins], "destinations": [waypoint(d) for d in destinations],
                 "travelMode": GOOGLE_MODE[mode]}
+        if self.meter is not None:
+            self.meter("routes", len(origins) * len(destinations))
         try:
             response = await self.client.post(
                 MATRIX_URL,

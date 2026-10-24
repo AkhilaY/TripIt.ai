@@ -111,6 +111,7 @@ from .pipeline import Pipeline
 from .monitoring import RateLimit, init_monitoring, report_client_error, report_feedback, set_user
 from .push import ApnsConfig, Push
 from .routing import Router
+from .usage import BudgetExceeded, Usage
 from .weather import Weather
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -128,9 +129,13 @@ def build_services(app: FastAPI, settings: Settings) -> None:
     app.state.photos = photos
     app.state.store = JobStore(db)
     app.state.claude = ClaudeService(settings)
+    app.state.claude.usage = usage = Usage(db, settings)
     app.state.library = Library(db, make_geocoder(settings), photos=photos)
     app.state.pipeline = Pipeline(settings, app.state.store, app.state.claude, app.state.library)
     app.state.router = Router(db, settings)
+    app.state.router.meter = usage.record_google
+    if hasattr(app.state.library.geocoder, "meter"):
+        app.state.library.geocoder.meter = usage.record_google
     app.state.push = Push(db, Path(settings.database_path).parent / "vapid_private.pem", settings.push_contact,
                           apns=ApnsConfig.from_settings(settings))
     app.state.curator = Curator(db, app.state.claude)
@@ -259,6 +264,27 @@ def _me(request: Request) -> User:
     if user is None:
         raise HTTPException(status_code=403, detail="Create your account first")
     return user
+
+
+def _claude_http(e: ClaudeError) -> HTTPException:
+    """429 when a budget or today's limit stopped the call (the message says when it resets), else 502."""
+    return HTTPException(status_code=429 if isinstance(e, BudgetExceeded) else 502, detail=str(e))
+
+
+def _allow(request: Request, feature: str) -> None:
+    """Turns work away up front (before downloading a reel, say) when its AI call wouldn't be allowed."""
+    usage = getattr(request.app.state.claude, "usage", None)
+    if usage is not None:
+        try:
+            usage.check(feature)
+        except BudgetExceeded as e:
+            raise _claude_http(e)
+
+
+def _count_google(request: Request, kind: str) -> None:
+    usage = getattr(request.app.state.claude, "usage", None)
+    if usage is not None:
+        usage.record_google(kind)
 
 
 def _admin(request: Request) -> User:
@@ -507,6 +533,27 @@ async def send_feedback(body: FeedbackIn, request: Request) -> dict:
     return {"id": feedback_id}
 
 
+def _usage(request: Request) -> Usage:
+    usage = getattr(request.app.state.claude, "usage", None)
+    if usage is None:
+        raise HTTPException(status_code=404, detail="Usage tracking isn't set up")
+    return usage
+
+
+@app.get("/v1/admin/usage", dependencies=[Auth])
+async def admin_usage(request: Request, days: int = 30) -> dict:
+    """AI spend by day, feature and person, Google Maps calls, and the budgets and limits in force."""
+    _admin(request)
+    return _usage(request).report(min(max(days, 1), 120))
+
+
+@app.put("/v1/admin/usage/limits", dependencies=[Auth])
+async def admin_usage_limits(body: dict[str, Optional[float]], request: Request) -> dict:
+    """Changes budgets and daily limits (keys as in "config"); null puts one back to the server setting."""
+    _admin(request)
+    return _usage(request).set_config(body)
+
+
 @app.get("/v1/admin/feedback", dependencies=[Auth])
 async def admin_feedback(request: Request, limit: int = 100) -> list[dict]:
     _admin(request)
@@ -549,6 +596,7 @@ async def create_job(body: CreateJobRequest, request: Request) -> Job:
         raise HTTPException(status_code=422, detail=str(e))
 
     shared_text = body.shared_text if body.shared_text and body.shared_text.strip() != url else None
+    _allow(request, "import")
     job, created = await request.app.state.store.create(url, shared_text)
     if created:
         start_job(request.app, job.id, url, shared_text)
@@ -575,6 +623,7 @@ def _decode_images(items: list[str]) -> list[bytes]:
 async def create_screenshot_job(body: ScreenshotJobRequest, request: Request) -> Job:
     """Finds places in screenshots (of a post, map or article) instead of a reel link."""
     images = _decode_images(body.images)
+    _allow(request, "import")
     url = request.app.state.pipeline.save_upload(images)
     note = (body.note or "").strip() or None
     job, _ = await request.app.state.store.create(url, note)
@@ -606,6 +655,7 @@ async def retry_job(job_id: str, request: Request) -> Job:
         raise HTTPException(status_code=404, detail="Job not found")
     if job.status != JobStatus.failed:
         raise HTTPException(status_code=409, detail="Only failed imports can be retried")
+    _allow(request, "import")
     store.update(job_id, status=JobStatus.queued, message="Retrying", warnings=[])
     start_job(request.app, job_id, job.url, _db(request).job_shared_text(job_id))
     return store.get(job_id)
@@ -875,6 +925,7 @@ async def discover_photo(request: Request, settings: Annotated[Settings, Depends
         raise HTTPException(status_code=403, detail="Bad photo link")
     if not settings.google_maps_api_key:
         raise HTTPException(status_code=404, detail="Photo not available")
+    _count_google(request, "photo")
     try:
         async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
             r = await client.get(f"https://places.googleapis.com/v1/{ref}/media",
@@ -893,7 +944,7 @@ async def check_booking_needs(trip_id: str, request: Request) -> TripDetail:
     try:
         await request.app.state.needs.check(trip)
     except ClaudeError as e:
-        raise HTTPException(status_code=502, detail=str(e))
+        raise _claude_http(e)
     return _trip_or_404(request, trip_id)
 
 
@@ -1064,7 +1115,7 @@ async def read_bookings(trip_id: str, body: ReadBookingsRequest, request: Reques
         result = await request.app.state.claude.extract_bookings(
             text, images, date.today().isoformat(), trip.name, trip.start_date.isoformat() if trip.start_date else None)
     except ClaudeError as e:
-        raise HTTPException(status_code=502, detail=str(e))
+        raise _claude_http(e)
     return _library(request).clean_drafts(result.bookings)
 
 
@@ -1334,7 +1385,7 @@ async def concierge(body: ConciergeRequest, request: Request) -> ConciergeReply:
     try:
         return await _curator(request).chat(body)
     except ClaudeError as e:
-        raise HTTPException(status_code=502, detail=str(e))
+        raise _claude_http(e)
 
 
 @app.post("/v1/trips/{trip_id}/days/{day}/briefing", response_model=DayBriefing, dependencies=[Auth])
@@ -1568,7 +1619,7 @@ async def upload_menu(place_id: str, body: MenuUploadRequest, request: Request) 
     try:
         menu = await request.app.state.menus.read_upload(place, images, pdfs)
     except ClaudeError as e:
-        raise HTTPException(status_code=502, detail=str(e))
+        raise _claude_http(e)
     if menu is None:
         raise HTTPException(status_code=422, detail="Couldn't find a menu in that. Try a clearer photo of the menu itself.")
     return menu
@@ -1590,7 +1641,7 @@ async def find_menu(place_id: str, request: Request, body: Optional[MenuRequest]
     try:
         return await request.app.state.menus.find(place, refresh=bool(body and body.refresh))
     except ClaudeError as e:
-        raise HTTPException(status_code=502, detail=str(e))
+        raise _claude_http(e)
 
 
 @app.get("/v1/places/{place_id}/photos/{index}", include_in_schema=False)
@@ -1614,6 +1665,7 @@ async def place_photo(
         return RedirectResponse(photo["ref"], status_code=302, headers={"Cache-Control": "private, max-age=86400"})
     if photo["source"] == "google" and settings.google_maps_api_key:
         width = min(max(w, 100), 1600)
+        _count_google(request, "photo")
         try:
             async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
                 r = await client.get(f"https://places.googleapis.com/v1/{photo['ref']}/media",
@@ -1638,7 +1690,7 @@ async def plan_itinerary(body: PlanRequest, request: Request) -> PlanResult:
     try:
         return await request.app.state.claude.plan_itinerary(body)
     except ClaudeError as e:
-        raise HTTPException(status_code=502, detail=str(e))
+        raise _claude_http(e)
 
 
 # ---------- Web app ----------

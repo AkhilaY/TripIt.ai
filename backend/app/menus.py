@@ -400,7 +400,7 @@ class MenuService:
         if website:
             materials = await self.gather_website(website, place.name, trace)
             if materials:
-                result = clean_menu(await self.claude.extract_menu(place, materials, from_photos=False))
+                result = clean_menu(await self.claude.extract_menu(place, materials, from_photos=False, feature="menu" if result is None else "menu_retry"))
                 trace.append(f"Claude read {len(materials)} item(s) from the website and {'found a menu' if result.found else 'found no menu in them'}")
                 if result.found:
                     kind = "website"
@@ -411,7 +411,7 @@ class MenuService:
             if photos:
                 materials = [Material("image", f"Photo {i}", "", data=data, media_type=media_type)
                              for i, (media_type, data) in enumerate(photos, start=1)]
-                result = clean_menu(await self.claude.extract_menu(place, materials, from_photos=True))
+                result = clean_menu(await self.claude.extract_menu(place, materials, from_photos=True, feature="menu" if result is None else "menu_retry"))
                 if result.found:
                     kind, source = "photos", None
                 trace.append(f"Google Maps photos: checked {len(photos)}, {'found a menu' if result.found else 'none was a readable menu'}")
@@ -432,7 +432,7 @@ class MenuService:
                     materials += read
                     trace.append(f"Browser found {len(links)} link(s); {len(chosen)} looked like menus; {len(read)} could be read")
                 if materials:
-                    result = clean_menu(await self.claude.extract_menu(place, materials, from_photos=False))
+                    result = clean_menu(await self.claude.extract_menu(place, materials, from_photos=False, feature="menu" if result is None else "menu_retry"))
                     trace.append(f"Claude read {len(materials)} item(s) from the browser visit and {'found a menu' if result.found else 'found no menu in them'}")
                     if result.found:
                         kind, source = "website", self._best_source(materials, website)

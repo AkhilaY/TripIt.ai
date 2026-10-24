@@ -81,12 +81,13 @@ class FakeMessages:
         self.outputs = {ExtractionResult: EXTRACTION}
         self.research = None
         self.stop_reason = "end_turn"
+        self.usage = None  # token counts reported with each response
         self.calls = []
 
     async def create(self, **kwargs):
         """Web research calls: returns self.research (content blocks), or nothing found."""
         self.calls.append(kwargs)
-        return SimpleNamespace(content=self.research or [], stop_reason="end_turn")
+        return SimpleNamespace(content=self.research or [], stop_reason="end_turn", usage=self.usage)
 
     async def parse(self, **kwargs):
         self.calls.append(kwargs)
@@ -97,7 +98,7 @@ class FakeMessages:
             parsed = parsed(kwargs)
         if isinstance(parsed, Exception):
             raise parsed
-        return SimpleNamespace(parsed_output=parsed, stop_reason=self.stop_reason)
+        return SimpleNamespace(parsed_output=parsed, stop_reason=self.stop_reason, usage=self.usage)
 
 
 class FakeGeocoder:
@@ -163,6 +164,8 @@ def client(monkeypatch, tmp_path):
     db = Database(":memory:")
     geocoder = FakeGeocoder()
     claude = ClaudeService(settings, client=SimpleNamespace(beta=SimpleNamespace(messages=messages)))
+    from app.usage import Usage
+    claude.usage = Usage(db, settings)
     photo_store = PhotoStore(tmp_path / "photos", "secret")
     db.photo_url = photo_store.url
     library = Library(db, geocoder, photos=photo_store)
@@ -3076,3 +3079,99 @@ def test_error_reports_never_carry_credentials():
     out = _scrub(event, {})["request"]
     assert out["headers"] == {"Authorization": "[filtered]", "X-API-Key": "[filtered]", "Cookie": "[filtered]", "User-Agent": "ua"}
     assert "cookies" not in out and "data" not in out and out["query_string"] == "[filtered]"
+
+
+# ---------- Costs and limits ----------
+
+
+def usage_of(input_tokens=0, output_tokens=0, searches=0):
+    return SimpleNamespace(input_tokens=input_tokens, output_tokens=output_tokens, cache_read_input_tokens=0,
+                           cache_creation_input_tokens=0, server_tool_use=SimpleNamespace(web_search_requests=searches))
+
+
+def ask_concierge(client, headers):
+    from app.models import ConciergeReply
+    client.messages.outputs[ConciergeReply] = ConciergeReply(reply="Try Lucali.", place_ids=[], actions=[])
+    return client.post("/v1/concierge", json={"messages": [{"role": "user", "content": "Dinner?"}]}, headers=headers)
+
+
+def test_ai_calls_are_costed_per_person_and_feature(client):
+    owner = signup(client, "a@x.com", "secret")
+    client.messages.usage = usage_of(input_tokens=100_000, output_tokens=10_000)  # $0.40 in + $0.20 out
+    import_reel(client)
+    report = client.get("/v1/admin/usage", headers=owner).json()
+    feature = next(f for f in report["features"] if f["feature"] == "import")
+    assert feature["calls"] == 1 and feature["cost"] == pytest.approx(0.6)
+    assert feature["input_tokens"] == 100_000 and feature["output_tokens"] == 10_000
+    assert report["people"][0]["email"] == "a@x.com" and report["people"][0]["cost_today"] == pytest.approx(0.6)
+    assert report["month_cost"] == pytest.approx(0.6) and report["monthly_budget"] == 150 and not report["paused"]
+    assert report["days"][0]["day"] == report["today"] and report["days"][0]["calls"] == 1
+    b = signup(client, "b@x.com", client.post("/v1/admin/invites", json={}, headers=owner).json()["code"])
+    assert client.get("/v1/admin/usage", headers=b).status_code == 403
+    assert client.put("/v1/admin/usage/limits", json={"limit_imports": 1}, headers=b).status_code == 403
+
+
+def test_web_searches_are_priced():
+    from app.usage import Usage
+    _, cost = Usage(Database(":memory:"), Settings()).price(usage_of(input_tokens=1_000_000, output_tokens=0, searches=4))
+    assert cost == pytest.approx(4.04)
+
+
+def test_daily_limits_and_spend_cap_apply_to_people_but_not_the_owner(client):
+    owner = signup(client, "a@x.com", "secret")
+    b = signup(client, "b@x.com", client.post("/v1/admin/invites", json={}, headers=owner).json()["code"])
+    config = client.put("/v1/admin/usage/limits", json={"limit_concierge": 2, "limit_imports": 1, "nonsense": 5}, headers=owner).json()
+    assert config["limit_concierge"] == 2 and config["limit_menus"] == 20 and "nonsense" not in config
+    assert ask_concierge(client, b).status_code == 200 and ask_concierge(client, b).status_code == 200
+    r = ask_concierge(client, b)
+    assert r.status_code == 429 and "limit of 2 Concierge messages" in r.json()["detail"] and "resets" in r.json()["detail"]
+    for _ in range(3):
+        assert ask_concierge(client, owner).status_code == 200  # the owner isn't limited
+    # Imports are turned away before anything is downloaded.
+    first = client.post("/v1/jobs", json={"url": "https://vm.tiktok.com/ZMb1/"}, headers=b)
+    assert first.status_code == 202 and wait_for(client, first.json()["id"], headers=b)["status"] == "done"
+    second = client.post("/v1/jobs", json={"url": "https://vm.tiktok.com/ZMb2/"}, headers=b)
+    assert second.status_code == 429 and "limit of 1 imports" in second.json()["detail"]
+    # Back to the server setting.
+    assert client.put("/v1/admin/usage/limits", json={"limit_imports": None}, headers=owner).json()["limit_imports"] == 25
+    assert client.post("/v1/jobs", json={"url": "https://vm.tiktok.com/ZMb2/"}, headers=b).status_code == 202
+
+    # The daily spend cap: $0.60 a call against $1.00 a day.
+    client.put("/v1/admin/usage/limits", json={"user_daily_budget_usd": 1, "limit_concierge": None}, headers=owner)
+    client.messages.usage = usage_of(input_tokens=100_000, output_tokens=10_000)
+    c = signup(client, "c@x.com", client.post("/v1/admin/invites", json={}, headers=owner).json()["code"])
+    assert ask_concierge(client, c).status_code == 200 and ask_concierge(client, c).status_code == 200
+    r = ask_concierge(client, c)
+    assert r.status_code == 429 and "today's AI allowance" in r.json()["detail"]
+    assert ask_concierge(client, owner).status_code == 200
+
+
+def test_monthly_budget_pauses_ai_for_everyone_and_alerts(client, caplog):
+    import logging
+
+    owner = signup(client, "a@x.com", "secret")
+    client.put("/v1/admin/usage/limits", json={"monthly_budget_usd": 1}, headers=owner)
+    client.messages.usage = usage_of(input_tokens=150_000)  # $0.60 a call
+    with caplog.at_level(logging.ERROR, logger="app.usage"):
+        assert ask_concierge(client, owner).status_code == 200  # 60%
+        assert ask_concierge(client, owner).status_code == 200  # 120%
+        r = ask_concierge(client, owner)
+        assert r.status_code == 429 and "paused until next month" in r.json()["detail"]
+    alerts = [rec.getMessage() for rec in caplog.records if rec.name == "app.usage" and rec.levelno >= logging.ERROR]
+    assert len(alerts) == 2 and "passed 50%" in alerts[0] and "budget used up" in alerts[1]
+    report = client.get("/v1/admin/usage", headers=owner).json()
+    assert report["paused"] and report["month_cost"] == pytest.approx(1.2)
+    # Imports wait too, and features with an offline fallback keep working.
+    assert client.post("/v1/jobs", json={"url": "https://vm.tiktok.com/ZMc/"}, headers=H).status_code == 429
+
+
+async def test_google_calls_are_counted():
+    from app.geocode import GooglePlacesGeocoder
+
+    calls = []
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, json={"places": []}))
+    geocoder = GooglePlacesGeocoder("key", client=httpx.AsyncClient(transport=transport))
+    geocoder.meter = calls.append
+    await geocoder.search("Lucali")
+    await geocoder.locate("Lucali", None, "New York", "USA")
+    assert calls == ["search", "locate"]

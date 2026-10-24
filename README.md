@@ -116,6 +116,28 @@ Setup:
 
 To check it works, open **Profile → Send feedback** (on the web or in the app) and send a test message. Within a minute it appears in the server project's **Issues** as "Feedback: …" (filter `kind:feedback`). App crashes appear in the iOS project after the app next opens.
 
+## Cost caps
+
+Every Claude call is recorded with its tokens, web searches and estimated cost, per person, feature and day (UTC). The owner sees it all under **Profile → Usage & costs**, in the app and on the web (`GET /v1/admin/usage`).
+
+| Limit | Default | What happens when it's reached |
+| --- | --- | --- |
+| Monthly AI budget, everyone | $150 | AI pauses for everyone until the 1st. Sentry emails you at 50%, 80% and 100%. |
+| Daily AI spend, per person | $3 | That person's AI pauses until midnight UTC. |
+| Imports per person per day | 25 | New imports are turned away with a message saying when the limit resets. |
+| AI plans, tidies and suggestions | 15 | |
+| Concierge messages | 50 | |
+| Menu lookups | 20 | |
+| Booking reads | 20 | |
+| Packing lists | 10 | |
+| Edits refreshes | 10 | |
+
+- **Fallbacks:** features with an offline fallback keep working when AI is paused. Plans use the offline planner, edits use your saved places, and packing lists use weather only. Features without one show the limit message.
+- **The owner:** you skip the per-person limits, but your use counts toward the monthly budget.
+- **Changing limits:** tap **Budgets and limits** on the Usage page; changes apply straight away. A limit of 0 turns it off. The defaults come from server settings (`MONTHLY_BUDGET_USD`, `USER_DAILY_BUDGET_USD`, `LIMIT_IMPORTS_PER_DAY` and so on in `backend/app/config.py`), along with the Claude prices used for the estimates.
+- **Google Maps:** Places and Routes calls are counted too, priced at Google's list prices before its free monthly allowance. Google bills them separately, so they don't count toward the AI budget.
+- **Accuracy:** costs are estimates from token counts. Your Anthropic Console has the exact bill, and it's worth also setting a spend limit there.
+
 ## 3. Set up your iPhone
 
 1. Open `https://<app>.fly.dev` in **Safari**, sign in (or create your account; see [Accounts](#accounts)), then tap **Share → Add to Home Screen**.

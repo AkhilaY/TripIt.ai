@@ -12,7 +12,7 @@ import math
 import re
 import time
 from dataclasses import dataclass, field
-from typing import Optional, Protocol
+from typing import Callable, Optional, Protocol
 from urllib.parse import urlsplit
 
 import httpx
@@ -156,9 +156,15 @@ class GooglePlacesGeocoder:
     def __init__(self, api_key: str, client: Optional[httpx.AsyncClient] = None):
         self.api_key = api_key
         self.client = client or httpx.AsyncClient(timeout=15)
+        self.meter: Optional[Callable[[str], None]] = None  # counts each billable call (usage.Usage.record_google)
+
+    def _count(self, kind: str) -> None:
+        if self.meter is not None:
+            self.meter(kind)
 
     async def locate(self, name, neighborhood, city, country, query=None) -> Optional[GeoMatch]:
         text = query or ", ".join(p for p in (name, neighborhood, city, country) if p)
+        self._count("locate")
         try:
             response = await self.client.post(
                 self.URL,
@@ -200,6 +206,7 @@ class GooglePlacesGeocoder:
         """Popular places of the given types around a point (raw Places API results); None when Google can't be reached."""
         body = {"includedTypes": types, "maxResultCount": min(limit, 20), "rankPreference": "POPULARITY",
                 "locationRestriction": {"circle": {"center": {"latitude": lat, "longitude": lon}, "radius": float(radius_m)}}}
+        self._count("nearby")
         try:
             response = await self.client.post(self.NEARBY_URL, json=body,
                                               headers={"X-Goog-Api-Key": self.api_key, "X-Goog-FieldMask": self.NEARBY_FIELDS})
@@ -212,6 +219,7 @@ class GooglePlacesGeocoder:
     async def menu_photos(self, name, neighborhood, city, country, limit: int = 8) -> list[tuple[str, bytes]]:
         """(media type, bytes) of the photos Google lists for a place, to look for a photographed menu."""
         text = ", ".join(p for p in (name, neighborhood, city, country) if p)
+        self._count("menu_photos")
         try:
             response = await self.client.post(
                 self.URL, headers={"X-Goog-Api-Key": self.api_key, "X-Goog-FieldMask": "places.photos"},
@@ -225,6 +233,7 @@ class GooglePlacesGeocoder:
         refs = [ph["name"] for ph in ((places[0].get("photos") if places else None) or [])[:limit] if ph.get("name")]
 
         async def fetch(ref: str) -> Optional[tuple[str, bytes]]:
+            self._count("photo")
             try:
                 r = await self.client.get(f"https://places.googleapis.com/v1/{ref}/media",
                                           params={"maxWidthPx": 1400, "key": self.api_key}, follow_redirects=True)
@@ -240,6 +249,7 @@ class GooglePlacesGeocoder:
         body: dict = {"textQuery": query, "pageSize": limit}
         if near:
             body["locationBias"] = {"circle": {"center": {"latitude": near[0], "longitude": near[1]}, "radius": 30000.0}}
+        self._count("search")
         try:
             response = await self.client.post(
                 self.URL, headers={"X-Goog-Api-Key": self.api_key, "X-Goog-FieldMask": self.SEARCH_FIELDS}, json=body,
@@ -265,6 +275,7 @@ class GooglePlacesGeocoder:
         pid = place_id.split(":", 1)[1]
         if not pid.replace("_", "").replace("-", "").isalnum():
             return None
+        self._count("details")
         try:
             response = await self.client.get(
                 f"https://places.googleapis.com/v1/places/{pid}",

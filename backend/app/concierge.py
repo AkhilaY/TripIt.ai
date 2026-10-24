@@ -292,7 +292,7 @@ class Curator:
                 payload["research_notes"] = notes
             try:
                 result = await self.claude._parse(
-                    EDITS_SYSTEM, [{"type": "text", "text": "Curate edits:\n\n" + json.dumps(payload, default=str)}], EditsResult)
+                    EDITS_SYSTEM, [{"type": "text", "text": "Curate edits:\n\n" + json.dumps(payload, default=str)}], EditsResult, feature="edits")
                 edits = await self._clean(result, pool, numbered, trip)
                 if edits:
                     curated_by = "claude+web" if any(x.get("source") for e in edits for x in e["entries"]) else "claude"
@@ -454,7 +454,7 @@ class Curator:
         if not messages or messages[-1]["role"] != "user":
             raise ClaudeError("Ask the concierge something first")
         system = CONCIERGE_SYSTEM + "\n\nContext:\n" + json.dumps(self._context(req), default=str)
-        reply = await self.claude._parse(system, [], ConciergeReply, effort="low", messages=messages)
+        reply = await self.claude._parse(system, [], ConciergeReply, effort="low", messages=messages, feature="concierge")
         return self._clean_reply(reply, req.trip_id)
 
     def _clean_reply(self, reply: ConciergeReply, trip_id: Optional[str]) -> ConciergeReply:
@@ -507,7 +507,7 @@ class Curator:
         curated_by = "offline"
         if self.claude is not None and stops:
             try:
-                text = await self.claude._parse(BRIEFING_SYSTEM, [{"type": "text", "text": json.dumps(facts)}], BriefingText)
+                text = await self.claude._parse(BRIEFING_SYSTEM, [{"type": "text", "text": json.dumps(facts)}], BriefingText, feature="briefing")
                 text.points = [p.strip() for p in text.points if p.strip()][:4]
                 curated_by = "claude"
             except ClaudeError as e:

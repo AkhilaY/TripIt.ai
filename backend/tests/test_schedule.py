@@ -198,13 +198,13 @@ def test_tiktok_photo_post_tries_other_browsers_then_the_embed(monkeypatch):
     calls = []
 
     # The first browser gets TikTok's 1.5 KB page without the post; the next one gets the post.
-    def video_page(page, cookies=None, profile="chrome_android"):
+    def video_page(page, cookies=None, profile=tiktok.PROFILES[0]):
         calls.append((page.split("/")[-2], profile))
-        return _rehydration(item) if profile == "safari_ios" else "<html>blocked</html>"
+        return _rehydration(item) if profile == tiktok.PROFILES[1] else "<html>blocked</html>"
 
     monkeypatch.setattr(tiktok, "_get_page", video_page)
     metadata, slides = tiktok.find_photo_post(url)
-    assert calls == [("video", "chrome_android"), ("video", "safari_ios")]
+    assert calls == [("video", tiktok.PROFILES[0]), ("video", tiktok.PROFILES[1])]
     assert metadata.caption == "Insta highlights" and len(slides) == 1
 
     # No video page at all: the embed page, after one 503.
@@ -212,15 +212,15 @@ def test_tiktok_photo_post_tries_other_browsers_then_the_embed(monkeypatch):
     monkeypatch.setattr(tiktok, "EMBED_PAUSE", 0)
     answers = iter([None, _embed("7695", "From the embed", ["https://p16-common-sign.tiktokcdn.com/tos-photomode/x~tplv-photomode-image.jpeg"])])
 
-    def embed_only(page, cookies=None, profile="chrome_android"):
+    def embed_only(page, cookies=None, profile=tiktok.PROFILES[0]):
         calls.append((page.split("/")[-2], profile))
         return next(answers) if "/embed/v2/" in page else None
 
     monkeypatch.setattr(tiktok, "_get_page", embed_only)
     metadata, slides = tiktok.find_photo_post(url)
     assert metadata.caption == "From the embed" and len(slides) == 1
-    assert calls[-2:] == [("v2", "chrome_android"), ("v2", "safari_ios")]
+    assert calls[-2:] == [("v2", tiktok.PROFILES[0]), ("v2", tiktok.PROFILES[1])]
 
     # Nothing served anywhere.
-    monkeypatch.setattr(tiktok, "_get_page", lambda page, cookies=None, profile="chrome_android": None)
+    monkeypatch.setattr(tiktok, "_get_page", lambda page, cookies=None, profile=None: None)
     assert tiktok.find_photo_post(url) is None

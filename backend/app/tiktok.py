@@ -29,8 +29,9 @@ ITEM_RE = re.compile(r"/(video|photo)/(\d+)")
 IMAGE_HOST_SUFFIXES = ("tiktokcdn.com", "tiktokcdn-us.com", "tiktokcdn-eu.com", "ibyteimg.com", "byteimg.com", "muscdn.com")
 MAX_SLIDES = 20
 # Browsers to look like when fetching TikTok pages, best first. TikTok sends servers that look like desktop Chrome a
-# 1.5 KB page without the post, while these four get the whole page (checked from the Fly server).
-PROFILES = ("chrome_android", "safari_ios", "safari", "edge", "chrome")
+# 1.5 KB page without the post (checked from the Fly server); Safari and Edge get the desktop page with the post in
+# it, and phones get a mobile page that keeps the post elsewhere but works on the embed page.
+PROFILES = ("safari", "edge", "chrome_android", "safari_ios", "chrome")
 EMBED_PAUSE = 0.8  # seconds between embed page tries; TikTok answers 503 to quick repeats
 
 

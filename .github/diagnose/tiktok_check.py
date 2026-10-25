@@ -137,8 +137,12 @@ def check(link):
         show("yt-dlp", f"error {str(e)[:200]}")
     with tempfile.TemporaryDirectory() as tmp:
         try:
+            import time
+
+            started = time.monotonic()
             got = tiktok.download_photo_post(resolved, Path(tmp), cookies=COOKIES)
-            show("download_photo_post", f"{len(got[1])} slides, caption {(got[0].caption or '')[:60]!r}, by {got[0].uploader}" if got else "None")
+            took = f"in {time.monotonic() - started:.1f}s"
+            show("download_photo_post", f"{len(got[1])} slides, caption {(got[0].caption or '')[:60]!r}, by {got[0].uploader} {took}" if got else f"None {took}")
         except Exception:  # noqa: BLE001
             show("download_photo_post", traceback.format_exc()[-300:])
 

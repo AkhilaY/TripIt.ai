@@ -23,6 +23,8 @@ enum Route: Hashable {
     case editPlace(tripId: String, editId: String, entryId: String)
     /// One trip's bookings.
     case bookings(tripId: String)
+    /// One of a trip's edits.
+    case edit(tripId: String, editId: String)
     /// A screen of the web app that isn't native yet, by its address inside the app (e.g. "#/packing/<trip id>").
     case web(hash: String)
 }
@@ -96,6 +98,8 @@ final class Router {
         case "trip" where parts.count > 1:
             if parts.count > 2, parts[2] == "bookings" { push(.bookings(tripId: parts[1])) }
             else { push(.trip(id: parts[1])) }
+        case "edit" where parts.count > 2:
+            push(.edit(tripId: parts[1], editId: parts[2]))
         case "editplace" where parts.count > 3:
             push(.editPlace(tripId: parts[1], editId: parts[2], entryId: parts[3]))
         case "folder" where parts.count > 1:

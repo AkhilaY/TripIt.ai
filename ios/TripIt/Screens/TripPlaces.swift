@@ -154,7 +154,7 @@ struct EditsRail: View {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(alignment: .top, spacing: 12) {
                         ForEach(edits.edits) { edit in
-                            Button { router.push(.web(hash: "#/edit/\(trip.id)/\(edit.id)")) } label: { EditCard(edit: edit) }
+                            Button { router.push(.edit(tripId: trip.id, editId: edit.id)) } label: { EditCard(edit: edit) }
                                 .buttonStyle(.plain)
                         }
                     }
@@ -217,7 +217,8 @@ struct EditsRail: View {
     }
 }
 
-private struct EditCard: View {
+/// An edit as a card: its cover photo, then its title and a line about it.
+struct EditCard: View {
     let edit: TripEdit
 
     var body: some View {

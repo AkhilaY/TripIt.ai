@@ -15,7 +15,7 @@ struct MainTabs: View {
             NavigationStack(path: $router.library) { LibraryView().withRoutes() }
                 .tabItem { Label("Library", systemImage: "bookmark") }
                 .tag(AppTab.library)
-            NavigationStack(path: $router.discover) { WebScreen(hash: "#/discover", isRoot: true).withRoutes() }
+            NavigationStack(path: $router.discover) { DiscoverView().withRoutes() }
                 .tabItem { Label("Discover", systemImage: "safari") }
                 .tag(AppTab.discover)
             NavigationStack(path: $router.bookings) { BookingsView().withRoutes() }
@@ -111,6 +111,7 @@ struct RouteView: View {
         case .menu(let placeId): MenuView(placeId: placeId)
         case .editPlace(let tripId, let editId, let entryId): EditPlaceView(tripId: tripId, editId: editId, entryId: entryId)
         case .bookings(let tripId): BookingsView(tripId: tripId)
+        case .edit(let tripId, let editId): EditView(tripId: tripId, editId: editId)
         case .web(let hash): WebScreen(hash: hash)
         }
     }

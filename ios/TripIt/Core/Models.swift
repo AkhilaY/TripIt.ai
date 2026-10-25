@@ -431,3 +431,34 @@ struct TripEdits: Codable {
     var stale: Bool
     var refreshing: Bool
 }
+
+/// A well-rated place near you or your trip that isn't saved yet (from Google, picked for your taste).
+struct DiscoverItem: Codable, Identifiable, Hashable {
+    var id: String  // "google:<place id>", the same id the add-a-place search uses
+    var name: String
+    var kindLabel: String?
+    var address: String?
+    var latitude: Double?
+    var longitude: Double?
+    var rating: Double?
+    var ratingCount: Int?
+    var priceLevel: Int?
+    var mapsUrl: String?
+    var photo: String?
+    var distanceM: Int?
+    var award: String?
+    var why: String?
+    var saved: Bool
+}
+
+struct DiscoverArea: Codable, Hashable {
+    var name: String
+    var latitude: Double
+    var longitude: Double
+}
+
+struct DiscoverResult: Codable {
+    var status: String  // ok, disabled, no_area, error
+    var area: DiscoverArea?
+    var items: [DiscoverItem]
+}

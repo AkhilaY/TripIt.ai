@@ -20,6 +20,37 @@ def show(label, value):
     print(f"  {label}: {value}", flush=True)
 
 
+INTERESTING = {"desc", "text", "title", "caption", "imagePost", "imagePostInfo", "images", "displayImages", "urlList",
+               "uniqueId", "imageURL", "itemInfos", "videoData", "authorInfos", "musicInfos", "itemStruct"}
+
+
+def state_paths(html):
+    """Where the embed page keeps its data: the path and a short value for each interesting key."""
+    match = re.search(r'<script[^>]+id="__FRONTITY_CONNECT_STATE__"[^>]*>(.*?)</script>', html, re.S)
+    if not match:
+        return ["no __FRONTITY_CONNECT_STATE__"]
+    try:
+        state = json.loads(match.group(1))
+    except ValueError as e:
+        return [f"state isn't JSON: {e}"]
+    out = []
+
+    def walk(node, path):
+        if len(out) > 60:
+            return
+        if isinstance(node, dict):
+            for k, v in node.items():
+                if k in INTERESTING:
+                    out.append(f"{path}.{k} = {json.dumps(v, ensure_ascii=False)[:160]}")
+                walk(v, f"{path}.{k}")
+        elif isinstance(node, list):
+            for i, v in enumerate(node[:3]):
+                walk(v, f"{path}[{i}]")
+
+    walk(state, "$")
+    return out
+
+
 def page_summary(html):
     if not html:
         return "nothing"
@@ -82,8 +113,26 @@ def check(link):
                 slides = tiktok.embed_slides(html)
                 show("  slides", f"{len(slides)} {[s[:90] for s in slides[:2]]}")
                 show("  caption", (tiktok.embed_caption(html) or "")[:100])
+                if "embed/v2" in embed_url:
+                    for line in state_paths(html):
+                        print(f"      {line}", flush=True)
                 images = sorted({u.split('?')[0][:110] for u in re.findall(r'https://[^"\'\s<>\\]+\.(?:jpe?g|webp|png|image)[^"\'\s<>\\]*', html.replace("\\u002F", "/"))})
                 show("  any images", f"{len(images)} {images[:4]}")
+    if match and link == sys.argv[1]:  # once, to keep the number of requests down
+        # Which browser TikTok treats best: status, size and whether the post data came back, three tries each.
+        from curl_cffi import requests as cffi_requests
+
+        pages = {"video": resolved.replace("/photo/", "/video/"), "embed": f"https://www.tiktok.com/embed/v2/{match.group(2)}"}
+        for target in ("chrome", "safari", "safari_ios", "chrome_android", "edge"):
+            for name, page_url in pages.items():
+                results = []
+                for _ in range(3):
+                    try:
+                        r = cffi_requests.get(page_url, impersonate=target, timeout=20, cookies=COOKIES or None)
+                        results.append(f"{r.status_code}/{len(r.text)}{'+post' if 'imagePost' in r.text else ''}")
+                    except Exception as e:  # noqa: BLE001
+                        results.append(type(e).__name__)
+                show(f"{target} {name}", " ".join(results))
     for candidate in dict.fromkeys([resolved, resolved.replace("/photo/", "/video/"), link]):
         try:
             r = httpx.get(OEMBED["tiktok"], params={"url": candidate, "format": "json"}, timeout=15, follow_redirects=True)

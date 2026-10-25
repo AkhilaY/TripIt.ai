@@ -28,6 +28,7 @@ jobs:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: backend/requirements.txt
+      - run: sudo apt-get install -y --no-install-recommends ffmpeg >/dev/null
       - run: pip install -r requirements.txt && pip install -U "yt-dlp[default,curl-cffi]"
       - run: python ../.github/diagnose/tiktok_check.py $LINKS
 

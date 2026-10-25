@@ -219,7 +219,7 @@ The server key still works as before until the first account is made, so updatin
 
 ### Instagram
 
-Instagram blocks most anonymous downloads. Export cookies for instagram.com from a logged-in browser (a "cookies.txt" extension, Netscape format), then either paste its contents into the `YTDLP_COOKIES` secret (Fly.io) or mount the file and set `YTDLP_COOKIES_FILE` (Docker). Use a secondary account. TikTok and YouTube Shorts usually work without cookies.
+Instagram blocks most anonymous downloads. Export cookies for instagram.com from a logged-in browser (a "cookies.txt" extension, Netscape format), then either paste its contents into the `YTDLP_COOKIES` secret (Fly.io) or mount the file and set `YTDLP_COOKIES_FILE` (Docker). Use a secondary account. TikTok and YouTube Shorts usually work without cookies, but TikTok sometimes holds slideshow (photo) posts back from servers: the importer then tries the post's video address, TikTok's embed page and its cover image in turn. Adding tiktok.com cookies to the same cookies.txt makes TikTok much more willing to serve them.
 
 > Downloading videos may conflict with TikTok's and Instagram's terms of service. The Travel Edit is meant for personal use on your own server.
 

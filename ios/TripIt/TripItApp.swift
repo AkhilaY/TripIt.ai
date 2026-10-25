@@ -34,6 +34,9 @@ struct RootView: View {
     @Environment(Session.self) private var session
     @Environment(Store.self) private var store
     @AppStorage(Appearance.key) private var appearance: Appearance = .system
+    @AppStorage(RootView.pendingJoinKey) private var pendingJoin = ""
+    @AppStorage("seenIntro") private var seenIntro = false
+    static let pendingJoinKey = "pendingJoin"
 
     var body: some View {
         Group {
@@ -41,12 +44,18 @@ struct RootView: View {
             case .checking:
                 ZStack { Theme.background.ignoresSafeArea(); ProgressView() }
             case .signedOut:
-                SignInView()
+                if seenIntro { SignInView() } else { IntroView { withAnimation { seenIntro = true } } }
             case .signedIn:
                 MainTabs()
             }
         }
         .preferredColorScheme(appearance.scheme)
+        // An invite link opened in the app (traveledit://join?token=…): joined once you're signed in.
+        .onOpenURL { url in
+            guard url.scheme == "traveledit", url.host == "join",
+                  let token = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "token" })?.value else { return }
+            pendingJoin = token
+        }
         .task { await session.restore() }
         .onReceive(NotificationCenter.default.publisher(for: API.signedOut)) { _ in
             session.signOutLocally()

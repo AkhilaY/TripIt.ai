@@ -2914,7 +2914,8 @@ def signup(client, email, invite, password="correct horse"):
 
 
 def test_first_account_claims_existing_data_then_invites_only(client):
-    assert client.get("/v1/auth/status").json() == {"accounts": False, "signed_in": False}
+    status = client.get("/v1/auth/status").json()
+    assert status["accounts"] is False and status["signed_in"] is False and status["open_signup"] is False
     import_reel(client, trip=False)  # saved before accounts existed
     client.put("/v1/profile", json={"pace": "slow"}, headers=H)
     bad = client.post("/v1/auth/signup", json={"email": "me@x.com", "password": "correct horse", "invite": "nope"})
@@ -3265,3 +3266,89 @@ def test_packing_list_without_ai_empty_pasted_or_copied(client):
     assert len(copied) == 6 and not any(i["packed"] for i in copied)
     c = client.post("/v1/trips", json={"city": "Rome", "days": 2}, headers=H).json()
     assert client.post(f"/v1/trips/{a['id']}/packing/start", json={"copy_from": c["id"]}, headers=H).status_code == 404
+
+
+def test_planning_a_trip_together(client):
+    owner = signup(client, "a@x.com", "secret")
+    client.patch("/v1/me", json={"name": "Akhila Y"}, headers=owner)
+    trip_id = import_reel(client)["trip_id"]  # as the owner
+    lucali = next(p for p in client.get(f"/v1/trips/{trip_id}", headers=owner).json()["places"] if p["name"] == "Lucali")
+    b = signup(client, "sam@x.com", client.post("/v1/admin/invites", json={}, headers=owner).json()["code"])
+    client.patch("/v1/me", json={"name": "Sam"}, headers=b)
+    assert client.get(f"/v1/trips/{trip_id}", headers=b).status_code == 404  # not invited yet
+
+    link = client.post(f"/v1/trips/{trip_id}/invite", headers=owner).json()
+    assert link["path"] == f"/join/{link['token']}"
+    assert client.post(f"/v1/trips/{trip_id}/invite", headers=owner).json() == link  # the same link each time
+    preview = client.get(f"/v1/join/{link['token']}").json()  # anyone with the link, before signing in
+    assert preview["owner_name"] == "Akhila" and preview["people"] == 1 and preview["city"]
+    joined = client.post(f"/v1/join/{link['token']}", headers=b).json()
+    assert joined["id"] == trip_id and joined["role"] == "editor"
+
+    # Sam sees the trip, its places and the people on it, but none of Akhila's other saves.
+    assert [t["id"] for t in client.get("/v1/trips", headers=b).json()] == [trip_id]
+    trip = client.get(f"/v1/trips/{trip_id}", headers=b).json()
+    assert len(trip["places"]) == 3 and [(m["name"], m["role"], m["you"]) for m in trip["members"]] == [("Akhila Y", "owner", False), ("Sam", "editor", True)]
+    assert client.get("/v1/places", headers=b).json() == []
+    assert client.get(f"/v1/places/{lucali['id']}", headers=b).status_code == 200
+    # Sam adds a place and plans a day; Akhila sees both, and Sam's place stays out of her Library.
+    added = client.post("/v1/places", json={"name": "Joe's Coffee", "trip_id": trip_id}, headers=b).json()["place"]
+    client.post(f"/v1/trips/{trip_id}/add-to-day", json={"place_ids": [lucali["id"]], "day": 1}, headers=b)
+    seen = client.get(f"/v1/trips/{trip_id}", headers=owner).json()
+    assert added["id"] in {p["id"] for p in seen["places"]} and next(p for p in seen["places"] if p["id"] == lucali["id"])["day_number"] == 1
+    assert added["id"] not in {p["id"] for p in client.get("/v1/places", headers=owner).json()}
+    assert seen["member_count"] == 1
+    # Only the owner deletes the trip or removes people; Sam can leave.
+    assert client.delete(f"/v1/trips/{trip_id}", headers=b).status_code == 403
+    owner_id = seen["members"][0]["user_id"]
+    sam_id = seen["members"][1]["user_id"]
+    assert client.delete(f"/v1/trips/{trip_id}/members/{owner_id}", headers=b).status_code == 403
+    assert client.delete(f"/v1/trips/{trip_id}/members/{sam_id}", headers=b).status_code == 204
+    assert client.get(f"/v1/trips/{trip_id}", headers=b).status_code == 404
+    # A link that's been turned off stops working; people already on the trip aren't affected.
+    client.delete(f"/v1/trips/{trip_id}/invite", headers=owner)
+    assert client.post(f"/v1/join/{link['token']}", headers=b).status_code == 404
+    assert client.get(f"/v1/join/{link['token']}").status_code == 404
+
+
+def test_open_signup_and_sign_in_with_apple(client):
+    from app.apple import AppleError
+    from app.main import app
+    owner = signup(client, "a@x.com", "secret")
+    # With open sign-up, anyone can make an account; an invite code is optional.
+    app.state.accounts.open_signup = True
+    assert client.post("/v1/auth/signup", json={"email": "new@x.com", "password": "correct horse", "invite": ""}).status_code == 201
+    assert client.get("/v1/auth/status").json()["open_signup"] is True
+
+    class FakeApple:
+        client_ids, enabled, can_revoke = ["com.example.travel"], True, False
+        async def verify(self, token, nonce=None):
+            if token == "bad":
+                raise AppleError("The sign-in token's signature isn't valid")
+            sub, email = token.split("|")
+            return {"sub": sub, "email": email or None, "email_verified": True, "aud": "com.example.travel"}
+    app.state.apple = FakeApple()
+    client.cookies.clear()
+    assert client.post("/v1/auth/apple", json={"identity_token": "bad"}).status_code == 401
+    # A new Apple ID makes an account (with the name Apple shares the first time) ...
+    r = client.post("/v1/auth/apple", json={"identity_token": "apple.123|xyz@privaterelay.appleid.com", "name": "Sam Lee"})
+    assert r.status_code == 200, r.text
+    me = r.json()["user"]
+    assert me["name"] == "Sam Lee" and me["email"] == "xyz@privaterelay.appleid.com" and me["has_password"] is False
+    # ... and signing in again finds the same account.
+    again = client.post("/v1/auth/apple", json={"identity_token": "apple.123|xyz@privaterelay.appleid.com"}).json()["user"]
+    assert again["id"] == me["id"] and again["name"] == "Sam Lee"
+    # An Apple ID with the verified email of an existing account signs in to that account.
+    linked = client.post("/v1/auth/apple", json={"identity_token": "apple.999|a@x.com"}).json()["user"]
+    assert linked["email"] == "a@x.com" and linked["is_admin"] is True
+    # No email shared at all still works.
+    hidden = client.post("/v1/auth/apple", json={"identity_token": "apple.555|"}).json()
+    assert hidden["user"]["email"] == ""
+    # An Apple-only account deletes itself with a typed confirmation instead of a password.
+    sam = {"Authorization": f"Bearer {client.post('/v1/auth/apple', json={'identity_token': 'apple.123|xyz@privaterelay.appleid.com'}).json()['token']}"}
+    client.cookies.clear()
+    assert client.request("DELETE", "/v1/me", json={}, headers=sam).status_code == 422
+    assert client.request("DELETE", "/v1/me", json={"confirm": "DELETE"}, headers=sam).status_code == 204
+    # Invite-only servers don't make new accounts from Apple sign-ins.
+    app.state.accounts.open_signup = False
+    assert client.post("/v1/auth/apple", json={"identity_token": "apple.777|someone@x.com"}).status_code == 403

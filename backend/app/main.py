@@ -99,7 +99,10 @@ from .models import (
     SearchPlacesRequest,
     TidyRequest,
     TripEvents,
+    InviteLink,
+    JoinPreview,
     ShareLink,
+    TripMember,
     Trip,
     TasteProfile,
     TripDetail,
@@ -112,6 +115,7 @@ from .needs import NeedsService
 from .packing import PackingService
 from .photos import PhotoStore, fetch_bytes as fetch_photo_bytes
 from .packing import parse_lines
+from .apple import AppleError, AppleSignIn
 from .reserve import find_reserve_link
 from .pipeline import Pipeline
 from .monitoring import RateLimit, init_monitoring, report_client_error, report_feedback, set_user
@@ -131,7 +135,10 @@ def build_services(app: FastAPI, settings: Settings) -> None:
     photos = PhotoStore(Path(settings.photos_dir or Path(settings.database_path).parent / "photos"), settings.app_api_key)
     db.photo_url = photos.url
     app.state.db = db
-    app.state.accounts = Accounts(db, settings.app_api_key)
+    app.state.accounts = Accounts(db, settings.app_api_key, open_signup=settings.open_signup)
+    app.state.apple = AppleSignIn([c.strip() for c in (settings.apple_client_ids or settings.apns_topic).split(",")],
+                                  team_id=settings.apple_team_id or settings.apns_team_id, key_id=settings.apple_signin_key_id,
+                                  private_key=settings.apple_signin_key)
     app.state.photos = photos
     app.state.store = JobStore(db)
     app.state.claude = ClaudeService(settings)
@@ -315,6 +322,10 @@ def _trip_or_404(request: Request, trip_id: str) -> TripDetail:
         raise HTTPException(status_code=404, detail="Trip not found")
     trip.closures = tripcheck.closures(trip)
     trip.schedule = [t for d in range(1, trip.day_count + 1) for t in day_times(trip.day_places(d))]
+    if trip.member_count or trip.role == "editor":
+        me = getattr(request.state, "user", None)
+        trip.members = [TripMember(user_id=m["id"], name=m["name"] or m["email"].split("@")[0], role=m["role"],
+                                   you=bool(me and me.id == m["id"])) for m in _db(request).members(trip_id)]
     return trip
 
 
@@ -346,7 +357,8 @@ class PasswordChange(BaseModel):
 
 
 class PasswordCheck(BaseModel):
-    password: str = Field(max_length=200)
+    password: str = Field(default="", max_length=200)
+    confirm: str = Field(default="", max_length=20)  # "delete", for accounts without a password (Sign in with Apple)
 
 
 class InviteRequest(BaseModel):
@@ -359,6 +371,7 @@ class MeOut(BaseModel):
     name: str
     is_admin: bool
     has_import_key: bool = False
+    has_password: bool = True  # False for accounts made with Sign in with Apple
 
 
 class SessionOut(BaseModel):
@@ -367,8 +380,9 @@ class SessionOut(BaseModel):
 
 
 def _me_out(request: Request, user: User) -> MeOut:
-    return MeOut(id=user.id, email=user.email, name=user.name, is_admin=user.is_admin,
-                 has_import_key=_accounts(request).has_import_key(user))
+    accounts = _accounts(request)
+    return MeOut(id=user.id, email="" if user.email.endswith("@users.traveledit.invalid") else user.email, name=user.name,
+                 is_admin=user.is_admin, has_import_key=accounts.has_import_key(user), has_password=accounts.has_password(user))
 
 
 def _start_session(request: Request, response: Response, user: User) -> SessionOut:
@@ -383,7 +397,40 @@ async def auth_status(request: Request) -> dict:
     """Whether accounts exist yet (if not, the first one is made with the server key) and whether you're signed in."""
     accounts = _accounts(request)
     signed_in = accounts.session_user(request.cookies.get(SESSION_COOKIE, "")) is not None
-    return {"accounts": accounts.owner() is not None, "signed_in": signed_in}
+    return {"accounts": accounts.owner() is not None, "signed_in": signed_in, "open_signup": accounts.open_signup,
+            "apple": _apple(request).enabled}
+
+
+class AppleSignInRequest(BaseModel):
+    identity_token: str = Field(max_length=5000)
+    authorization_code: Optional[str] = Field(default=None, max_length=1000)
+    nonce: Optional[str] = Field(default=None, max_length=200)  # the raw nonce whose SHA-256 the app gave Apple
+    name: str = Field(default="", max_length=80)  # Apple only shares it the first time
+
+
+def _apple(request: Request) -> AppleSignIn:
+    return getattr(request.app.state, "apple", None) or AppleSignIn([])
+
+
+@app.post("/v1/auth/apple", response_model=SessionOut)
+async def sign_in_with_apple(body: AppleSignInRequest, request: Request, response: Response) -> SessionOut:
+    """Signs in (or up) with the identity token from Sign in with Apple on the iPhone."""
+    apple = _apple(request)
+    try:
+        claims = await apple.verify(body.identity_token, body.nonce)
+    except AppleError as e:
+        raise HTTPException(status_code=401, detail=str(e))
+    accounts = _accounts(request)
+    verified = claims.get("email_verified") in (True, "true")
+    try:
+        user, _ = accounts.apple_user(claims["sub"], claims.get("email"), verified, body.name)
+    except AuthError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    if body.authorization_code and apple.can_revoke:
+        token = await apple.refresh_token(body.authorization_code, claims["aud"])
+        if token:
+            accounts.set_apple_token(user, token)
+    return _start_session(request, response, user)
 
 
 @app.post("/v1/auth/signup", response_model=SessionOut, status_code=201)
@@ -450,10 +497,17 @@ async def new_import_key(request: Request) -> dict:
 async def delete_account(body: PasswordCheck, request: Request) -> Response:
     """Deletes your account and everything in it: places, folders, trips, bookings and photos."""
     accounts, user = _accounts(request), _me(request)
-    try:
-        accounts.sign_in(user.email, body.password)
-    except AuthError:
-        raise HTTPException(status_code=422, detail="Your password isn't right")
+    if accounts.has_password(user):
+        try:
+            accounts.sign_in(user.email, body.password)
+        except AuthError:
+            raise HTTPException(status_code=422, detail="Your password isn't right")
+    elif body.confirm.strip().lower() != "delete":
+        raise HTTPException(status_code=422, detail="Type DELETE to confirm")
+    apple = _apple(request)
+    token = accounts.apple_token(user)
+    if token and apple.client_ids:
+        await apple.revoke(token, apple.client_ids[0])  # Apple asks apps to end the Apple sign-in too
     library = _library(request)
     if library.photos:
         for place in _db(request).list_places():
@@ -863,7 +917,8 @@ async def set_trip_stops(trip_id: str, body: TripStopsRequest, request: Request)
 
 @app.delete("/v1/trips/{trip_id}", status_code=204, dependencies=[Auth])
 async def delete_trip(trip_id: str, request: Request) -> Response:
-    _trip_or_404(request, trip_id)
+    if _trip_or_404(request, trip_id).role != "owner":
+        raise HTTPException(status_code=403, detail="Only the person who made this trip can delete it. You can leave it instead.")
     _library(request).delete_trip(trip_id)
     return Response(status_code=204)
 
@@ -1283,6 +1338,96 @@ async def unshare_trip(trip_id: str, request: Request) -> Response:
     _trip_or_404(request, trip_id)
     _db(request).update_trip(trip_id, share_token=None)
     return Response(status_code=204)
+
+
+# ---------- Planning together ----------
+
+
+@app.post("/v1/trips/{trip_id}/invite", response_model=InviteLink, dependencies=[Auth])
+async def invite_to_trip(trip_id: str, request: Request) -> InviteLink:
+    """A link that lets people join the trip and plan it with you (everyone on the trip can share it)."""
+    trip = _trip_or_404(request, trip_id)
+    if trip.kind == "local":
+        raise HTTPException(status_code=422, detail="Your home city isn't a trip to share")
+    db = _db(request)
+    token = db.invite_token(trip_id)
+    if not token:
+        token = secrets.token_urlsafe(18)
+        db.set_invite_token(trip_id, token)
+    return InviteLink(token=token, path=f"/join/{token}")
+
+
+@app.delete("/v1/trips/{trip_id}/invite", status_code=204, dependencies=[Auth])
+async def reset_trip_invite(trip_id: str, request: Request) -> Response:
+    """Turns the invite link off (people already on the trip stay)."""
+    if _trip_or_404(request, trip_id).role != "owner":
+        raise HTTPException(status_code=403, detail="Only the trip's owner can turn the invite link off")
+    _db(request).set_invite_token(trip_id, None)
+    return Response(status_code=204)
+
+
+def _invite_or_404(request: Request, token: str):
+    row = _db(request).trip_by_invite(token)
+    if row is None:
+        raise HTTPException(status_code=404, detail="This invite link isn't working any more. Ask for a new one.")
+    return row
+
+
+@app.get("/v1/join/{token}", response_model=JoinPreview)
+async def join_preview(token: str, request: Request) -> JoinPreview:
+    """Whose trip an invite is for, before you sign in. Just the name, city and dates."""
+    row = _invite_or_404(request, token)
+    owner = _accounts(request).get_user(row["user_id"]) if row["user_id"] else None
+    return JoinPreview(trip_name=row["name"], city=row["city"], start_date=row["start_date"], day_count=row["day_count"] or 0,
+                       owner_name=(owner.name or owner.email.split("@")[0]).split(" ")[0] if owner else "A friend",
+                       people=1 + (row["member_count"] or 0))
+
+
+@app.post("/v1/join/{token}", response_model=Trip, dependencies=[Auth])
+async def join_trip(token: str, request: Request) -> Trip:
+    """Joins the trip an invite is for: it shows up in your Trips and you can plan it together."""
+    row = _invite_or_404(request, token)
+    me = _me(request)
+    db = _db(request)
+    if row["user_id"] != me.id and db.add_member(row["id"], me.id):
+        await _tell_owner(request, row, f"{(me.name or me.email.split('@')[0]).split(' ')[0]} joined {row['name']}",
+                          "You're planning it together now.", f"/#/trip/{row['id']}")
+    trip = db.get_trip(row["id"])
+    if trip is None:
+        raise HTTPException(status_code=404, detail="Trip not found")
+    return trip
+
+
+async def _tell_owner(request: Request, row, title: str, body: str, url: str) -> None:
+    """A notification on the trip owner's devices (best effort)."""
+    if not row["user_id"]:
+        return
+    reset = CURRENT_USER.set(row["user_id"])
+    try:
+        await request.app.state.push.send_all({"title": title, "body": body, "url": url, "tag": f"join-{row['id']}"})
+    except Exception as e:  # noqa: BLE001 - a notification must never break joining
+        log.warning("Couldn't notify the trip owner: %s", e)
+    finally:
+        CURRENT_USER.reset(reset)
+
+
+@app.delete("/v1/trips/{trip_id}/members/{user_id}", status_code=204, dependencies=[Auth])
+async def remove_trip_member(trip_id: str, user_id: str, request: Request) -> Response:
+    """The owner removes someone, or you leave a trip you were invited to."""
+    trip = _trip_or_404(request, trip_id)
+    me = _me(request)
+    if user_id != me.id and trip.role != "owner":
+        raise HTTPException(status_code=403, detail="Only the trip's owner can remove people")
+    if user_id == _db(request).trip_owner(trip_id):
+        raise HTTPException(status_code=422, detail="The owner can't leave their own trip")
+    _db(request).remove_member(trip_id, user_id)
+    return Response(status_code=204)
+
+
+@app.get("/join/{token}", include_in_schema=False)
+async def join_page(token: str) -> Response:
+    """Invite links open the app's join screen."""
+    return RedirectResponse(f"/#/join/{quote(token)}", status_code=302)
 
 
 def _shared_or_404(request: Request, token: str) -> TripDetail:

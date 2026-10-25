@@ -22,6 +22,17 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>Travel Edit links</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>traveledit</string>
+			</array>
+		</dict>
+	</array>
 	<key>UIAppFonts</key>
 	<array>
 		<string>CormorantGaramond.ttf</string>

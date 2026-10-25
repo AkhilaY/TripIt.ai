@@ -202,6 +202,14 @@ CREATE TABLE IF NOT EXISTS trip_events (
 
 -- A trip's stops: saved places linked to it, with where they sit in its itinerary. A place can be in
 -- any number of trips (and folders); its own details (stars, notes, hours) are shared by all of them.
+CREATE TABLE IF NOT EXISTS trip_members (
+    trip_id TEXT NOT NULL REFERENCES trips(id) ON DELETE CASCADE,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    role TEXT NOT NULL DEFAULT 'editor',
+    joined_at TEXT NOT NULL,
+    PRIMARY KEY (trip_id, user_id)
+);
+
 CREATE TABLE IF NOT EXISTS trip_places (
     trip_id TEXT NOT NULL REFERENCES trips(id) ON DELETE CASCADE,
     place_id TEXT NOT NULL REFERENCES places(id) ON DELETE CASCADE,
@@ -284,8 +292,10 @@ MIGRATIONS = {
         ("saved", "INTEGER NOT NULL DEFAULT 1"),  # 0 for a place an AI plan suggested that you haven't kept
         ("user_id", "TEXT"),
     ],
-    "trips": [("share_token", "TEXT"), ("kind", "TEXT NOT NULL DEFAULT 'trip'"), ("user_id", "TEXT"), ("stops", "TEXT")],
+    "trips": [("share_token", "TEXT"), ("kind", "TEXT NOT NULL DEFAULT 'trip'"), ("user_id", "TEXT"), ("stops", "TEXT"),
+              ("invite_token", "TEXT")],
     "folders": [("user_id", "TEXT")],
+    "users": [("apple_sub", "TEXT"), ("apple_token", "TEXT")],
     "reels": [("user_id", "TEXT")],
     "jobs": [("user_id", "TEXT")],
     "push_subscriptions": [("user_id", "TEXT")],
@@ -345,6 +355,30 @@ def _mine(alias: str = "") -> tuple[str, tuple]:
     """" AND <alias.>user_id = ?" (and its parameter) when a user is signed in, else nothing."""
     uid = _uid()
     return (f" AND {alias + '.' if alias else ''}user_id = ?", (uid,)) if uid else ("", ())
+
+
+MEMBER_COUNT = "(SELECT COUNT(*) FROM trip_members WHERE trip_members.trip_id = trips.id) AS member_count"
+
+
+def _trips_i_can_open(alias: str = "", column: str = "id") -> tuple[str, tuple]:
+    """Trips you own or were invited to plan: " AND (<trip id column> is one of them)"."""
+    uid = _uid()
+    if not uid:
+        return "", ()
+    col = f"{alias + '.' if alias else ''}{column}"
+    return (f" AND ({col} IN (SELECT id FROM trips WHERE user_id = ?) OR {col} IN (SELECT trip_id FROM trip_members WHERE user_id = ?))",
+            (uid, uid))
+
+
+def _places_i_can_open(alias: str = "p") -> tuple[str, tuple]:
+    """Your own places, and places on trips you plan with others (someone else may have added them)."""
+    uid = _uid()
+    if not uid:
+        return "", ()
+    a = alias + "." if alias else ""
+    return (f" AND ({a}user_id = ? OR {a}id IN (SELECT place_id FROM trip_places WHERE trip_id IN "
+            "(SELECT id FROM trips WHERE user_id = ?) OR trip_id IN (SELECT trip_id FROM trip_members WHERE user_id = ?)))",
+            (uid, uid, uid))
 
 
 PLACE_SELECT = ("SELECT p.*, (SELECT group_concat(m.reel_id) FROM place_mentions m WHERE m.place_id = p.id) AS mention_reels, "
@@ -489,7 +523,9 @@ class Database:
         if not fields:
             return
         assignments = ", ".join(f"{k} = ?" for k in fields)
-        mine, mine_args = _mine() if table in OWNED_TABLES else ("", ())
+        # Trips and their places can be changed by everyone planning the trip; the rest only by their owner.
+        scope = {"trips": _trips_i_can_open, "places": lambda: _places_i_can_open("")}.get(table)
+        mine, mine_args = scope() if scope else _mine() if table in OWNED_TABLES else ("", ())
         self._exec(
             f"UPDATE {table} SET {assignments} WHERE id = ?{mine}",
             [_encode(k, v) for k, v in fields.items()] + [row_id, *mine_args],
@@ -506,8 +542,8 @@ class Database:
         return self.get_trip(trip_id)
 
     def list_trips(self) -> list[Trip]:
-        mine, args = _mine()
-        rows = self._rows(f"SELECT * FROM trips WHERE 1{mine} ORDER BY created_at DESC", args)
+        mine, args = _trips_i_can_open()
+        rows = self._rows(f"SELECT *, {MEMBER_COUNT} FROM trips WHERE 1{mine} ORDER BY created_at DESC", args)
         stats = self._rows(
             "SELECT tp.trip_id, p.category, COUNT(*) AS n, SUM(p.latitude IS NOT NULL) AS mapped "
             "FROM trip_places tp JOIN places p ON p.id = tp.place_id GROUP BY tp.trip_id, p.category"
@@ -519,8 +555,8 @@ class Database:
         return [self._trip(r, by_trip.get(r["id"], []), covers.get(r["id"])) for r in rows]
 
     def get_trip(self, trip_id: str) -> Optional[Trip]:
-        mine, args = _mine()
-        rows = self._rows(f"SELECT * FROM trips WHERE id = ?{mine}", (trip_id, *args))
+        mine, args = _trips_i_can_open()
+        rows = self._rows(f"SELECT *, {MEMBER_COUNT} FROM trips WHERE id = ?{mine}", (trip_id, *args))
         if not rows:
             return None
         stats = self._rows(
@@ -536,6 +572,40 @@ class Database:
             return None
         return TripDetail(**trip.model_dump(), places=self.list_places(trip_id), reels=self.list_reels(trip_id),
                           bookings=self.list_bookings(trip_id))
+
+    # ---------- Planning together ----------
+
+    def trip_owner(self, trip_id: str) -> Optional[str]:
+        rows = self._rows("SELECT user_id FROM trips WHERE id = ?", (trip_id,))
+        return rows[0]["user_id"] if rows else None
+
+    def trip_by_invite(self, token: str) -> Optional[sqlite3.Row]:
+        """The trip an invite link is for, whoever owns it (only the token is checked)."""
+        rows = self._rows("SELECT *, (SELECT COUNT(*) FROM trip_members m WHERE m.trip_id = trips.id) AS member_count "
+                          "FROM trips WHERE invite_token = ?", (token,)) if token else []
+        return rows[0] if rows else None
+
+    def set_invite_token(self, trip_id: str, token: Optional[str]) -> None:
+        self._exec("UPDATE trips SET invite_token = ? WHERE id = ?", (token, trip_id))
+
+    def invite_token(self, trip_id: str) -> Optional[str]:
+        rows = self._rows("SELECT invite_token FROM trips WHERE id = ?", (trip_id,))
+        return rows[0]["invite_token"] if rows else None
+
+    def add_member(self, trip_id: str, user_id: str) -> bool:
+        cur = self._exec("INSERT OR IGNORE INTO trip_members (trip_id, user_id, role, joined_at) VALUES (?, ?, 'editor', ?)",
+                         (trip_id, user_id, now().isoformat()))
+        return cur.rowcount > 0
+
+    def remove_member(self, trip_id: str, user_id: str) -> None:
+        self._exec("DELETE FROM trip_members WHERE trip_id = ? AND user_id = ?", (trip_id, user_id))
+
+    def members(self, trip_id: str) -> list[dict]:
+        """The owner, then everyone who joined, oldest first."""
+        owner = self._rows("SELECT u.id, u.name, u.email FROM trips t JOIN users u ON u.id = t.user_id WHERE t.id = ?", (trip_id,))
+        joined = self._rows("SELECT u.id, u.name, u.email FROM trip_members m JOIN users u ON u.id = m.user_id "
+                            "WHERE m.trip_id = ? ORDER BY m.joined_at", (trip_id,))
+        return [{**dict(r), "role": "owner"} for r in owner] + [{**dict(r), "role": "editor"} for r in joined]
 
     def find_trip_by_city(self, city: str) -> Optional[Trip]:
         key = normalize(city)
@@ -613,6 +683,8 @@ class Database:
             cover_photo=cover,
             share_token=row["share_token"],
             stops=trip_stops(row),
+            role="editor" if _uid() and row["user_id"] and row["user_id"] != _uid() else "owner",
+            member_count=row["member_count"] if "member_count" in row.keys() else 0,
         )
 
     # ---------- Places ----------
@@ -635,19 +707,21 @@ class Database:
 
     def get_place(self, place_id: str, trip_id: Optional[str] = None) -> Optional[Place]:
         """The place itself, or as a stop on a trip (None if it isn't on that trip)."""
-        mine, args = _mine("p")
         if trip_id:
+            mine, args = _trips_i_can_open("tp", "trip_id")
             rows = self._rows(f"{TRIP_PLACE_SELECT} WHERE p.id = ? AND tp.trip_id = ?{mine}", (place_id, trip_id, *args))
         else:
+            mine, args = _places_i_can_open("p")
             rows = self._rows(f"{PLACE_SELECT} WHERE p.id = ?{mine}", (place_id, *args))
         return self._place(rows[0]) if rows else None
 
     def list_places(self, trip_id: Optional[str] = None, saved_only: bool = False) -> list[Place]:
         """A trip's stops, or every place (saved_only: leave out AI suggestions you haven't kept)."""
-        mine, args = _mine("p")
         if trip_id:
+            mine, args = _trips_i_can_open("tp", "trip_id")
             rows = self._rows(f"{TRIP_PLACE_SELECT} WHERE tp.trip_id = ?{mine} ORDER BY tp.added_at, p.created_at, p.rowid", (trip_id, *args))
         else:
+            mine, args = _mine("p")  # your Library: only your own places, never a travel partner's
             rows = self._rows(f"{PLACE_SELECT} WHERE 1{' AND p.saved = 1' if saved_only else ''}{mine} ORDER BY p.created_at, p.rowid", args)
         return [self._place(r) for r in rows]
 
@@ -853,7 +927,7 @@ class Database:
         return [Booking(**dict(r)) for r in rows]
 
     def list_all_bookings(self) -> list[BookingListItem]:
-        mine, args = _mine("t")
+        mine, args = _trips_i_can_open("t")
         rows = self._rows("SELECT b.*, t.name AS trip_name, t.kind AS trip_kind FROM bookings b JOIN trips t ON t.id = b.trip_id "
                           f"WHERE 1{mine} "
                           "ORDER BY COALESCE(b.start_at, '9999'), b.created_at, b.rowid", args)

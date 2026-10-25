@@ -112,12 +112,24 @@ struct TripView: View {
                     Button { router.push(.web(hash: "#/events/\(trip.id)")) } label: { Label("What's on", systemImage: "music.mic") }
                 }
             }
+            if !trip.isLocal {
+                Section {
+                    if (trip.members ?? []).count > 1 {
+                        Button { sheet = .people } label: { Label("People on this trip", systemImage: "person.2") }
+                    }
+                    Button { Task { await TripInvite.share(trip, store: store) } } label: { Label("Invite someone to plan with you", systemImage: "person.badge.plus") }
+                }
+            }
             Section {
                 Button { sheet = .details } label: { Label(trip.isLocal ? "Rename" : "Name and dates", systemImage: "pencil") }
                 if !trip.isLocal {
                     Button { sheet = .route } label: { Label("Edit route", systemImage: "point.topleft.down.to.point.bottomright.curvepath") }
                 }
-                Button(role: .destructive) { confirmDelete = true } label: { Label("Delete trip", systemImage: "trash") }
+                if trip.isOwner {
+                    Button(role: .destructive) { confirmDelete = true } label: { Label("Delete trip", systemImage: "trash") }
+                } else {
+                    Button(role: .destructive) { sheet = .people } label: { Label("Leave trip", systemImage: "rectangle.portrait.and.arrow.right") }
+                }
             }
         } label: {
             Image(systemName: "ellipsis.circle")
@@ -155,7 +167,7 @@ struct TripView: View {
 }
 
 enum TripSheet: String, Identifiable {
-    case plan, tidy, details, route
+    case plan, tidy, details, route, people
     var id: String { rawValue }
 
     @MainActor @ViewBuilder func view(trip: TripDetail) -> some View {
@@ -164,6 +176,7 @@ enum TripSheet: String, Identifiable {
         case .tidy: TidySheet(trip: trip)
         case .details: TripDetailsSheet(trip: trip)
         case .route: RouteSheet(trip: trip)
+        case .people: PeopleSheet(trip: trip)
         }
     }
 }

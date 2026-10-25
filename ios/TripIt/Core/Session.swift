@@ -34,6 +34,12 @@ final class Session {
         start(out)
     }
 
+    func signInWithApple(token: String, code: String?, nonce: String, name: String) async throws {
+        let out: SessionOut = try await API.shared.post("/v1/auth/apple",
+                                                        ["identity_token": token, "authorization_code": code, "nonce": nonce, "name": name])
+        start(out)
+    }
+
     func setName(_ name: String) async throws {
         me = try await API.shared.patch("/v1/me", ["name": name.trimmingCharacters(in: .whitespaces)], as: Me.self)
     }

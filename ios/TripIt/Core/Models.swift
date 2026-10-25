@@ -156,8 +156,28 @@ struct Trip: Codable, Identifiable, Hashable {
     var coverPhoto: PlacePhoto?
     var shareToken: String?
     var stops: [TripStop]?
+    var role: String?
+    var memberCount: Int?
 
     var isLocal: Bool { kind == "local" }
+    /// Someone else's trip you were invited to plan, or yours with people on it.
+    var isShared: Bool { role == "editor" || (memberCount ?? 0) > 0 }
+}
+
+/// Someone planning a trip: its owner, or a person they invited.
+struct TripMember: Codable, Hashable, Identifiable {
+    var userId: String
+    var name: String
+    var role: String
+    var you: Bool
+    var id: String { userId }
+
+    var initials: String { name.split(separator: " ").compactMap(\.first).prefix(2).map(String.init).joined().uppercased() }
+}
+
+struct InviteLink: Codable {
+    var token: String
+    var path: String
 }
 
 struct TripDetail: Codable, Identifiable, Hashable {
@@ -179,6 +199,10 @@ struct TripDetail: Codable, Identifiable, Hashable {
     var stops: [TripStop]?
     var closures: [TripClosure]?
     var schedule: [ScheduledStop]?
+    var role: String?
+    var members: [TripMember]?
+
+    var isOwner: Bool { role != "editor" }
 
     var isLocal: Bool { kind == "local" }
 
@@ -248,6 +272,7 @@ struct Me: Codable, Hashable {
     var name: String
     var isAdmin: Bool
     var hasImportKey: Bool
+    var hasPassword: Bool?  // false for accounts made with Sign in with Apple
 }
 
 struct SessionOut: Codable {

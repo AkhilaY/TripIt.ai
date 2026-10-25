@@ -199,6 +199,7 @@ function route() {
   if (!parts.length || parts[0] === 'home') return { name: 'home', params };
   if (parts[0] === 'library') return { name: 'trips', params };
   if (parts[0] === 'city' && parts[1]) return { name: 'city', id: decodeURIComponent(parts[1]), params };
+  if (parts[0] === 'join' && parts[1]) return { name: 'join', id: parts[1], params };
   if (parts[0] === 'trip' && parts[1] && parts[2] === 'bookings') return { name: 'bookings', params: new URLSearchParams(`trip=${parts[1]}`) };
   if (parts[0] === 'settings') return { name: 'profile', params };
   if (parts[0] === 'setup') return { name: 'signin', params };
@@ -2583,7 +2584,7 @@ function routeCard(t) {
 function tripRowHtml(t) {
   const cover = t.cover_photo ? `<img class="sthumb" style="--sz:56px" src="${esc(photoUrl(t.cover_photo, 180))}" alt="" loading="lazy">` : `<span class="sthumb ph" style="--sz:56px">${ICON.plane}</span>`;
   return `<a class="trow" href="#/trip/${t.id}">${cover}<span class="m"><span class="t serif">${esc(t.name)}</span>
-    <span class="s">${esc([tripRange(t), tripStops(t).join(' → ')].filter(Boolean).join(' · '))}</span></span>${ICON.chev}</a>`;
+    <span class="s">${esc([tripRange(t), tripStops(t).join(' → '), t.member_count || t.role === 'editor' ? 'Shared' : ''].filter(Boolean).join(' · '))}</span></span>${ICON.chev}</a>`;
 }
 function cityTile(c, trip) {
   const photos = c.places.filter((p) => p.photos && p.photos[0]).slice(0, 2);
@@ -2686,7 +2687,7 @@ const VIEWS = {
     const head = `${navbar(trip.name, { back: '#/library', backLabel: 'Library', right })}
       <h1 class="largetitle" data-anchor>${esc(trip.name)}</h1>
       <div class="subtitle"><span>${esc(meta)}</span><span class="tiles-inline" aria-hidden="true">${cats.slice(0, 6).map((c) => catTile(c, 'sm')).join('')}</span>
-        ${trip.share_token ? `<button class="chip-shared" data-act="sharetrip" data-id="${trip.id}">${ICON.link}Shared</button>` : ''}</div>${seg}`;
+        ${trip.share_token ? `<button class="chip-shared" data-act="sharetrip" data-id="${trip.id}">${ICON.link}Shared</button>` : ''}</div>${local ? '' : peopleStrip(trip)}${seg}`;
 
     if (mode === 'places' && local) return head + placesList(trip);
     if (mode === 'places') {
@@ -3109,6 +3110,8 @@ const VIEWS = {
         <span class="s">Removes your account and everything you saved</span></span></button></div></div>` : ''}`;
   },
 
+  async join(r) { return joinView(r); },
+
   async signin(r) {
     const status = await api('/v1/auth/status').catch(() => ({ accounts: true }));
     const first = !status.accounts;
@@ -3122,18 +3125,19 @@ const VIEWS = {
       ? field('email', 'Email', 'email', 'username', 'inputmode="email" autocapitalize="off"') + field('password', 'Password', 'password', 'current-password')
       : field('email', 'Email', 'email', 'username', 'inputmode="email" autocapitalize="off"')
         + field('password', 'Password', 'password', 'new-password', 'minlength="8" placeholder="At least 8 characters"')
-        + field('invite', first ? 'Server key' : 'Invite code', first ? 'password' : 'text', 'off', `autocapitalize="characters" ${first ? '' : 'placeholder="ABCD-2345"'}`);
+        + (first || !status.open_signup ? field('invite', first ? 'Server key' : 'Invite code', first ? 'password' : 'text', 'off', `autocapitalize="characters" ${first ? '' : 'placeholder="ABCD-2345"'}`) : '');
     const lead = first
       ? 'Create the first account. Use the server key (APP_API_KEY) as the code: everything already saved in The Travel Edit becomes yours, and you can invite others after.'
-      : mode === 'join' ? 'The Travel Edit is invite-only for now. Enter the code you were given.' : 'Your places, folders and trips, on any device.';
+      : mode === 'join' ? (status.open_signup ? 'Every place you save from TikTok and Instagram, ready for your next trip.' : 'The Travel Edit is invite-only for now. Enter the code you were given.')
+        : 'Your places, lists and trips, on any device.';
     return `<div class="authpage">
-      <div class="authmark" aria-hidden="true">${ICON.bookmark}</div>
-      <h1 class="authtitle">${first ? 'Set up The Travel Edit' : mode === 'join' ? 'Join The Travel Edit' : 'Welcome back'}</h1>
+      <img class="authlogo light" src="/icons/wordmark.png" alt="The Travel Edit"><img class="authlogo dark" src="/icons/wordmark-dark.png" alt="">
+      <h1 class="authtitle">${first ? 'Set up The Travel Edit' : mode === 'join' ? 'Create your account' : 'Welcome back'}</h1>
       <p class="authlead">${lead}</p>${seg}
       <form class="section" data-form="${mode === 'in' ? 'signin' : 'signup'}" novalidate><div class="group">${fields}</div>
         <div class="section-f autherr" id="auth-error" role="alert"></div>
         <button class="btn wide" type="submit">${mode === 'in' ? 'Sign in' : 'Create account'}</button>
-        ${mode === 'in' ? '<p class="section-f authhelp">Forgot your password? Ask whoever invited you to reset it.</p>' : ''}
+        ${mode === 'in' ? '<p class="section-f authhelp">Made your account with Apple on your iPhone? Sign in there; the website uses an email and password.</p>' : ''}
       </form></div>`;
   },
 
@@ -4402,6 +4406,90 @@ async function shareTrip(trip) {
   });
 }
 
+// ---------- Planning together ----------
+
+const JOIN_KEY = 'tripit.join';
+const initials = (name) => (name || '?').split(/\s+/).map((w) => w[0]).join('').slice(0, 2).toUpperCase();
+
+/** Who's planning the trip, and a way to invite someone. */
+function peopleStrip(t) {
+  const people = t.members || [];
+  if (people.length < 2) {
+    return t.role === 'owner' ? `<div class="people"><button class="tbtn" data-act="tripinvite" data-id="${t.id}">${ICON.person}Plan it together · Invite</button></div>` : '';
+  }
+  const names = people.map((m) => (m.you ? 'You' : m.name.split(' ')[0]));
+  return `<div class="people"><button class="faces" data-act="tripmembers" data-id="${t.id}" aria-label="People on this trip: ${esc(names.join(', '))}">
+      ${people.slice(0, 4).map((m) => `<span class="face${m.you ? ' you' : ''}">${esc(initials(m.name))}</span>`).join('')}
+      <span class="who">${esc(names.length > 3 ? `${names.slice(0, 2).join(', ')} and ${names.length - 2} more` : names.join(names.length === 2 ? ' and ' : ', '))}</span></button>
+    <button class="tbtn" data-act="tripinvite" data-id="${t.id}">${ICON.plus}Invite</button></div>`;
+}
+
+/** Gets the trip's invite link, then shares it from a second tap (Safari only opens the share sheet from a tap). */
+async function inviteSheet(t) {
+  let link;
+  try { link = await api(`/v1/trips/${t.id}/invite`, { method: 'POST' }); } catch (e) { toast(e.message, true); return; }
+  const url = `${location.origin}${link.path}`;
+  const text = `Plan ${t.name} with me on The Travel Edit`;
+  openSheet({
+    type: 'actions', title: `Anyone with this link can join ${t.name} and add places, change the plan and add bookings. Your other saves stay private.`,
+    actions: [
+      { label: 'Share invite link', run: () => { if (navigator.share) navigator.share({ title: t.name, text, url }).catch((e) => { if (e.name !== 'AbortError') copy(url); }); else copy(url); } },
+      { label: 'Copy link', run: () => copy(url) },
+      ...(t.role === 'owner' ? [{ label: 'Turn off this link', destructive: true, run: async () => {
+        await api(`/v1/trips/${t.id}/invite`, { method: 'DELETE' }); toast('The old link no longer works');
+      } }] : []),
+    ],
+  });
+}
+
+function peopleSheet(t) {
+  const people = t.members || [];
+  openSheet({
+    type: 'actions', title: `Planning ${t.name}: ${people.map((m) => (m.you ? 'you' : m.name)).join(', ')}`,
+    actions: [
+      { label: 'Invite someone else', run: () => inviteSheet(t) },
+      ...(t.role === 'owner' ? people.filter((m) => !m.you).map((m) => ({ label: `Remove ${m.name}`, destructive: true, run: async () => {
+        await api(`/v1/trips/${t.id}/members/${m.user_id}`, { method: 'DELETE' });
+        S.trip[t.id] = await api(`/v1/trips/${t.id}`); fetchedAt.trips = 0; toast(`${m.name} was removed`); render();
+      } })) : [{ label: 'Leave trip', destructive: true, run: () => leaveTrip(t) }]),
+    ],
+  });
+}
+
+async function leaveTrip(t) {
+  const me = (t.members || []).find((m) => m.you);
+  if (!me) return;
+  await api(`/v1/trips/${t.id}/members/${me.user_id}`, { method: 'DELETE' });
+  delete S.trip[t.id];
+  if (S.trips) S.trips = S.trips.filter((x) => x.id !== t.id);
+  fetchedAt.trips = 0;
+  toast(`You left ${t.name}`);
+  go('#/library');
+}
+
+/** An invite link: whose trip it is, then join (signing in first if needed). */
+async function joinView(r) {
+  let preview;
+  try { preview = await api(`/v1/join/${encodeURIComponent(r.id)}`); } catch (e) {
+    return `<div class="authpage"><div class="authmark" aria-hidden="true">${ICON.person}</div><h1 class="authtitle">This invite isn’t working</h1>
+      <p class="authlead">${esc(e.message)}</p><a class="btn wide" href="#/">Open The Travel Edit</a></div>`;
+  }
+  if (S.me === undefined) S.me = await api('/v1/me').catch(() => null);
+  const signedIn = !!S.me || !!getKey();
+  const when = preview.start_date ? `${shortDay(preview.start_date)}${preview.day_count > 1 ? ` · ${plural(preview.day_count, 'day')}` : ''}` : preview.day_count ? plural(preview.day_count, 'day') : '';
+  const iphone = /iPhone|iPad/.test(navigator.userAgent) && !EMBED;
+  return `<div class="authpage join">
+    <div class="authmark" aria-hidden="true">${ICON.person}</div>
+    <p class="eyebrow">${esc(preview.owner_name)} invited you</p>
+    <h1 class="authtitle">${esc(preview.trip_name)}</h1>
+    <p class="authlead">${esc([preview.city, when, preview.people > 1 ? `${preview.people} people planning` : ''].filter(Boolean).join(' · '))}</p>
+    <p class="authlead">Join to see the places and the plan, add your own and change the days together. Your other saves stay yours.</p>
+    ${signedIn ? `<button class="btn wide" data-act="jointrip" data-token="${esc(r.id)}">Join the trip</button>`
+      : `${iphone ? `<a class="btn wide" href="traveledit://join?token=${encodeURIComponent(r.id)}">Open in the app</a>` : ''}
+        <button class="btn wide${iphone ? ' tint' : ''}" data-act="joinsignin" data-token="${esc(r.id)}">Sign in or create an account to join</button>`}
+  </div>`;
+}
+
 function shareMenu(t) {
   const url = t.share_token ? `${location.origin}/s/${t.share_token}` : null;
   const actions = [
@@ -4706,6 +4794,12 @@ async function onAction(act, el) {
         } },
       ];
       if (t.day_count) actions.push({ label: 'Clear itinerary', destructive: true, run: async () => { S.trip[t.id] = await api(`/v1/trips/${t.id}/plan`, { method: 'DELETE' }); fetchedAt.trips = 0; render(); } });
+      actions.splice(1, 0, { label: t.members && t.members.length > 1 ? 'People on this trip' : 'Invite someone to plan with you', run: () => (t.members && t.members.length > 1 ? peopleSheet(t) : inviteSheet(t)) });
+      if (t.role === 'editor') {
+        actions.push({ label: 'Leave trip', destructive: true, run: () => leaveTrip(t) });
+        openSheet({ type: 'actions', actions });
+        return;
+      }
       actions.push({ label: 'Delete trip', destructive: true, run: () => openSheet({
         type: 'actions', title: `Delete ${t.name} and its ${plural(t.places.length, 'place')}?`,
         actions: [{ label: 'Delete trip', destructive: true, run: async () => {
@@ -4722,6 +4816,20 @@ async function onAction(act, el) {
     }
     case 'plan': planSheet(S.trip[el.dataset.id]); return;
     case 'sharetrip': shareMenu(S.trip[el.dataset.id]); return;
+    case 'tripinvite': await inviteSheet(S.trip[el.dataset.id]); return;
+    case 'tripmembers': peopleSheet(S.trip[el.dataset.id]); return;
+    case 'joinsignin': try { sessionStorage.setItem(JOIN_KEY, el.dataset.token); } catch { /* private mode */ } go('#/signin?mode=join'); return;
+    case 'jointrip': {
+      el.disabled = true;
+      try {
+        const t = await api(`/v1/join/${encodeURIComponent(el.dataset.token)}`, { method: 'POST' });
+        try { sessionStorage.removeItem(JOIN_KEY); } catch { /* fine */ }
+        fetchedAt.trips = 0; S.trips = null;
+        toast(`You’re planning ${t.name} together`);
+        location.replace(`#/trip/${t.id}`);
+      } catch (e) { el.disabled = false; toast(e.message, true); }
+      return;
+    }
     case 'editday': S.editDay = !S.editDay; render(); return;
     case 'mode': setTravelMode(el.dataset.mode); render(); return;
     case 'dismissinvite': try { localStorage.setItem('tripit.tasteInvite', 'no'); } catch { /* fine */ } render(); return;
@@ -5760,7 +5868,8 @@ async function start() {
   try { await loadJobs(); } catch { /* shown by the views */ }
   schedulePoll();
   flushOutbox();
-  if (route().name === 'signin') location.hash = '#/';
+  const pendingJoin = (() => { try { return sessionStorage.getItem(JOIN_KEY); } catch { return null; } })();
+  if (route().name === 'signin') location.hash = pendingJoin ? `#/join/${pendingJoin}` : '#/';
   else render();
   setTimeout(() => { if (S.trips) autoSaveToday(); }, 3000);
 }
@@ -5794,7 +5903,8 @@ hydrateIcons(document.getElementById('netpill'));
     S.config = await api('/v1/config');
     configureMaps({ googleMapsKey: S.config.google_maps_key });
   } catch (e) {
-    if (e.status === 401) { location.hash = '#/signin'; render(); return; }
+    // Signed out: an invite link still shows whose trip it is (and offers to sign in); everything else asks you to sign in.
+    if (e.status === 401) { if (route().name !== 'join') location.hash = '#/signin'; render(); return; }
   }
   await start();
 })();

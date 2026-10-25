@@ -5,6 +5,7 @@ struct MainTabs: View {
     @Environment(Store.self) private var store
     @Environment(Session.self) private var session
     @Environment(\.scenePhase) private var scenePhase
+    @AppStorage(RootView.pendingJoinKey) private var pendingJoin = ""
 
     var body: some View {
         TabView(selection: $router.tab) {
@@ -39,6 +40,12 @@ struct MainTabs: View {
             SaveReviewSheet(job: job)
                 .environment(router).environment(store)
                 .modifier(ToastOverlay())
+        }
+        .task(id: pendingJoin) {
+            guard !pendingJoin.isEmpty else { return }
+            let token = pendingJoin
+            pendingJoin = ""
+            await TripInvite.join(token, store: store, router: router)
         }
         .task {
             if !store.loaded { await store.refresh() }

@@ -377,7 +377,7 @@ struct TripRow: View {
             TripCover(trip: trip, size: 44)
             VStack(alignment: .leading, spacing: 2) {
                 Text(trip.name).font(Theme.serif(17)).foregroundStyle(Theme.label).lineLimit(1)
-                Text([trip.dateRange, trip.cities.joined(separator: " → ")].compactMap { $0?.isEmpty == false ? $0 : nil }.joined(separator: " · "))
+                Text([trip.dateRange, trip.cities.joined(separator: " → "), trip.isShared ? "Shared" : nil].compactMap { $0?.isEmpty == false ? $0 : nil }.joined(separator: " · "))
                     .font(.footnote).foregroundStyle(Theme.secondary).lineLimit(1)
             }
             Spacer(minLength: 0)

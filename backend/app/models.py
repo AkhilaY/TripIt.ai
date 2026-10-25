@@ -660,6 +660,25 @@ class Trip(BaseModel):
     cover_photo: Optional[PlacePhoto] = None
     share_token: Optional[str] = None  # set while a public link to the trip exists
     stops: list[TripStop] = []  # the route; one stop (the trip's city) until you add more
+    role: Literal["owner", "editor"] = "owner"  # yours, or one you were invited to plan
+    member_count: int = 0  # people planning it with the owner
+
+
+class TripMember(BaseModel):
+    user_id: str
+    name: str
+    role: Literal["owner", "editor"]
+    you: bool = False
+
+
+class JoinPreview(BaseModel):
+    """What an invite link shows before you join: whose trip, where and when."""
+    trip_name: str
+    city: str
+    start_date: Optional[date] = None
+    day_count: int = 0
+    owner_name: str
+    people: int = 1
 
 
 class TripClosure(BaseModel):
@@ -685,6 +704,7 @@ class TripDetail(Trip):
     bookings: list[Booking] = []
     closures: list[TripClosure] = []  # filled in when the trip has a start date
     schedule: list[ScheduledStop] = []  # a realistic time for each planned stop
+    members: list[TripMember] = []  # everyone planning it, the owner first (only once someone's been invited)
 
     def day_places(self, day: int) -> list[Place]:
         return sorted((p for p in self.places if p.day_number == day), key=lambda p: p.day_order)
@@ -836,6 +856,11 @@ class ScreenshotJobRequest(BaseModel):
 class PushSubscriptionRequest(BaseModel):
     endpoint: str = Field(max_length=2000)
     keys: dict[str, str] = {}
+
+
+class InviteLink(BaseModel):
+    token: str
+    path: str  # "/join/<token>", relative to the app's address
 
 
 class ShareLink(BaseModel):

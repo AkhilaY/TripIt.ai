@@ -81,9 +81,10 @@ def valid_password(password: str) -> None:
 
 
 class Accounts:
-    def __init__(self, db: Database, app_api_key: str = ""):
+    def __init__(self, db: Database, app_api_key: str = "", open_signup: bool = False):
         self.db = db
         self.app_api_key = app_api_key
+        self.open_signup = open_signup  # anyone can make an account; otherwise new accounts need an invite
         self._failures: dict[str, list[float]] = {}  # email -> recent failed sign-in times
 
     # ---------- Users ----------
@@ -114,22 +115,67 @@ class Accounts:
         if self.by_email(email):
             raise AuthError("There's already an account with that email. Sign in instead.")
         first = self.owner() is None
+        invite_row = None
         if first:
             if not self.app_api_key or not hmac.compare_digest(invite.strip(), self.app_api_key):
                 raise AuthError("The first account needs the server key as its invite code")
-        else:
-            row = self.db._rows("SELECT * FROM invites WHERE code_hash = ? AND used_by IS NULL", (_hash(clean_code(invite)),))
-            if not row:
+        elif invite.strip() or not self.open_signup:
+            invite_row = self.db._rows("SELECT * FROM invites WHERE code_hash = ? AND used_by IS NULL", (_hash(clean_code(invite)),))
+            if not invite_row:
                 raise AuthError("That invite code isn't valid or has been used")
         user_id = uuid.uuid4().hex[:16]
         self.db._exec("INSERT INTO users (id, email, name, password_hash, is_admin, created_at) VALUES (?, ?, ?, ?, ?, ?)",
                       (user_id, email, " ".join(name.split())[:80], hash_password(password), int(first), _now().isoformat()))
         if first:
             self._claim_existing(user_id)
-        else:
+        elif invite_row:
             self.db._exec("UPDATE invites SET used_by = ?, used_at = ? WHERE code_hash = ?",
                           (user_id, _now().isoformat(), _hash(clean_code(invite))))
         return self.get_user(user_id)
+
+    # ---------- Sign in with Apple ----------
+
+    def by_apple(self, sub: str) -> Optional[User]:
+        rows = self.db._rows("SELECT * FROM users WHERE apple_sub = ?", (sub,))
+        return self._user(rows[0]) if rows else None
+
+    def apple_user(self, sub: str, email: Optional[str], email_verified: bool, name: str = "") -> tuple[User, bool]:
+        """The account for an Apple ID: the one already linked, else the account with Apple's verified email (now
+        linked), else a new one. Returns (user, created)."""
+        user = self.by_apple(sub)
+        if user:
+            if name and not user.name:
+                self.db._exec("UPDATE users SET name = ? WHERE id = ?", (" ".join(name.split())[:80], user.id))
+                user = self.get_user(user.id)
+            return user, False
+        email = (email or "").strip().lower()
+        existing = self.by_email(email) if email and email_verified else None
+        if existing:
+            self.db._exec("UPDATE users SET apple_sub = ? WHERE id = ?", (sub, existing.id))
+            if name and not existing.name:
+                self.db._exec("UPDATE users SET name = ? WHERE id = ?", (" ".join(name.split())[:80], existing.id))
+            return self.get_user(existing.id), False
+        if self.owner() is None:
+            raise AuthError("Set up the first account with the server key before signing in with Apple")
+        if not self.open_signup:
+            raise AuthError("The Travel Edit is invite-only for now. Create an account with your invite code first.")
+        user_id = uuid.uuid4().hex[:16]
+        # Apple may hide the email (a private relay address), or not share one: the account still works without it.
+        address = email if email and not self.by_email(email) else f"apple-{sub[:12].replace('.', '')}@users.traveledit.invalid"
+        self.db._exec("INSERT INTO users (id, email, name, password_hash, is_admin, created_at, apple_sub) VALUES (?, ?, ?, '', 0, ?, ?)",
+                      (user_id, address, " ".join(name.split())[:80], _now().isoformat(), sub))
+        return self.get_user(user_id), True
+
+    def set_apple_token(self, user: User, token: Optional[str]) -> None:
+        self.db._exec("UPDATE users SET apple_token = ? WHERE id = ?", (token, user.id))
+
+    def apple_token(self, user: User) -> Optional[str]:
+        rows = self.db._rows("SELECT apple_token FROM users WHERE id = ?", (user.id,))
+        return rows[0]["apple_token"] if rows else None
+
+    def has_password(self, user: User) -> bool:
+        rows = self.db._rows("SELECT password_hash FROM users WHERE id = ?", (user.id,))
+        return bool(rows and rows[0]["password_hash"])
 
     def _claim_existing(self, user_id: str) -> None:
         """The owner's first account takes over everything saved before accounts existed."""

@@ -30,7 +30,7 @@ struct ProfileView: View {
                             .background(Theme.accent, in: Circle())
                         VStack(alignment: .leading, spacing: 2) {
                             Text(me.name.isEmpty ? "Add your name" : me.name).font(Theme.serif(22)).foregroundStyle(Theme.label)
-                            Text(me.email).font(.subheadline).foregroundStyle(Theme.secondary)
+                            Text(me.email.isEmpty ? "Signed in with Apple" : me.email).font(.subheadline).foregroundStyle(Theme.secondary)
                         }
                         Spacer()
                         Image(systemName: "pencil").font(.footnote).foregroundStyle(Theme.tertiary)
@@ -87,7 +87,9 @@ struct ProfileView: View {
                 if notifications == .denied { Text("Notifications are off for Travel Edit. Turn them on in Settings → Notifications → Travel Edit.") }
             }
             Section("Account") {
-                Button { changingPassword = true } label: { row("lock.fill", Theme.gray, "Change password", nil) }
+                if session.me?.hasPassword != false {
+                    Button { changingPassword = true } label: { row("lock.fill", Theme.gray, "Change password", nil) }
+                }
                 if session.me?.isAdmin == true {
                     NavigationLink(value: Route.web(hash: "#/profile")) {
                         row("person.2.fill", Theme.indigo, "Invites and people", "Invite testers; reset a forgotten password", chevron: false)
@@ -262,12 +264,17 @@ private struct DeleteAccountSheet: View {
     @State private var password = ""
     @State private var error: String?
     @State private var busy = false
+    private var usesPassword: Bool { session.me?.hasPassword != false }  // Sign in with Apple accounts confirm by typing DELETE
 
     var body: some View {
         NavigationStack {
             Form {
                 Section {
-                    SecureField("Your password", text: $password).textContentType(.password)
+                    if usesPassword {
+                        SecureField("Your password", text: $password).textContentType(.password)
+                    } else {
+                        TextField("Type DELETE to confirm", text: $password).textInputAutocapitalization(.characters).autocorrectionDisabled()
+                    }
                 } footer: {
                     Text("This deletes your account and everything in it: saved places, folders, trips, bookings and photos. It can't be undone.")
                 }
@@ -277,7 +284,7 @@ private struct DeleteAccountSheet: View {
                         busy = true
                         Task {
                             do {
-                                try await API.shared.call("DELETE", "/v1/me", ["password": password])
+                                try await API.shared.call("DELETE", "/v1/me", usesPassword ? ["password": password] : ["confirm": password])
                                 session.signOutLocally()
                             } catch { self.error = error.localizedDescription }
                             busy = false
@@ -285,7 +292,7 @@ private struct DeleteAccountSheet: View {
                     } label: {
                         if busy { ProgressView() } else { Text("Delete my account").frame(maxWidth: .infinity) }
                     }
-                    .disabled(password.isEmpty || busy)
+                    .disabled(busy || (usesPassword ? password.isEmpty : password.trimmingCharacters(in: .whitespaces).lowercased() != "delete"))
                 }
             }
             .tripBackground()

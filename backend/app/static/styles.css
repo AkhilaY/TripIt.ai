@@ -1354,3 +1354,18 @@ a.krow, button.krow { cursor: pointer; }
 .addpair { display: inline-flex; gap: 8px; }
 .packpaste { width: 100%; min-height: 160px; resize: vertical; font: inherit; font-size: 15px; line-height: 1.5; border: 0; background: transparent; color: var(--label); padding: 4px 0; }
 .wideselect:focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; border-radius: 8px; }
+
+/* ---------- Planning together ---------- */
+.people { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 20px 10px; }
+.faces { display: inline-flex; align-items: center; gap: 0; border: 0; background: none; padding: 0; color: var(--label); cursor: pointer; font: inherit; min-width: 0; }
+.face { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; font-family: var(--serif); font-size: 13px; font-weight: 600;
+  background: var(--cell); color: var(--gold); box-shadow: 0 0 0 2px var(--bg), inset 0 0 0 1px var(--border-strong); margin-right: -6px; }
+.face.you { background: var(--accent); color: var(--accent-ink); box-shadow: 0 0 0 2px var(--bg); }
+.faces .who { margin-left: 14px; font-size: 13.5px; color: var(--secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.authpage.join .eyebrow { text-align: center; margin-bottom: 6px; }
+.authpage.join .btn.wide { display: flex; width: calc(100% - 40px); margin: 10px 20px 0; }
+.authlogo { display: block; width: 170px; height: auto; margin: 0 auto 18px; }
+.authlogo.dark { display: none; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .authlogo.light { display: none; } :root:not([data-theme="light"]) .authlogo.dark { display: block; } }
+:root[data-theme="dark"] .authlogo.light { display: none; }
+:root[data-theme="dark"] .authlogo.dark { display: block; }

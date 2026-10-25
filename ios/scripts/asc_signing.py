@@ -79,6 +79,20 @@ def bundle_id(identifier: str) -> str:
         "Identifiers, add it as an App ID with App Groups ticked (see the README's TestFlight steps).")
 
 
+def enable_sign_in_with_apple(bundle: str) -> None:
+    """Turns on Sign in with Apple for the app's ID (once; it stays on). Profiles made after include it."""
+    caps = call("GET", f"/bundleIds/{bundle}/bundleIdCapabilities")["data"]
+    if any(c["attributes"].get("capabilityType") == "APPLE_ID_AUTH" for c in caps):
+        return
+    call("POST", "/bundleIdCapabilities", {"data": {
+        "type": "bundleIdCapabilities",
+        "attributes": {"capabilityType": "APPLE_ID_AUTH",
+                       "settings": [{"key": "APPLE_ID_AUTH_APP_CONSENT", "options": [{"key": "PRIMARY_APP_CONSENT"}]}]},
+        "relationships": {"bundleId": {"data": {"type": "bundleIds", "id": bundle}}},
+    }})
+    print("Turned on Sign in with Apple for the app's ID")
+
+
 def make_profile(name: str, bundle: str, certificate: str) -> dict:
     data = call("POST", "/profiles", {"data": {
         "type": "profiles",
@@ -98,7 +112,8 @@ def make_profile(name: str, bundle: str, certificate: str) -> dict:
         folder.mkdir(parents=True, exist_ok=True)
         (folder / f"{uuid}.mobileprovision").write_bytes(content)
     return {"id": data["id"], "name": name, "uuid": uuid,
-            "groups": list(entitlements.get("com.apple.security.application-groups", []))}
+            "groups": list(entitlements.get("com.apple.security.application-groups", [])),
+            "apple_sign_in": "com.apple.developer.applesignin" in entitlements}
 
 
 def run(*args: str) -> None:
@@ -143,12 +158,17 @@ def setup() -> None:
     run("security", "list-keychains", "-d", "user", "-s", KEYCHAIN, *[k.strip('"') for k in existing])
     (WORK / "signing.p12").unlink()
 
+    enable_sign_in_with_apple(app_bundle)
     app_profile = make_profile(f"TripIt CI {run_id}", app_bundle, state["certificate"])
     state["profiles"].append(app_profile["id"])
     STATE.write_text(json.dumps(state))
     share_profile = make_profile(f"TripIt Share CI {run_id}", share_bundle, state["certificate"])
     state["profiles"].append(share_profile["id"])
     STATE.write_text(json.dumps(state))
+
+    if not app_profile["apple_sign_in"]:
+        raise SystemExit(f"The App ID {app_identifier} doesn't have Sign in with Apple. In developer.apple.com → Identifiers, "
+                         "open it, tick Sign In with Apple, and Save; then run this again.")
 
     # The app and its share extension share sign-in through an App Group. Use the one registered for them.
     print("App Groups in the profiles:", app_profile["groups"], share_profile["groups"])

@@ -12,8 +12,9 @@ struct TripPlaces: View {
         let mine = trip.places.filter { !$0.suggested }
         List {
             if !trip.isLocal {
+                Section { PeopleRow(trip: trip) }
                 Section {
-                    shortcut("ticket.fill", Theme.blue, "Bookings",
+                    shortcut("airplane", Theme.blue, "Bookings",
                              trip.bookings.isEmpty ? "Flights, stays and tables" : Fmt.plural(trip.bookings.count, "booking"),
                              "#/trip/\(trip.id)/bookings")
                     shortcut("suitcase.fill", Theme.teal, "Packing list", "Made for the weather and your plans", "#/packing/\(trip.id)")

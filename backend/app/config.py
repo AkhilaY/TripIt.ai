@@ -99,6 +99,16 @@ class Settings(BaseSettings):
     sentry_environment: str = "production"
     sentry_release: str = ""
     sentry_traces_sample_rate: float = 0.0
+    # Accounts: anyone can sign up (with Apple or an email). False makes new accounts need an invite code.
+    open_signup: bool = True
+    # Sign in with Apple: the app's bundle ID(s), comma separated. Defaults to APNS_TOPIC, which is the bundle ID.
+    apple_client_ids: str = ""
+    # Optional: a Sign in with Apple key (.p8, its key ID; team defaults to APNS_TEAM_ID), so deleting an account
+    # also revokes its Apple sign-in, as Apple asks.
+    apple_signin_key: str = ""
+    apple_signin_key_id: str = ""
+    apple_team_id: str = ""
+
     apns_key: str = ""
     apns_key_id: str = ""
     apns_team_id: str = ""

@@ -16,9 +16,9 @@ struct TripPlaces: View {
                 Section {
                     shortcut("airplane", Theme.blue, "Bookings",
                              trip.bookings.isEmpty ? "Flights, stays and tables" : Fmt.plural(trip.bookings.count, "booking"),
-                             "#/trip/\(trip.id)/bookings")
-                    shortcut("suitcase.fill", Theme.teal, "Packing list", "Made for the weather and your plans", "#/packing/\(trip.id)")
-                    shortcut("music.mic", Category.event.color, "What's on", "Events while you're there", "#/events/\(trip.id)")
+                             .bookings(tripId: trip.id))
+                    shortcut("suitcase.fill", Theme.teal, "Packing list", "Made for the weather and your plans", .web(hash: "#/packing/\(trip.id)"))
+                    shortcut("music.mic", Category.event.color, "What's on", "Events while you're there", .web(hash: "#/events/\(trip.id)"))
                 }
                 EditsRail(trip: trip)
             }
@@ -117,8 +117,8 @@ struct TripPlaces: View {
         .tripBackground()
     }
 
-    private func shortcut(_ symbol: String, _ color: Color, _ title: String, _ subtitle: String, _ hash: String) -> some View {
-        Button { router.push(.web(hash: hash)) } label: {
+    private func shortcut(_ symbol: String, _ color: Color, _ title: String, _ subtitle: String, _ route: Route) -> some View {
+        Button { router.push(route) } label: {
             HStack(spacing: 12) {
                 SymbolTile(symbol: symbol, color: color)
                 VStack(alignment: .leading, spacing: 2) {

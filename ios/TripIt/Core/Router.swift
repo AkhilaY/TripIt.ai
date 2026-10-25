@@ -21,6 +21,8 @@ enum Route: Hashable {
     case menu(placeId: String)
     /// A place from an edit that isn't saved yet: a preview with Save.
     case editPlace(tripId: String, editId: String, entryId: String)
+    /// One trip's bookings.
+    case bookings(tripId: String)
     /// A screen of the web app that isn't native yet, by its address inside the app (e.g. "#/packing/<trip id>").
     case web(hash: String)
 }
@@ -39,6 +41,16 @@ final class Router {
     var profilePath: [Route] = []
     /// Set to open the Add sheet, optionally with a link already filled in.
     var addRequest: AddRequest?
+    /// Set to add or edit a booking.
+    var bookingRequest: BookingRequest?
+
+    struct BookingRequest: Identifiable {
+        let id = UUID()
+        var tripId: String?  // nil: the trip it most likely belongs to, which the person can change
+        var booking: Booking?  // edit this one
+        var fields: BookingFields?  // start the form filled in (a stay for nights with none, a table at a place)
+        var title: String?
+    }
 
     struct AddRequest: Identifiable {
         let id = UUID()
@@ -82,7 +94,7 @@ final class Router {
             if parts.count > 2, parts[2] == "menu" { push(.menu(placeId: parts[1])) }
             else { push(.place(id: parts[1], tripId: param("trip"))) }
         case "trip" where parts.count > 1:
-            if parts.count > 2, parts[2] == "bookings" { push(.web(hash: "#/trip/\(parts[1])/bookings")) }
+            if parts.count > 2, parts[2] == "bookings" { push(.bookings(tripId: parts[1])) }
             else { push(.trip(id: parts[1])) }
         case "editplace" where parts.count > 3:
             push(.editPlace(tripId: parts[1], editId: parts[2], entryId: parts[3]))
@@ -95,6 +107,7 @@ final class Router {
             showProfile = false
             tab = .discover
         case "bookings":
+            if let trip = param("trip") { push(.bookings(tripId: trip)); break }
             showProfile = false
             tab = .bookings
         case "concierge":

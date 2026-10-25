@@ -19,6 +19,9 @@ final class Store {
     var toast: Toast?
     /// An import that just finished, to review: its places by city, a trip that passes through, lists.
     var reviewJob: Job?
+    /// Every booking across your trips, soonest first (undated ones last), for the Bookings tab.
+    var bookings: [Booking] = []
+    var bookingsLoaded = false
 
     private let api = API.shared
     private var pollTask: Task<Void, Never>?
@@ -305,6 +308,23 @@ final class Store {
         } catch { fail(error); return false }
     }
 
+    // MARK: Bookings
+
+    func reloadBookings() async {
+        do {
+            bookings = try await api.get("/v1/bookings")
+        } catch { if bookingsLoaded { fail(error) } }
+        bookingsLoaded = true
+    }
+
+    /// The trip a new booking most likely belongs to: the one happening now, else the next one, else the newest.
+    var likelyBookingTrip: Trip? {
+        if let active = activeTrip { return active.trip }
+        let today = Fmt.iso(Date())
+        let next = realTrips.filter { ($0.startDate ?? "") >= today }.min { ($0.startDate ?? "") < ($1.startDate ?? "") }
+        return next ?? realTrips.max { $0.createdAt < $1.createdAt } ?? trips.first
+    }
+
     func setHome(_ city: String) async -> Bool {
         do {
             home = try await api.put("/v1/home", ["city": city])
@@ -314,6 +334,7 @@ final class Store {
 
     func reset() {
         places = []; folders = []; trips = []; jobs = []; tripDetails = [:]; home = nil; loaded = false
+        bookings = []; bookingsLoaded = false
         pollTask?.cancel(); pollTask = nil
     }
 }

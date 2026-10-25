@@ -18,7 +18,7 @@ struct MainTabs: View {
             NavigationStack(path: $router.discover) { WebScreen(hash: "#/discover", isRoot: true).withRoutes() }
                 .tabItem { Label("Discover", systemImage: "safari") }
                 .tag(AppTab.discover)
-            NavigationStack(path: $router.bookings) { WebScreen(hash: "#/bookings", isRoot: true).withRoutes() }
+            NavigationStack(path: $router.bookings) { BookingsView().withRoutes() }
                 .tabItem { Label("Bookings", systemImage: "suitcase") }
                 .tag(AppTab.bookings)
             NavigationStack(path: $router.concierge) { WebScreen(hash: "#/concierge", isRoot: true).withRoutes() }
@@ -35,6 +35,11 @@ struct MainTabs: View {
         .sheet(item: $router.addRequest) { request in
             AddPlaceSheet(request: request)
                 .environment(router).environment(store)
+        }
+        .sheet(item: $router.bookingRequest) { request in
+            BookingSheet(request: request)
+                .environment(router).environment(store)
+                .modifier(ToastOverlay())
         }
         .sheet(item: Binding(get: { store.reviewJob }, set: { store.reviewJob = $0 })) { job in
             SaveReviewSheet(job: job)
@@ -105,6 +110,7 @@ struct RouteView: View {
         case .reel(let id): ReelPlacesView(reelId: id)
         case .menu(let placeId): MenuView(placeId: placeId)
         case .editPlace(let tripId, let editId, let entryId): EditPlaceView(tripId: tripId, editId: editId, entryId: entryId)
+        case .bookings(let tripId): BookingsView(tripId: tripId)
         case .web(let hash): WebScreen(hash: hash)
         }
     }

@@ -115,11 +115,11 @@ struct TripPlan: View {
         Section {
             if let arriving, editMode?.wrappedValue.isEditing != true {
                 TravelDayRow(from: trip.stop(on: day - 1)?.city, stop: arriving, ticket: dayBookings(day).first { ["flight", "train"].contains($0.kind) }) {
-                    router.push(.web(hash: "#/trip/\(trip.id)/bookings"))
+                    router.push(.bookings(tripId: trip.id))
                 }
             }
             ForEach(dayBookings(day)) { booking in
-                Button { router.push(.web(hash: "#/trip/\(trip.id)/bookings")) } label: {
+                Button { router.push(.bookings(tripId: trip.id)) } label: {
                     HStack(spacing: 12) {
                         SymbolTile(symbol: bookingSymbol(booking.kind), color: Theme.blue)
                         VStack(alignment: .leading, spacing: 2) {

@@ -89,7 +89,7 @@ struct Booking: Codable, Identifiable, Hashable {
     var tripId: String
     var kind: String
     var title: String
-    var startAt: String?
+    var startAt: String?  // local wall-clock time as printed: "2026-11-07" or "2026-11-07T19:25"
     var endAt: String?
     var origin: String?
     var destination: String?
@@ -98,6 +98,43 @@ struct Booking: Codable, Identifiable, Hashable {
     var partySize: Int?
     var notes: String?
     var placeId: String?
+    var tripName: String?  // only in the list of every booking (GET /v1/bookings)
+
+    var startDay: String? { startAt.map { String($0.prefix(10)) } }
+    var startTime: String? { startAt.flatMap { $0.count > 10 ? String($0.suffix(5)) : nil } }
+    var endDay: String? { endAt.map { String($0.prefix(10)) } }
+    var endTime: String? { endAt.flatMap { $0.count > 10 ? String($0.suffix(5)) : nil } }
+    /// The last day it covers (check-out, arrival, drop-off), or its first.
+    var lastDay: String? { endDay ?? startDay }
+}
+
+/// What Claude read from a confirmation, for the person to check before it's saved.
+struct BookingDraft: Codable, Hashable {
+    var kind: String
+    var title: String
+    var startAt: String?
+    var endAt: String?
+    var origin: String?
+    var destination: String?
+    var address: String?
+    var confirmation: String?
+    var partySize: Int?
+    var notes: String?
+}
+
+struct Lounge: Codable, Hashable {
+    var name: String
+    var terminal: String?
+    var location: String?
+    var access: [String]
+    var hours: String?
+}
+
+struct LoungeResult: Codable {
+    var status: String
+    var airport: String?
+    var airportName: String?
+    var lounges: [Lounge]
 }
 
 /// One city on a trip's route; stops cover the trip's days back to back.

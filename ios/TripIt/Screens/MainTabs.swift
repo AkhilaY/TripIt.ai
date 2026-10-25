@@ -18,7 +18,7 @@ struct MainTabs: View {
                 .tabItem { Label("Discover", systemImage: "safari") }
                 .tag(AppTab.discover)
             NavigationStack(path: $router.bookings) { WebScreen(hash: "#/bookings", isRoot: true).withRoutes() }
-                .tabItem { Label("Bookings", systemImage: "ticket") }
+                .tabItem { Label("Bookings", systemImage: "suitcase") }
                 .tag(AppTab.bookings)
             NavigationStack(path: $router.concierge) { WebScreen(hash: "#/concierge", isRoot: true).withRoutes() }
                 .tabItem { Label("Concierge", systemImage: "sparkles") }

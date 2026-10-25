@@ -136,6 +136,14 @@ class PlanPlace(BaseModel):
     mentions: int = 1  # how many saved reels recommend it
     start_time: Optional[str] = None  # a fixed time, e.g. a reservation ("HH:MM")
     current_day: Optional[int] = None  # the day the person already put it on, if any
+    city: Optional[str] = None
+
+
+class PlanCity(BaseModel):
+    """One city of a multi-city trip and the days spent there."""
+    city: str
+    first_day: int
+    last_day: int
 
 
 class PlanRequest(BaseModel):
@@ -144,6 +152,7 @@ class PlanRequest(BaseModel):
     start_date: Optional[date] = None
     preferences: Optional[str] = None
     places: list[PlanPlace] = Field(min_length=1, max_length=200)
+    route: list[PlanCity] = []  # filled in for multi-city trips
 
 
 class TimeOfDay(str, Enum):
@@ -461,8 +470,14 @@ class PackingList(BaseModel):
     weather: list[WeatherDay] = []
     notes: Optional[str] = None
     carry_on_only: bool = False
-    generated_by: Literal["claude", "offline"] = "offline"
+    generated_by: Literal["claude", "offline", "manual"] = "offline"
     generated_at: datetime
+
+
+class PackingStart(BaseModel):
+    """Start a list without AI: empty, from pasted text (one item per line), or copied from another trip."""
+    text: Optional[str] = Field(default=None, max_length=20000)
+    copy_from: Optional[str] = None  # another trip's id
 
 
 class PackingRequest(BaseModel):
@@ -656,11 +671,23 @@ class TripClosure(BaseModel):
     move_to_label: Optional[str] = None  # "Mon"
 
 
+class ScheduledStop(BaseModel):
+    """When a stop happens on its day: its exact time, or an estimate from the stops before it."""
+    place_id: str
+    day: int
+    time: str  # "HH:MM"
+    estimated: bool = True
+
+
 class TripDetail(Trip):
     places: list[Place] = []
     reels: list[Reel] = []
     bookings: list[Booking] = []
     closures: list[TripClosure] = []  # filled in when the trip has a start date
+    schedule: list[ScheduledStop] = []  # a realistic time for each planned stop
+
+    def day_places(self, day: int) -> list[Place]:
+        return sorted((p for p in self.places if p.day_number == day), key=lambda p: p.day_order)
 
 
 class TripUpdate(BaseModel):
@@ -768,6 +795,7 @@ class TidyRequest(BaseModel):
 class SearchPlacesRequest(BaseModel):
     query: str = Field(min_length=1, max_length=300)
     trip_id: Optional[str] = None  # search near this trip's places
+    city: Optional[str] = Field(default=None, max_length=120)  # or in this city (a city page)
 
 
 class PlaceCandidate(BaseModel):
@@ -928,6 +956,11 @@ class TripEdit(BaseModel):
     cover_photo: Optional[PlacePhoto] = None
     folder_id: Optional[str] = None  # set once the whole edit is saved to the Library
     new_count: int = 0  # places in it that aren't in your saved places yet
+
+
+class CoverPick(BaseModel):
+    number: int = Field(description="The number of the photo that makes the best cover.")
+    reason: str = Field(description="Under 12 words on why.")
 
 
 class TripEdits(BaseModel):

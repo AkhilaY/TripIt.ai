@@ -1841,7 +1841,8 @@ def test_packing_regenerate_keeps_custom_items_and_ticks(client):
 
 def test_packing_item_edits_and_learning(client):
     trip_id = packing_trip(client)
-    assert client.post(f"/v1/trips/{trip_id}/packing/items", json={"text": "x"}, headers=H).status_code == 404  # no list yet
+    # Adding before the list exists starts your own; making it with AI afterwards keeps what you added.
+    assert client.post(f"/v1/trips/{trip_id}/packing/items", json={"text": "x"}, headers=H).status_code == 201
     client.messages.outputs[PackingResult] = PackingResult(items=[draft("5 tops"), draft("Rain jacket"), draft("Hair dryer", "toiletries")], notes=None)
     plan = client.post(f"/v1/trips/{trip_id}/packing", json={}, headers=H).json()
     ids = {i["text"]: i["id"] for i in plan["items"]}
@@ -3245,3 +3246,22 @@ def test_tours_are_a_kind_of_booking(client):
     t = client.post(f"/v1/trips/{trip['id']}/bookings", json={"kind": "tour", "title": "Chocolate tasting walk", "party_size": 2}, headers=H)
     assert t.status_code in (200, 201), t.text
     assert t.json()["bookings"][0]["kind"] == "tour" and t.json()["bookings"][0]["start_at"] is None
+
+
+def test_packing_list_without_ai_empty_pasted_or_copied(client):
+    a = client.post("/v1/trips", json={"city": "Dubai", "days": 4}, headers=H).json()
+    b = client.post("/v1/trips", json={"city": "Lisbon", "days": 3}, headers=H).json()
+    # Your first item starts your own list.
+    r = client.post(f"/v1/trips/{a['id']}/packing/items", json={"text": "Linen shirt", "group": "clothes"}, headers=H)
+    assert r.status_code == 201 and r.json()["generated_by"] == "manual" and [i["text"] for i in r.json()["items"]] == ["Linen shirt"]
+    # Paste a list from Notes: bullets and checkboxes go, each line lands in a sensible group, duplicates are skipped.
+    pasted = "- Passport\n[ ] Phone charger\n• Sunscreen SPF 50\n1. Sandals\nlinen shirt\nUmbrella"
+    items = client.post(f"/v1/trips/{a['id']}/packing/start", json={"text": pasted}, headers=H).json()["items"]
+    assert {i["text"]: i["group"] for i in items} == {"Linen shirt": "clothes", "Passport": "documents", "Phone charger": "tech",
+                                                       "Sunscreen SPF 50": "toiletries", "Sandals": "shoes", "Umbrella": "other"}
+    client.patch(f"/v1/trips/{a['id']}/packing/items/{items[1]['id']}", json={"packed": True}, headers=H)
+    # Copy it to another trip: everything comes across unticked.
+    copied = client.post(f"/v1/trips/{b['id']}/packing/start", json={"copy_from": a["id"]}, headers=H).json()["items"]
+    assert len(copied) == 6 and not any(i["packed"] for i in copied)
+    c = client.post("/v1/trips", json={"city": "Rome", "days": 2}, headers=H).json()
+    assert client.post(f"/v1/trips/{a['id']}/packing/start", json={"copy_from": c["id"]}, headers=H).status_code == 404

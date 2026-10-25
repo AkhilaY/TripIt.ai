@@ -124,7 +124,7 @@ struct AddPlaceSheet: View {
                 }
             }
             .tripBackground()
-            .navigationTitle("Add")
+            .navigationTitle(request.city.map { "Add in \($0)" } ?? "Add")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
             .overlay { if busy { ProgressView().controlSize(.large).padding(24).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16)) } }
@@ -134,6 +134,7 @@ struct AddPlaceSheet: View {
             .onAppear {
                 text = request.text
                 tripId = request.tripId
+                city = request.city ?? ""
                 if request.text.isEmpty { focused = true }
             }
         }
@@ -157,7 +158,7 @@ struct AddPlaceSheet: View {
         try? await Task.sleep(for: .milliseconds(400))
         guard !Task.isCancelled else { return }
         do {
-            results = try await API.shared.post("/v1/places/search", ["query": query, "trip_id": tripId])
+            results = try await API.shared.post("/v1/places/search", ["query": query, "trip_id": tripId, "city": tripId == nil ? request.city : nil])
         } catch is CancellationError {
             return
         } catch {

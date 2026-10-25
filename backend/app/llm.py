@@ -36,8 +36,10 @@ Rules:
 PLAN_SYSTEM = """You are a travel planner. Arrange the given saved places into a realistic day-by-day itinerary.
 
 - Group places that are geographically close into the same day to minimise travel (use latitude/longitude and neighborhood).
-- Put meals at sensible times: cafes and bakeries in the morning, restaurants at lunch or dinner, bars and nightlife in the evening.
-- Don't overload days: roughly 3-6 stops per day, fewer if they are big attractions.
+- Plan days a real person could enjoy. Each day has at most one breakfast (morning), one lunch and one dinner. Never put two restaurants at the same meal: a second restaurant goes to the other meal or another day, and if every meal is taken, leave it in unscheduled_place_ids.
+- Cafes and bakeries in the morning or mid-afternoon (at most two a day), sweets after lunch or dinner (at most two), bars and nightlife in the evening (at most two). Museums, sights and shopping fill the morning and afternoon between meals.
+- Don't overload days: roughly 4-6 stops including meals, fewer when there are big attractions (a museum or theme park takes half a day).
+- When a route is given (a multi-city trip), put each place only on the days of the city it is in (its city field), and keep travel days between cities light.
 - Respect opening_hours when given (local times, Mon–Sun). Don't schedule a place on a day or at a time it's closed. If a start_date is given, day 1 falls on that date's weekday; otherwise prefer slots when the place is open on most days.
 - Places with must_do: true are the person's priorities: always schedule them. When there are more places than fit, leave out others first, starting with those fewer reels mention (mentions).
 - Use each place at most once, and only use place_ids from the input. Put places that don't fit in unscheduled_place_ids.
@@ -48,6 +50,7 @@ TIDY_SYSTEM = """You tidy an itinerary a person built by hand from their own sav
 
 - Keep every place on the day it is on (current_day). Only move a place to another day, or schedule one that has no current_day, when the person's instruction asks for it.
 - Within each day, order the stops so the walking or driving between them is short, and give each stop a time_of_day that fits it (cafes in the morning, meals at lunch or dinner, bars in the evening).
+- At most one breakfast, one lunch and one dinner a day: never give two restaurants the same meal. If a day has more restaurants than meals, use breakfast, lunch and dinner and mention the extra in the day's notes rather than stacking meals.
 - A place with start_time has a fixed time (a reservation): order the day so those are in time order and match its time_of_day to it.
 - Respect opening_hours when given (local times, Mon–Sun). If a start_date is given, day 1 falls on that date's weekday.
 - Add a short, useful tip to a stop's note only when you have one; otherwise null. Don't repeat the place's own notes.
@@ -189,6 +192,7 @@ class ClaudeService:
             "start_date": request.start_date.isoformat() if request.start_date else None,
             "start_weekday": request.start_date.strftime("%A") if request.start_date else None,
             "preferences": request.preferences,
+            "route": [c.model_dump(mode="json") for c in request.route] or None,
             "places": [p.model_dump(mode="json", exclude_none=True) for p in request.places],
         }
         content = [

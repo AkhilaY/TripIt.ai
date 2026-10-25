@@ -75,6 +75,8 @@ struct CityView: View {
         .navigationTitle(isHome ? "Around \(city)" : city)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            Button { router.addRequest = Router.AddRequest(tripId: trip?.id, city: city) } label: { Image(systemName: "plus") }
+                .accessibilityLabel("Add a place in \(city)")
             Button { router.push(.map) } label: { Image(systemName: "map") }.accessibilityLabel("Map")
         }
         .sheet(item: $sheet) { $0.view.environment(store).environment(router) }

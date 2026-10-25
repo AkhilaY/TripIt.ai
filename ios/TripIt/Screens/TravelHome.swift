@@ -17,8 +17,7 @@ struct TravelHome: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            tripStrip.padding(.top, 14)
-            today.padding(.top, 14)
+            today.padding(.top, 16)
             nearYou
             nextStop
         }
@@ -26,27 +25,6 @@ struct TravelHome: View {
             if store.tripDetails[trip.id] == nil { _ = try? await store.loadTrip(trip.id) }
             await loadWeather()
         }
-    }
-
-    // MARK: Trip strip
-
-    private var tripStrip: some View {
-        HStack(spacing: 10) {
-            Text("Day \(day) of \(trip.dayCount)")
-                .font(.caption2.weight(.semibold)).foregroundStyle(Theme.gold)
-                .padding(.horizontal, 8).padding(.vertical, 4)
-                .background(Theme.gold.opacity(0.14), in: Capsule())
-            Text(trip.name).font(.caption.weight(.medium)).foregroundStyle(Theme.label).lineLimit(1)
-            Spacer(minLength: 4)
-            // The route only when it adds something: a London trip called "London" shows London once.
-            let route = trip.cities.joined(separator: " → ")
-            if !route.isEmpty, Store.cityKey(route) != Store.cityKey(trip.name) {
-                Text(route).font(.caption).foregroundStyle(Theme.secondary).lineLimit(1)
-            }
-        }
-        .padding(.horizontal, 10).padding(.vertical, 6)
-        .background(Theme.cell, in: Capsule())
-        .overlay(Capsule().strokeBorder(Theme.border))
     }
 
     // MARK: Today
@@ -58,10 +36,20 @@ struct TravelHome: View {
     }
 
     private var slots: [Slot] {
-        (detail?.dayPlaces(day) ?? []).map { Slot(place: $0, minute: Self.minute(of: $0)) }
+        (detail?.dayPlaces(day) ?? []).map { Slot(place: $0, minute: detail?.minute(of: $0.id) ?? Self.minute(of: $0)) }
     }
 
-    /// The planned time, or a usual time for its part of the day.
+    /// "Breakfast", "Lunch" or "Dinner" for meals; otherwise the kind of place ("Market" isn't breakfast).
+    static func stopLabel(_ p: Place) -> String {
+        let category = Category(p.category)
+        if category == .food || category == .cafe {
+            if p.timeOfDay == "morning" { return "Breakfast" }
+            if category == .food, let tod = p.timeOfDay, tod == "lunch" || tod == "dinner" { return tod.capitalized }
+        }
+        return category.label
+    }
+
+    /// The planned time, or a usual time for its part of the day (until the server's schedule arrives).
     static func minute(of p: Place) -> Int {
         if let t = p.startTime { let parts = t.split(separator: ":").compactMap { Int($0) }; if parts.count == 2 { return parts[0] * 60 + parts[1] } }
         switch p.timeOfDay {
@@ -88,7 +76,7 @@ struct TravelHome: View {
         Card(radius: 16, padding: 14) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Eyebrow(text: stops.count > 1 ? "Today · stop \(stopIndex + 1) of \(stops.count)" : "Today", color: Theme.gold)
+                    Eyebrow(text: stops.count > 1 ? "Today · Day \(day) of \(trip.dayCount) · \(currentCity)" : "Today · Day \(day) of \(trip.dayCount)", color: Theme.gold)
                     Text(dayTitle).font(Theme.serif(20)).foregroundStyle(Theme.label).fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer(minLength: 8)
@@ -163,7 +151,7 @@ struct TravelHome: View {
                     if isNext { Eyebrow(text: leaveText(slot, walk: walk), color: Theme.gold) }
                     Text(p.name).font(Theme.serif(isNext ? 17 : 15)).foregroundStyle(p.visited ? Theme.secondary : Theme.label)
                         .strikethrough(p.visited).lineLimit(2)
-                    Text([p.timeOfDay.map { $0 == "morning" ? "Breakfast" : $0.capitalized } ?? Category(p.category).label,
+                    Text([Self.stopLabel(p),
                           walk.map { "\($0) min walk" }].compactMap { $0 }.joined(separator: " · "))
                         .font(.caption).foregroundStyle(Theme.secondary)
                     if p.bookingNeed != nil, !booked, Category(p.category).hasMenu {

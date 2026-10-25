@@ -22,6 +22,7 @@ from .models import (
     ExtractedPlace,
     ExtractionResult,
     Place,
+    PlanCity,
     PlanPlace,
     PlanRequest,
     PlanResult,
@@ -30,9 +31,20 @@ from .models import (
     TripDetail,
 )
 from .planner import offline_plan, offline_tidy, slot_for_time
+from .schedule import balance_plan
+from .tripcheck import city_key
 
 log = logging.getLogger(__name__)
 
+
+
+def _city_days(route, days: int):
+    """The days a place may go on: its own city's days on a multi-city trip, otherwise any day."""
+    def allowed(place) -> list[int]:
+        key = city_key(place.city)
+        found = [d for s in route if city_key(s.city) == key for d in range(s.start_day, min(s.end_day, days) + 1)]
+        return found or list(range(1, days + 1))
+    return allowed
 
 class Library:
     def __init__(self, db: Database, geocoder: Geocoder, photos: Optional[PhotoStore] = None):
@@ -281,6 +293,7 @@ class Library:
         places = self.db.list_places(trip_id)
         planned_by = "offline"
         result: Optional[PlanResult] = None
+        route = [s for s in trip.stops if s.start_day <= days] if len(trip.stops) > 1 else []
         if claude is not None:
             request = PlanRequest(
                 city=trip.city,
@@ -291,9 +304,10 @@ class Library:
                     PlanPlace(id=p.id, name=p.name, category=p.category, latitude=p.latitude,
                               longitude=p.longitude, neighborhood=p.neighborhood, notes=p.summary[:300] or None,
                               opening_hours=hours_summary(p.opening_hours), must_do=p.must_do,
-                              mentions=max(1, p.mention_count))
+                              mentions=max(1, p.mention_count), city=p.city or None)
                     for p in places
                 ],
+                route=[PlanCity(city=s.city, first_day=s.start_day, last_day=min(s.end_day, days)) for s in route],
             )
             try:
                 result = await claude.plan_itinerary(request)
@@ -302,6 +316,7 @@ class Library:
                 log.warning("Claude planning failed, using offline planner: %s", e)
         if result is None:
             result = offline_plan(places, days, trip.city)
+        result = balance_plan(result, places, _city_days(route, days))
 
         self.apply_plan(trip_id, result, start_date, planned_by)
         return self.db.get_trip_detail(trip_id)
@@ -392,6 +407,7 @@ class Library:
                 log.warning("Claude tidy failed, using offline ordering: %s", e)
         if result is None:
             result = offline_tidy(places, day_count)
+        result = balance_plan(result, places, _city_days([], day_count), move_days=False)
         titles = {i: t for i, t in enumerate(trip.day_titles, start=1) if t and not re.fullmatch(r"Day \d+", t)}
         for i, day in enumerate(result.days, start=1):
             if i in titles and day.day_number == i:

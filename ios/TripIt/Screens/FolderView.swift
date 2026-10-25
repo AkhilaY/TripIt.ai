@@ -20,8 +20,15 @@ struct FolderView: View {
             List {
                 Section {
                     HStack(spacing: 10) {
-                        Button { pickPlaces(folder, inside: inside) } label: { Label("Add places", systemImage: "plus") }
-                            .buttonStyle(PrimaryButtonStyle(tinted: true))
+                        Menu {
+                            Button { pickPlaces(folder, inside: inside) } label: { Label("From your saved places", systemImage: "bookmark") }
+                            Button { router.addRequest = Router.AddRequest(folderId: folder.id) } label: { Label("Search for a new place", systemImage: "magnifyingglass") }
+                        } label: {
+                            Label("Add places", systemImage: "plus")
+                                .font(.body.weight(.semibold)).foregroundStyle(Theme.accent)
+                                .padding(.horizontal, 20).padding(.vertical, 13).frame(maxWidth: .infinity)
+                                .background(Theme.fill, in: Capsule())
+                        }
                         if !inside.isEmpty {
                             Button { sheet = .newTrip([], folder.id) } label: { Label("Plan a trip", systemImage: "airplane") }
                                 .buttonStyle(PrimaryButtonStyle())

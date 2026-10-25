@@ -9,6 +9,8 @@ struct ProfileView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var home: HomeSetting?
     @State private var editingHome = false
+    @State private var editingName = false
+    @State private var nameText = ""
     @State private var homeText = ""
     @State private var notifications: UNAuthorizationStatus = .notDetermined
     @State private var changingPassword = false
@@ -21,16 +23,20 @@ struct ProfileView: View {
         List {
             if let me = session.me {
                 Section {
-                    HStack(spacing: 14) {
+                    Button { nameText = me.name; editingName = true } label: { HStack(spacing: 14) {
                         Text(String((me.name.isEmpty ? me.email : me.name).prefix(1)).uppercased())
                             .font(Theme.serif(26)).foregroundStyle(Theme.accentInk)
                             .frame(width: 56, height: 56)
                             .background(Theme.accent, in: Circle())
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(me.name.isEmpty ? "Your account" : me.name).font(Theme.serif(22))
+                            Text(me.name.isEmpty ? "Add your name" : me.name).font(Theme.serif(22)).foregroundStyle(Theme.label)
                             Text(me.email).font(.subheadline).foregroundStyle(Theme.secondary)
                         }
-                    }
+                        Spacer()
+                        Image(systemName: "pencil").font(.footnote).foregroundStyle(Theme.tertiary)
+                    } }
+                    .buttonStyle(.plain)
+                    .accessibilityHint("Change your name")
                     .listRowBackground(Color.clear)
                 }
             }
@@ -110,6 +116,13 @@ struct ProfileView: View {
         .task {
             notifications = await Push.shared.status()
             home = try? await API.shared.get("/v1/home", as: HomeSetting?.self)
+        }
+        .alert("Your name", isPresented: $editingName) {
+            TextField("First name", text: $nameText).textContentType(.givenName)
+            Button("Cancel", role: .cancel) {}
+            Button("Save") { Task { do { try await session.setName(nameText) } catch { store.fail(error) } } }
+        } message: {
+            Text("For your greeting, and how friends see you on a trip you plan together.")
         }
         .alert("Home city", isPresented: $editingHome) {
             TextField("e.g. Brooklyn, New York", text: $homeText)

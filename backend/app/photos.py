@@ -96,3 +96,26 @@ async def wikidata_image(client: httpx.AsyncClient, qid: str) -> Optional[dict]:
         "ref": f"https://commons.wikimedia.org/wiki/Special:FilePath/{quote(filename.replace(' ', '_'))}?width=1000",
         "attribution": "Wikimedia Commons",
     }
+
+
+async def fetch_bytes(photo: dict, store: "PhotoStore", google_key: str, width: int = 480,
+                      count_google=None) -> Optional[bytes]:
+    """A stored photo's image bytes (small), for Claude to look at. None when it can't be loaded."""
+    source, ref = photo.get("source"), photo.get("ref") or ""
+    try:
+        if source == "reel":
+            path = store.path(ref)
+            return path.read_bytes() if path else None
+        async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
+            if source == "wikimedia":
+                r = await client.get(ref.split("?")[0] + f"?width={width}")
+            elif source == "google" and google_key:
+                if count_google:
+                    count_google("photo")
+                r = await client.get(f"https://places.googleapis.com/v1/{ref}/media", params={"maxWidthPx": width, "key": google_key})
+            else:
+                return None
+        ok = r.status_code == 200 and r.headers.get("content-type", "").startswith("image/")
+        return r.content if ok and len(r.content) < 4_000_000 else None
+    except (httpx.HTTPError, OSError):
+        return None

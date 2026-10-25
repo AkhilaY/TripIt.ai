@@ -45,6 +45,7 @@ final class Router {
         var text: String = ""
         var tripId: String?
         var folderId: String?
+        var city: String?  // search around this city (a city page)
     }
 
     func push(_ route: Route) {
@@ -106,7 +107,7 @@ final class Router {
         case "signin":
             NotificationCenter.default.post(name: API.signedOut, object: nil)
         case "add":
-            addRequest = AddRequest(text: param("url") ?? "")
+            addRequest = AddRequest(text: param("url") ?? "", tripId: param("trip"), folderId: param("folder"), city: param("city"))
         default:
             push(.web(hash: "#" + hash))
         }

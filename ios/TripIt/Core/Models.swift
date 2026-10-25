@@ -121,6 +121,14 @@ struct TripStop: Codable, Hashable {
     }
 }
 
+/// When a stop happens on its day (exact, or estimated from the stops before it).
+struct ScheduledStop: Codable, Hashable {
+    var placeId: String
+    var day: Int
+    var time: String
+    var estimated: Bool
+}
+
 /// A place planned on a day it's closed, with the nearest day in the same city it's open.
 struct TripClosure: Codable, Hashable {
     var placeId: String
@@ -170,8 +178,16 @@ struct TripDetail: Codable, Identifiable, Hashable {
     var bookings: [Booking]
     var stops: [TripStop]?
     var closures: [TripClosure]?
+    var schedule: [ScheduledStop]?
 
     var isLocal: Bool { kind == "local" }
+
+    /// When a planned stop happens, in minutes after midnight: its exact time, or the server's estimate.
+    func minute(of placeId: String) -> Int? {
+        guard let time = schedule?.first(where: { $0.placeId == placeId })?.time else { return nil }
+        let parts = time.split(separator: ":").compactMap { Int($0) }
+        return parts.count == 2 ? parts[0] * 60 + parts[1] : nil
+    }
 
     /// The route's cities when there's more than one.
     var route: [TripStop] { (stops ?? []).count > 1 ? stops ?? [] : [] }

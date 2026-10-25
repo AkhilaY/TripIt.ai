@@ -1178,15 +1178,18 @@ function discoverEdits(cityName, tripId) {
     const t = trips.find((x) => x.id === te.trip_id);
     return cityName && t && tripStops(t).some((c) => cityKey(c) === cityKey(cityName));
   });
-  const cards = matches.flatMap((te) => te.edits.map((e) => ({ te, e }))).slice(0, 4);
+  const cards = matches.flatMap((te) => te.edits.map((e) => ({ te, e }))).slice(0, 6);
   if (!cards.length) return '';
-  const [first, ...rest] = cards;
-  const photos = first.e.entries.map((x) => x.photo).filter(Boolean).slice(0, 3);
-  return `<div class="h2row"><h2 class="h2">The edits${cityName ? ` · ${esc(cityName)}` : ''}</h2></div>
-    <a class="ecard" href="#/edit/${first.te.trip_id}/${first.e.id}">${photos.length ? `<span class="eimgs">${photos.map((ph) => `<img src="${esc(photoUrl(ph, 400))}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">`).join('')}</span>` : ''}
-      <span class="b"><span class="eyebrow">The edit · ${plural(first.e.entries.length, 'place')}</span><span class="t serif">${esc(first.e.title)}</span>
-      ${first.e.dek ? `<span class="s">${esc(first.e.dek)}</span>` : ''}</span></a>
-    ${rest.length ? `<ul class="rows">${rest.map(({ te, e }) => `<li><a href="#/edit/${te.trip_id}/${e.id}"><span class="m"><span class="eyebrow">The edit · ${plural(e.entries.length, 'place')}</span><span class="t serif">${esc(e.title)}</span></span>${ICON.chev}</a></li>`).join('')}</ul>` : ''}`;
+  // Every edit as the same card: its cover photo, then the title and a line about it. Swipe for more.
+  const card = ({ te, e }) => {
+    const cover = e.cover_photo || (e.entries.find((x) => x.photo) || {}).photo;
+    return `<a class="ecard${cards.length === 1 ? ' solo' : ''}" href="#/edit/${te.trip_id}/${e.id}">${cover
+      ? `<img class="ecover" src="${esc(photoUrl(cover, 700))}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">` : `<span class="ecover ph">${ICON.sparkle}</span>`}
+      <span class="b"><span class="eyebrow">The edit · ${plural(e.entries.length, 'place')}</span><span class="t serif">${esc(e.title)}</span>
+      ${e.dek ? `<span class="s">${esc(e.dek)}</span>` : ''}</span></a>`;
+  };
+  return `<div class="h2row"><h2 class="h2">The edits${cityName ? ` · ${esc(cityName)}` : ''}</h2>${cards.length > 1 ? `<span class="hint">${cards.length} edits · swipe</span>` : ''}</div>
+    <div class="hscroll erail">${cards.map(card).join('')}</div>`;
 }
 
 async function discoverView() {
@@ -2190,9 +2193,20 @@ function routeSheet(t) {
 // ---------- Home during a trip ----------
 
 const TOD_MINUTE = { morning: 570, lunch: 750, afternoon: 900, dinner: 1170, evening: 1260 };
-function slotMinute(p) {
-  if (p.start_time) { const [h, m] = p.start_time.split(':').map(Number); return h * 60 + m; }
+/** When a stop happens: the server's schedule (exact or estimated from the stops before it), else a usual time. */
+function slotMinute(p, detail) {
+  const sched = detail && detail.schedule && detail.schedule.find((x) => x.place_id === p.id);
+  const at = sched ? sched.time : p.start_time;
+  if (at) { const [h, m] = at.split(':').map(Number); return h * 60 + m; }
   return TOD_MINUTE[p.time_of_day] ?? 720;
+}
+/** "Breakfast", "Lunch" or "Dinner" for meals; otherwise the kind of place. */
+function stopLabel(p) {
+  if (['food', 'cafe'].includes(p.category)) {
+    if (p.time_of_day === 'morning') return 'Breakfast';
+    if (p.category === 'food' && ['lunch', 'dinner'].includes(p.time_of_day)) return cap(p.time_of_day);
+  }
+  return CATS[p.category] || cap(p.time_of_day || '');
 }
 const minuteClock = (m) => fmtClock(`${String(Math.floor(m / 60) % 24).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`);
 function walkMins(p, prev) {
@@ -2223,7 +2237,7 @@ function travelHomeHtml(t, day) {
   const list = detail ? stops(detail, day) : [];
   if (detail) loadTodayWeather(t, list.length ? list : detail.places);
   const now = new Date().getHours() * 60 + new Date().getMinutes();
-  const next = list.find((p) => !p.visited && slotMinute(p) >= now - 30) || list.find((p) => !p.visited);
+  const next = list.find((p) => !p.visited && slotMinute(p, detail) >= now - 30) || list.find((p) => !p.visited);
   const booked = new Set(((detail && detail.bookings) || []).map((b) => b.place_id).filter(Boolean));
   const hoods = [...new Set(list.map((p) => p.neighborhood).filter(Boolean))];
   const title = (detail && detail.day_titles && detail.day_titles[day - 1] && !/^Day \d+$/.test(detail.day_titles[day - 1])) ? detail.day_titles[day - 1]
@@ -2232,18 +2246,18 @@ function travelHomeHtml(t, day) {
 
   // Dinner gap: nothing after 6 PM, so offer saved food places close to where the day ends.
   let gap = [];
-  if (detail && list.length && !list.some((p) => slotMinute(p) >= 1080)) {
+  if (detail && list.length && !list.some((p) => slotMinute(p, detail) >= 1080)) {
     const planned = new Set(detail.places.filter((p) => p.day_number).map((p) => p.id));
     const anchor = [...list].reverse().find(located);
     gap = savedOnly(S.places || []).filter((p) => ['food', 'drinks'].includes(p.category) && !planned.has(p.id) && p.city && cityKey(p.city) === cityKey(city)
       && (!anchor || !located(p) || meters(anchor.latitude, anchor.longitude, p.latitude, p.longitude) < 2500));
   }
   const rows = list.map((p, i) => {
-    const m = slotMinute(p);
+    const m = slotMinute(p, detail);
     const walk = walkMins(p, list[i - 1]);
     const isNext = next && p.id === next.id;
     const leave = isNext && walk != null ? m - walk - now : null;
-    const what = p.time_of_day === 'morning' ? 'Breakfast' : p.time_of_day ? cap(p.time_of_day) : CATS[p.category];
+    const what = stopLabel(p);
     const warn = p.booking_need && !booked.has(p.id) && MENU_CATS.has(p.category)
       ? `<span class="tl-warn">${p.booking_need === 'required' ? 'No table booked yet' : 'No table booked · expect a queue'}</span>` : '';
     return `<a class="tl${isNext ? ' next' : ''}${p.visited ? ' done' : ''}" href="#/place/${p.id}?trip=${t.id}"><span class="tl-time">${esc(minuteClock(m))}</span><i class="tl-dot"></i>
@@ -2254,7 +2268,7 @@ function travelHomeHtml(t, day) {
     <span class="tl-body"><span class="tl-name">Dinner isn't planned</span><span class="tl-meta">${plural(gap.length, 'saved place')} ${gap.length === 1 ? 'is' : 'are'} close to where you'll be</span>
     <button class="tlink" data-act="dinnergap" data-trip="${t.id}" data-day="${day}" data-ids="${gap.slice(0, 8).map((p) => p.id).join(',')}">Choose one</button></span></div>` : '';
   const links = next ? mapsLinks(next, detail) : null;
-  const todayHtml = `<section class="tcard"><div class="tc-head"><span class="m"><span class="eyebrow">${route.length > 1 ? `Today · stop ${si + 1} of ${route.length}` : 'Today'}</span>
+  const todayHtml = `<section class="tcard"><div class="tc-head"><span class="m"><span class="eyebrow">Today · Day ${day} of ${t.day_count}${route.length > 1 ? ` · ${esc(city)}` : ''}</span>
       <span class="t serif">${esc(title)}</span></span>${w ? `<span class="twx"><b>${temp(w.temp_max)}°</b><span>${esc(w.summary)}</span></span>` : ''}</div>
     ${list.length ? `<div class="tline">${rows}${gapRow}</div>` : '<p class="sub">Nothing planned for today yet.</p>'}
     <div class="wbtns"><a class="btn" href="#/today/${t.id}">Open today</a>
@@ -2283,10 +2297,7 @@ function travelHomeHtml(t, day) {
       <span class="cline">${ICON.bookmark}${plural(saved.length, 'saved place')} · ${inPlan} in the plan</span>
       ${hotel ? '' : `<span class="cline attn">${ICON.stay || ICON.bag}No hotel booked yet<a class="tlink" href="#/trip/${t.id}/bookings">Add a stay</a></span>`}</div>`;
   }
-  // The route only when it adds something: a London trip called "London" shows London once.
-  const routeText = tripStops(t).join(' → ');
-  const showRoute = routeText && cityKey(routeText) !== cityKey(t.name);
-  return `<div class="tstrip"><b>Day ${day} of ${t.day_count}</b><span class="n">${esc(t.name)}</span>${showRoute ? `<span class="r">${esc(routeText)}</span>` : ''}</div>${todayHtml}${nearHtml}${nextHtml}`;
+  return `${todayHtml}${nearHtml}${nextHtml}`;
 }
 
 // ---------- Home, Library and cities ----------
@@ -2634,7 +2645,7 @@ async function cityView(r) {
   const sub = [plural(all.length, 'place'), home ? (openN ? `${openN} open now` : '') : trip ? (tripRange(trip) ? `trip ${tripRange(trip)}` : `on ${trip.name}`) : 'your wishlist, no trip yet'].filter(Boolean).join(' · ');
   const scope = `city:${cityKey(name)}`;
   const shown = byVisit(all);
-  const head = `${navbar(title, { back: '#/library', backLabel: 'Library', right: `<a class="gbtn" href="#/map" aria-label="Map">${ICON.map}</a>` })}
+  const head = `${navbar(title, { back: '#/library', backLabel: 'Library', right: `<span class="gcluster"><button class="gbtn" data-act="add" aria-label="Add a place in ${esc(name)}">${ICON.plus}</button><a class="gbtn" href="#/map" aria-label="Map">${ICON.map}</a></span>` })}
     ${home ? '<div class="eyebrow pad">Your city</div>' : ''}<h1 class="largetitle" data-anchor>${esc(title)}</h1>
     <div class="subtitle"><span>${esc(sub)}</span></div>
     <div class="page tight">${trip ? `<span class="eyebrow quiet planned">Planned trip</span>${tripRowHtml(trip)}` : (!home && all.length ? `<button class="btn wide" data-act="citytrip" data-city="${esc(name)}">${ICON.plane}Plan a trip to ${esc(name)}</button>` : '')}
@@ -3018,6 +3029,8 @@ const VIEWS = {
       <div class="subtitle"><span>${me ? esc(me.email) : 'Your taste, home city and app settings'}</span></div>
 
       ${me ? `<div class="section"><div class="section-h">Account</div><div class="group tiles">
+        <button class="row" data-act="editname">${tile('gold', 'person')}<span class="main"><span class="t">${me.name ? esc(me.name) : 'Add your name'}</span>
+          <span class="s">For your greeting, and how friends see you on a shared trip</span></span>${ICON.chev}</button>
         <button class="row" data-act="changepw">${tile('gray', 'lock')}<span class="main"><span class="t">Change password</span></span>${ICON.chev}</button>
         ${me.is_admin ? `<button class="row" data-act="invites">${tile('gold', 'plus')}<span class="main"><span class="t">Invite people</span>
           <span class="s">Make a one-time code for each tester</span></span>${ICON.chev}</button>
@@ -3319,10 +3332,10 @@ function gettingThere(p) {
 }
 
 function placesList(trip) {
-  const addBtn = `<button class="btn tint small" data-act="tripaddplaces" data-id="${trip.id}">${ICON.plus}Add from saved</button>`;
+  const addBtn = `<span class="addpair"><button class="btn tint small" data-act="add">${ICON.search}Search</button><button class="btn tint small" data-act="tripaddplaces" data-id="${trip.id}">${ICON.plus}From saved</button></span>`;
   if (!trip.places.length) {
-    return emptyState('gray', 'pinslash', 'No places on this trip yet', 'Add places from everything you’ve saved, or from one of your folders.',
-      `<button class="btn" data-act="tripaddplaces" data-id="${trip.id}">${ICON.plus}Add from saved</button>`);
+    return emptyState('gray', 'pinslash', 'No places on this trip yet', 'Search for a place, or add from everything you’ve saved.',
+      `<button class="btn" data-act="add">${ICON.search}Search for a place</button><button class="btn tint" data-act="tripaddplaces" data-id="${trip.id}">${ICON.plus}Add from saved</button>`);
   }
   const bar = `<div class="planbar"><span class="planned-by">${S.sel.on ? 'Tick places, then add them to a day' : addBtn}</span>
     <button class="linkbtn" data-act="selecttoggle">${S.sel.on ? 'Done' : 'Select'}</button></div>`;
@@ -3531,9 +3544,9 @@ const findLink = (text) => (text.match(/https?:\/\/[^\s<>"']+/) || [null])[0];
 /** One sheet for every way to add: a reel link, a Google/Apple Maps link, a place name, or screenshots. */
 function addSheet({ tripId = '' } = {}) {
   const r = route();
-  const st = { text: '', trip: tripId, folder: r.name === 'folder' ? r.id : null, results: '', hint: '' };
+  const st = { text: '', trip: tripId, folder: r.name === 'folder' ? r.id : null, city: r.name === 'city' ? r.id : '', results: '', hint: '' };
   openSheet({
-    type: 'form', title: 'Add', confirm: 'Add', st,
+    type: 'form', title: st.city ? `Add in ${st.city}` : 'Add', confirm: 'Add', st,
     body: () => `<div class="section"><div class="group"><label class="row searchrow" for="add-input">${ICON.search}
         <input class="field" id="add-input" type="text" data-act="addinput" value="${esc(st.text)}" placeholder="Paste a link or search for a place"
           autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="go" aria-label="Link or place name"></label></div>
@@ -3596,7 +3609,7 @@ function addInputChanged(value) {
     let found = [];
     let error = '';
     try {
-      found = await api('/v1/places/search', { method: 'POST', body: { query: text, trip_id: st.trip || null } });
+      found = await api('/v1/places/search', { method: 'POST', body: { query: text, trip_id: st.trip || null, city: st.trip ? null : st.city || null } });
     } catch (e) { error = e.message; }
     if (seq !== searchSeq || !S.sheet || S.sheet.st !== st) return;
     const rows = found.map((c) => `<button class="row" data-act="addresult" data-id="${esc(c.candidate_id)}">${catTile(c.category)}
@@ -4049,15 +4062,20 @@ async function packingView(trip) {
       <p>Looking at your days, the weather and your taste. This can take up to a minute.</p></div>`;
   }
   if (!list) {
-    return emptyState('teal', 'bag', 'A packing list for this trip',
-      `Built from your ${trip.day_count ? plural(trip.day_count, 'planned day') : 'saved places'}${trip.start_date ? ', the weather on your dates' : ''} and your taste, with a reason for what’s on it. Not a list you could write in a notes app.`,
-      `<button class="btn" data-act="makepacking" data-id="${trip.id}">${ICON.sparkle}Make my list</button>
-       ${trip.start_date ? '' : '<div class="section-f">Add a start date to your trip and it will use the weather too.</div>'}`);
+    const opt = (act, color, icon, title, sub) => `<button class="row" data-act="${act}" data-id="${trip.id}">${tile(color, icon)}<span class="main"><span class="t">${title}</span><span class="s">${sub}</span></span>${ICON.chev}</button>`;
+    return `<div class="empty">${tile('teal', 'bag', 'xl')}<h3>A packing list for this trip</h3><p>Write your own, bring one you already have, or let it be made for your days and the weather.</p></div>
+      <div class="section"><div class="group tiles">
+        ${opt('makepacking', 'gold', 'sparkle', 'Make it for me', `From your ${trip.day_count ? plural(trip.day_count, 'planned day') : 'saved places'}${trip.start_date ? ', the weather on your dates' : ''} and your taste, with a reason for each thing`)}
+        ${opt('packimport', 'blue', 'copy', 'Import a list', 'Paste one from Notes or anywhere, or copy another trip’s list')}
+        ${opt('packadd', 'gray', 'plus', 'Start my own', 'Add things one at a time')}
+      </div>${trip.start_date ? '' : '<div class="section-f">Add a start date to your trip and the list it makes for you uses the weather too.</div>'}</div>`;
   }
   const packed = list.items.filter((i) => i.packed).length;
   const groups = PACK_GROUPS.map(([id, label]) => [id, label, list.items.filter((i) => i.group === id)]).filter(([, , items]) => items.length);
-  return `<div class="planbar"><span class="planned-by">${list.generated_by === 'claude' ? `${ICON.sparkle}Made for this trip` : 'Basic list (Claude unavailable)'}</span>
-      <span class="planlinks"><button class="linkbtn" data-act="makepacking" data-id="${trip.id}" data-again="1">Remake</button></span></div>
+  const by = { claude: `${ICON.sparkle}Made for this trip`, manual: 'Your list', offline: 'Basic list (AI unavailable)' }[list.generated_by] || '';
+  return `<div class="planbar"><span class="planned-by">${by}</span>
+      <span class="planlinks"><button class="linkbtn" data-act="packimport" data-id="${trip.id}">Import</button>
+      <button class="linkbtn" data-act="makepacking" data-id="${trip.id}" data-again="1">${list.generated_by === 'manual' ? 'Add suggestions' : 'Remake'}</button></span></div>
     <div class="homectl"><button class="pillbtn${list.carry_on_only ? ' on' : ''}" data-act="packcarry" data-id="${trip.id}" aria-pressed="${list.carry_on_only}">Carry-on only</button></div>
     ${list.notes ? `<div class="section"><div class="group"><div class="notecard">${esc(list.notes)}</div></div></div>` : ''}
     ${weatherStrip(list)}
@@ -4085,6 +4103,28 @@ async function todayBag(trip, day) {
   if (!items.length) return '';
   return `<div class="section"><div class="section-h">${ICON.bag}Today’s bag</div><div class="group tiles">${items.map((i) => `<a class="row" href="#/packing/${trip.id}">
     <span class="main"><span class="t">${esc(i.text)}</span>${i.reason ? `<span class="s">${esc(i.reason)}</span>` : ''}</span></a>`).join('')}</div></div>`;
+}
+
+/** Bring a list you already have: paste it (one thing per line) or copy another trip's. */
+function packImportSheet(trip) {
+  const others = (S.trips || []).filter((t) => t.id !== trip.id && t.kind !== 'local');
+  const st = { text: '', from: '' };
+  openSheet({
+    type: 'form', title: 'Import a list', confirm: 'Import', st,
+    body: () => `<div class="section"><div class="group"><div class="row"><textarea class="field packpaste" data-act="packfield" data-f="text" rows="8"
+        placeholder="Paste your list, one thing per line&#10;Passport&#10;Phone charger&#10;Sunscreen" aria-label="Your list">${esc(st.text)}</textarea></div></div>
+        <div class="section-f">Bullets, checkboxes and numbers are tidied away, and each thing goes in the right group.</div></div>
+      ${others.length ? `<div class="section"><div class="group tiles"><label class="row" for="pack-from">${tile('blue', 'trips')}<span class="main"><span class="t">Or copy from a trip</span></span>
+        <select class="select" id="pack-from" data-act="packfield" data-f="from"><option value="">Choose…</option>
+        ${others.map((t) => `<option value="${t.id}" ${st.from === t.id ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}</select></label></div></div>` : ''}`,
+    async ok() {
+      if (!st.text.trim() && !st.from) { toast('Paste a list or choose a trip', true); return; }
+      try {
+        S.packing[trip.id] = await api(`/v1/trips/${trip.id}/packing/start`, { method: 'POST', body: { text: st.text || null, copy_from: st.from || null } });
+        closeSheet(); toast('List imported'); render();
+      } catch (e) { toast(e.message, true); }
+    },
+  });
 }
 
 function packAddSheet(trip) {
@@ -4623,7 +4663,15 @@ async function onAction(act, el) {
         },
       });
       return;
-    case 'add': { if (EMBED) { toNative({ open: '#/add' }); return; } const r = route(); addSheet({ tripId: ['trip', 'today'].includes(r.name) ? r.id : '' }); return; }
+    case 'add': {
+      const r = route();
+      const tripId = ['trip', 'today'].includes(r.name) ? r.id : '';
+      if (EMBED) {
+        const q = new URLSearchParams({ ...(tripId ? { trip: tripId } : {}), ...(r.name === 'folder' ? { folder: r.id } : {}), ...(r.name === 'city' ? { city: r.id } : {}) });
+        toNative({ open: `#/add${q.toString() ? `?${q}` : ''}` }); return;
+      }
+      addSheet({ tripId }); return;
+    }
     case 'addtrip': S.sheet.st.trip = el.value; if (S.sheet.st.text) addInputChanged(S.sheet.st.text); return;
     case 'addresult': await addPlace('/v1/places', { candidate_id: el.dataset.id, trip_id: S.sheet.st.trip || null }); return;
     case 'addname': await addByName(S.sheet.st.text.trim(), S.sheet.st.trip); return;
@@ -5049,6 +5097,7 @@ async function onAction(act, el) {
       return;
     }
     case 'packadd': packAddSheet(S.trip[el.dataset.id]); return;
+    case 'packimport': packImportSheet(S.trip[el.dataset.id]); return;
     case 'packfield': S.sheet.st[el.dataset.f] = el.value; return;
     case 'packtick': {
       const trip = Object.values(S.trip).find((t) => S.packing[t.id] && S.packing[t.id].items.some((i) => i.id === el.dataset.id));
@@ -5414,6 +5463,18 @@ async function onAction(act, el) {
       return;
     }
     case 'copy': await copy(el.dataset.value, el.previousElementSibling); return;
+    case 'editname':
+      openSheet({ type: 'form', title: 'Your name', confirm: 'Save', st: {},
+        body: () => `<div class="section"><div class="group">
+          <label class="row authrow" for="me-name"><span class="lbl">Name</span><input class="field" id="me-name" autocomplete="given-name" value="${esc((S.me && S.me.name) || '')}" maxlength="80"></label>
+        </div></div>`,
+        async ok() {
+          try {
+            S.me = await api('/v1/me', { method: 'PATCH', body: { name: $('#me-name').value } });
+            closeSheet(); toast('Saved'); render({ quiet: true });
+          } catch (e) { toast(e.message, true); }
+        } });
+      return;
     case 'changepw':
       openSheet({ type: 'form', title: 'Change password', confirm: 'Save', st: {},
         body: () => `<div class="section"><div class="group">

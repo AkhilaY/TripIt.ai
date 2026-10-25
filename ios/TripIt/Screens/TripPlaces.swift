@@ -22,6 +22,7 @@ struct TripPlaces: View {
                 EditsRail(trip: trip)
             }
             Section {
+                Button { router.addRequest = Router.AddRequest(tripId: trip.id) } label: { Label("Search for a place to add", systemImage: "magnifyingglass") }
                 Button { addFromSaved() } label: { Label("Add from saved", systemImage: "plus.circle.fill") }
             }
             if trip.places.isEmpty {

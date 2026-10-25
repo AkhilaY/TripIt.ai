@@ -179,10 +179,28 @@ class PackingService:
 
     # ---------- Editing ----------
 
+    def _empty(self, trip_id: str) -> PackingList:
+        return PackingList(trip_id=trip_id, items=[], generated_by="manual", generated_at=datetime.now(timezone.utc))
+
+    def start(self, trip_id: str, lines: list[str], copy_from: Optional[PackingList] = None) -> PackingList:
+        """A list you make yourself: pasted lines (grouped by what they are) and/or another trip's items, unticked.
+        Adds to the list if there is one already; duplicates are skipped."""
+        with self._lock:
+            current = self.get(trip_id) or self._empty(trip_id)
+            have = {i.text.lower() for i in current.items}
+            incoming = [(i.text, i.group) for i in copy_from.items if not i.unused] if copy_from else []
+            incoming += [(t, guess_group(t)) for t in lines]
+            for text, group in incoming:
+                text = " ".join(text.split())[:120]
+                if text and text.lower() not in have and len(current.items) < MAX_ITEMS + 40:
+                    have.add(text.lower())
+                    current.items.append(PackingItem(id=new_id(), text=text, group=group, custom=True))
+            return self._save(trip_id, current)
+
     def add_item(self, trip_id: str, text: str, group: str) -> Optional[PackingList]:
         with self._lock:
-            current = self.get(trip_id)
-            if current is None or len(current.items) >= MAX_ITEMS + 40:
+            current = self.get(trip_id) or self._empty(trip_id)  # the first item starts your own list
+            if len(current.items) >= MAX_ITEMS + 40:
                 return current
             current.items.append(PackingItem(id=new_id(), text=" ".join(text.split())[:120], group=group, custom=True))
             return self._save(trip_id, current)
@@ -214,3 +232,33 @@ class PackingService:
                 return None
             current.items = [i for i in current.items if i.id != item_id]
             return self._save(trip_id, current)
+
+
+GROUP_WORDS = {
+    "documents": ("passport", "visa", "ticket", "boarding", "insurance", "license", "licence", "id card", "cash", "card", "wallet", "money", "itinerary"),
+    "tech": ("charger", "cable", "adapter", "plug", "power bank", "battery", "phone", "laptop", "headphone", "earbud", "airpods", "camera", "kindle", "ipad", "tablet"),
+    "toiletries": ("toothbrush", "toothpaste", "sunscreen", "spf", "shampoo", "conditioner", "deodorant", "razor", "makeup", "skincare", "moisturi", "medicine", "meds", "pills", "vitamin", "contact", "glasses", "perfume", "lotion", "floss", "plaster", "band-aid"),
+    "shoes": ("shoe", "sneaker", "trainer", "sandal", "boot", "heel", "flip flop", "loafer", "slipper", "sunglasses", "hat", "belt", "scarf", "jewel", "watch", "bag"),
+    "clothes": ("shirt", "t-shirt", "tee", "top", "dress", "skirt", "jean", "trouser", "pant", "short", "jacket", "coat", "sweater", "jumper", "hoodie", "cardigan", "sock", "underwear", "bra", "pyjama", "pajama", "swim", "bikini", "suit", "blouse", "legging"),
+}
+
+
+def guess_group(text: str) -> str:
+    """Which group a pasted item probably belongs in."""
+    t = text.lower()
+    for group, words in GROUP_WORDS.items():
+        if any(w in t for w in words):
+            return group
+    return "other"
+
+
+def parse_lines(text: str) -> list[str]:
+    """Items from pasted text: one per line (or comma separated), without bullets, checkboxes or numbering."""
+    import re
+    parts = [p for line in (text or "").splitlines() for p in (line.split(",") if line.count(",") >= 2 else [line])]
+    out = []
+    for p in parts:
+        p = re.sub(r"^\s*(?:[-*•·◦▪–]|\[[ xX]?\]|☐|☑|✓|✔|\d+[.)])\s*", "", p).strip()
+        if p and len(p) <= 120:
+            out.append(p)
+    return out[:150]

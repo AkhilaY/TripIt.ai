@@ -31,6 +31,7 @@ from .calendar import CalendarService
 from .events import EventsService, Ticketmaster
 from .lounges import LoungeService
 from . import tripcheck
+from .schedule import day_times
 from .exports import ExportError, ics, kml, schedule
 from .geocode import GooglePlacesGeocoder, NoGeocoder, clean_website, make_geocoder
 from .jobs import JobStore
@@ -83,6 +84,7 @@ from .models import (
     PackingItemInput,
     PackingList,
     PackingRequest,
+    PackingStart,
     Place,
     PlaceUpdate,
     PlanRequest,
@@ -108,7 +110,8 @@ from .menu_browser import BrowserRenderer, browser_available
 from .menus import MENU_CATEGORIES, MenuService, SafeFetcher
 from .needs import NeedsService
 from .packing import PackingService
-from .photos import PhotoStore
+from .photos import PhotoStore, fetch_bytes as fetch_photo_bytes
+from .packing import parse_lines
 from .reserve import find_reserve_link
 from .pipeline import Pipeline
 from .monitoring import RateLimit, init_monitoring, report_client_error, report_feedback, set_user
@@ -146,6 +149,7 @@ def build_services(app: FastAPI, settings: Settings) -> None:
     app.state.lounges = LoungeService(db, app.state.claude)
     cur = app.state.curator
     cur.geocoder, cur.photo_url = app.state.library.geocoder, app.state.discover.photo_url
+    cur.fetch_photo = lambda ref: fetch_photo_bytes(ref, photos, settings.google_maps_api_key, count_google=usage.record_google)
     cur.web, cur.web_searches = settings.edits_web, settings.edits_web_searches
     app.state.calendar = CalendarService(db, photos)
     app.state.needs = NeedsService(db, app.state.claude)
@@ -310,6 +314,7 @@ def _trip_or_404(request: Request, trip_id: str) -> TripDetail:
     if trip is None:
         raise HTTPException(status_code=404, detail="Trip not found")
     trip.closures = tripcheck.closures(trip)
+    trip.schedule = [t for d in range(1, trip.day_count + 1) for t in day_times(trip.day_places(d))]
     return trip
 
 
@@ -414,6 +419,16 @@ async def me(request: Request) -> Optional[MeOut]:
     """You, or null in the single-user setup from before accounts."""
     user = getattr(request.state, "user", None)
     return _me_out(request, user) if user else None
+
+
+class NameChange(BaseModel):
+    name: str = Field(max_length=80)
+
+
+@app.patch("/v1/me", response_model=MeOut, dependencies=[Auth])
+async def update_me(body: NameChange, request: Request) -> MeOut:
+    """Your name, as the greeting and shared trips show it."""
+    return _me_out(request, _accounts(request).set_name(_me(request), body.name))
 
 
 @app.post("/v1/me/password", status_code=204, dependencies=[Auth])
@@ -1051,15 +1066,25 @@ async def make_packing(trip_id: str, request: Request, body: Optional[PackingReq
     return await request.app.state.packing.generate(trip, request.app.state.curator.profile(), body.carry_on_only, body.keep_packed)
 
 
+@app.post("/v1/trips/{trip_id}/packing/start", response_model=PackingList, dependencies=[Auth])
+async def start_packing(trip_id: str, body: PackingStart, request: Request) -> PackingList:
+    """Your own list, without AI: empty, pasted (one item per line), or copied from another trip's list."""
+    _trip_or_404(request, trip_id)
+    source = None
+    if body.copy_from:
+        _trip_or_404(request, body.copy_from)
+        source = request.app.state.packing.get(body.copy_from)
+        if source is None:
+            raise HTTPException(status_code=404, detail="That trip doesn't have a packing list yet")
+    return request.app.state.packing.start(trip_id, parse_lines(body.text or ""), source)
+
+
 @app.post("/v1/trips/{trip_id}/packing/items", response_model=PackingList, status_code=201, dependencies=[Auth])
 async def add_packing_item(trip_id: str, body: PackingItemInput, request: Request) -> PackingList:
     _trip_or_404(request, trip_id)
     if not body.text:
         raise HTTPException(status_code=422, detail="What should be on the list?")
-    result = request.app.state.packing.add_item(trip_id, body.text, body.group or "other")
-    if result is None:
-        raise HTTPException(status_code=404, detail="Make the packing list first")
-    return result
+    return request.app.state.packing.add_item(trip_id, body.text, body.group or "other")
 
 
 @app.patch("/v1/trips/{trip_id}/packing/items/{item_id}", response_model=PackingList, dependencies=[Auth])
@@ -1522,7 +1547,12 @@ async def list_places(request: Request) -> list[Place]:
 @app.post("/v1/places/search", response_model=list[PlaceCandidate], dependencies=[Auth])
 async def search_places(body: SearchPlacesRequest, request: Request) -> list[PlaceCandidate]:
     library = _library(request)
-    matches = await library.geocoder.search(body.query.strip(), near=library.trip_center(body.trip_id), limit=6)
+    query = body.query.strip()
+    near = library.trip_center(body.trip_id)
+    # On a city page, look in that city unless the search already names a place.
+    if near is None and body.city and body.city.strip().lower() not in query.lower():
+        query = f"{query}, {body.city.strip()}"
+    matches = await library.geocoder.search(query, near=near, limit=6)
     return [
         PlaceCandidate(candidate_id=m.place_id, name=m.name, address=m.address, category=m.category or "other",
                        latitude=m.latitude, longitude=m.longitude)

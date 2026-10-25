@@ -151,6 +151,10 @@ class Accounts:
         self._failures.pop(key, None)
         return user
 
+    def set_name(self, user: User, name: str) -> User:
+        self.db._exec("UPDATE users SET name = ? WHERE id = ?", (" ".join(name.split())[:80], user.id))
+        return self.get_user(user.id)
+
     def change_password(self, user: User, current: str, new: str) -> None:
         rows = self.db._rows("SELECT password_hash FROM users WHERE id = ?", (user.id,))
         if not rows or not check_password(current, rows[0]["password_hash"]):

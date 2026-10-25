@@ -34,6 +34,10 @@ final class Session {
         start(out)
     }
 
+    func setName(_ name: String) async throws {
+        me = try await API.shared.patch("/v1/me", ["name": name.trimmingCharacters(in: .whitespaces)], as: Me.self)
+    }
+
     private func start(_ out: SessionOut) {
         SessionStore.save(out.token)
         me = out.user

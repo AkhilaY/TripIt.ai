@@ -154,8 +154,8 @@ struct TravelHome: View {
                     Text([Self.stopLabel(p),
                           walk.map { "\($0) min walk" }].compactMap { $0 }.joined(separator: " · "))
                         .font(.caption).foregroundStyle(Theme.secondary)
-                    if p.bookingNeed != nil, !booked, Category(p.category).hasMenu {
-                        Text(p.bookingNeed == "required" ? "No table booked yet" : "No table booked · expect a queue")
+                    if p.shownNeed != nil, !booked, Category(p.category).hasMenu {
+                        Text(p.shownNeed == "required" ? "No table booked yet" : "No table booked · expect a queue")
                             .font(.caption.weight(.medium)).foregroundStyle(Theme.attention)
                     }
                 }

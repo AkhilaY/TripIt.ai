@@ -101,6 +101,9 @@ class Settings(BaseSettings):
     sentry_traces_sample_rate: float = 0.0
     # Accounts: anyone can sign up (with Apple or an email). False makes new accounts need an invite code.
     open_signup: bool = True
+    # Features switched off, comma separated: events, concierge, menus, lounges, calendar, chatgpt, booking_needs.
+    # The apps hide them and their endpoints answer 404. fly.toml sets the list for the first App Store version.
+    features_off: str = ""
     # Sign in with Apple: the app's bundle ID(s), comma separated. Defaults to APNS_TOPIC, which is the bundle ID.
     apple_client_ids: str = ""
     # Optional: a Sign in with Apple key (.p8, its key ID; team defaults to APNS_TEAM_ID), so deleting an account
@@ -118,3 +121,7 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
+
+
+def features_off(settings: "Settings") -> set[str]:
+    return {f.strip() for f in settings.features_off.split(",") if f.strip()}

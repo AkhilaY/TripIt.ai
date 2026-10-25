@@ -273,7 +273,7 @@ struct PlaceView: View {
     private func main(_ p: Place, _ category: Category) -> MainAction {
         let booked = (trip ?? memberTrip(p))?.bookings.contains { $0.placeId == p.id && $0.kind == "reservation" } ?? false
         if !booked, let url = p.reserveUrl.flatMap({ URL(string: $0) }) { return .reserve(url) }
-        if p.bookingKind == "tickets", p.bookingNeed != nil, let url = p.website.flatMap({ URL(string: $0) }) { return .tickets(url) }
+        if p.bookingKind == "tickets", p.shownNeed != nil, let url = p.website.flatMap({ URL(string: $0) }) { return .tickets(url) }
         return .directions
     }
 
@@ -296,13 +296,13 @@ struct PlaceView: View {
                 }
             }
             if let need = needText(p) {
-                Label(need, systemImage: "info.circle").font(.footnote).foregroundStyle(p.bookingNeed == "required" ? Theme.attention : Theme.secondary)
+                Label(need, systemImage: "info.circle").font(.footnote).foregroundStyle(p.shownNeed == "required" ? Theme.attention : Theme.secondary)
             }
         }
     }
 
     private func needText(_ p: Place) -> String? {
-        guard let need = p.bookingNeed, need != "none" else { return nil }
+        guard let need = p.shownNeed, need != "none" else { return nil }
         let required = need == "required"
         let text: String
         if p.bookingKind == "tickets" { text = required ? "Tickets needed" : "Tickets recommended" }
@@ -321,7 +321,7 @@ struct PlaceView: View {
         switch primary { case .directions: isDirections = true; case .tickets: isTickets = true; default: break }
         return HStack(spacing: 10) {
             if !isDirections { DirectionsButton(apple: p.directionsURL, google: p.googleDirectionsURL) }
-            if category.hasMenu {
+            if category.hasMenu, Features.isOn("menus") {
                 Button { router.push(.menu(placeId: p.id)) } label: { QuietTileLabel(symbol: "menucard", title: "Menu") }.buttonStyle(.plain)
             }
             if let phone {
@@ -432,10 +432,10 @@ struct PlaceView: View {
                     }
                     Divider().overlay(Theme.border).padding(.leading, 48)
                 }
-                if Category(p.category).hasMenu || p.bookingNeed != nil || booking != nil {
+                if Category(p.category).hasMenu || p.shownNeed != nil || booking != nil {
                     Button { router.open("#/trip/\(trip.id)/bookings") } label: {
                         slotRow("ticket", "Reservation", booking.map { $0.title } ?? "Not booked yet", chevron: booking == nil,
-                                attention: booking == nil && p.bookingNeed == "required")
+                                attention: booking == nil && p.shownNeed == "required")
                     }
                 }
             }

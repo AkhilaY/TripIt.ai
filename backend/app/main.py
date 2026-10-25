@@ -311,6 +311,13 @@ def _count_google(request: Request, kind: str) -> None:
         usage.record_google(kind)
 
 
+def _feature(name: str) -> None:
+    """Endpoints of a feature switched off (FEATURES_OFF) answer 404, so nothing spends money on it."""
+    from .config import features_off
+    if name in features_off(get_settings()):
+        raise HTTPException(status_code=404, detail="That isn't available in The Travel Edit right now")
+
+
 def _admin(request: Request) -> User:
     user = _me(request)
     if not user.is_admin:
@@ -645,6 +652,28 @@ async def admin_feedback(request: Request, limit: int = 100) -> list[dict]:
     for item in items:
         item["email"] = users.get(item["user_id"] or "", "")
     return items
+
+
+@app.get("/v1/features")
+async def features() -> dict:
+    """Which features are switched off, so the apps can hide them."""
+    from .config import features_off
+    return {"off": sorted(features_off(get_settings()))}
+
+
+@app.post("/v1/home/collection", response_model=TripDetail, dependencies=[Auth])
+async def home_collection(request: Request) -> TripDetail:
+    """Your home city's collection ("Around <city>"), made the first time it's needed: for places and bookings
+    near home that aren't part of a trip, such as a pop-up's tickets or a dinner reservation."""
+    from .tripcheck import city_key
+    home = _library(request).home()
+    if not home:
+        raise HTTPException(status_code=422, detail="Set your home city in your profile first")
+    key = city_key(home["city"])
+    trip = next((t for t in _db(request).list_trips() if t.kind == "local" and city_key(t.city) == key and t.role != "editor"), None)
+    if trip is None:
+        trip = _db(request).create_trip(name=f"Around {home['city']}", city=home["city"], country=home.get("country") or "", kind="local")
+    return _trip_or_404(request, trip.id)
 
 
 @app.get("/health")
@@ -1079,6 +1108,9 @@ async def discover_photo(request: Request, settings: Annotated[Settings, Depends
 async def check_booking_needs(trip_id: str, request: Request) -> TripDetail:
     """Marks which places need a reservation or tickets (once per place; Claude's best judgement)."""
     trip = _trip_or_404(request, trip_id)
+    from .config import features_off
+    if "booking_needs" in features_off(get_settings()):
+        return trip  # switched off: nothing is checked, so nothing is spent
     try:
         await request.app.state.needs.check(trip)
     except ClaudeError as e:
@@ -1092,6 +1124,7 @@ async def check_booking_needs(trip_id: str, request: Request) -> TripDetail:
 @app.get("/v1/trips/{trip_id}/events", response_model=TripEvents, dependencies=[Auth])
 async def trip_events(trip_id: str, request: Request) -> TripEvents:
     """Events near the trip during its dates, matched to the person's taste (Ticketmaster)."""
+    _feature("events")
     trip = _trip_or_404(request, trip_id)
     return await request.app.state.events.get(trip, request.app.state.curator.profile())
 
@@ -1201,6 +1234,7 @@ async def calendar(request: Request) -> CalendarResult:
 @app.post("/v1/calendar/feed", response_model=CalendarFeed, dependencies=[Auth])
 async def start_calendar_feed(request: Request) -> CalendarFeed:
     """A private link Google or Apple Calendar can subscribe to. Making a new one turns the old one off."""
+    _feature("calendar")
     return request.app.state.calendar.start_feed(_public_base(request))
 
 
@@ -1244,6 +1278,7 @@ async def list_all_bookings(request: Request) -> list[BookingListItem]:
 @app.get("/v1/trips/{trip_id}/bookings/{booking_id}/lounges", response_model=LoungeResult, dependencies=[Auth])
 async def booking_lounges(trip_id: str, booking_id: str, request: Request, refresh: bool = False) -> LoungeResult:
     """Lounges at the airport a flight departs from: name, terminal, and how to get in. From Claude's knowledge, so to be checked."""
+    _feature("lounges")
     booking = _booking_or_404(request, trip_id, booking_id)
     if booking.kind != "flight":
         raise HTTPException(status_code=422, detail="Lounges are for flights")
@@ -1618,6 +1653,7 @@ async def bookmark_edit(trip_id: str, edit_id: str, request: Request) -> Folder:
 
 @app.post("/v1/concierge", response_model=ConciergeReply, dependencies=[Auth])
 async def concierge(body: ConciergeRequest, request: Request) -> ConciergeReply:
+    _feature("concierge")
     if body.trip_id:
         _trip_or_404(request, body.trip_id)
     try:
@@ -1878,6 +1914,7 @@ async def get_menu(place_id: str, request: Request) -> PlaceMenu:
 @app.post("/v1/places/{place_id}/menu", response_model=PlaceMenu, dependencies=[Auth])
 async def find_menu(place_id: str, request: Request, body: Optional[MenuRequest] = None) -> PlaceMenu:
     """Looks for the menu on the place's website (then, if allowed, in its Google photos) and saves it."""
+    _feature("menus")
     place = _place_or_404(request, place_id)
     if place.category.value not in MENU_CATEGORIES:
         raise HTTPException(status_code=422, detail="Menus are for restaurants, cafés, bars and sweet shops")

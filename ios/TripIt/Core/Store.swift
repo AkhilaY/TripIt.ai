@@ -22,6 +22,8 @@ final class Store {
     /// Every booking across your trips, soonest first (undated ones last), for the Bookings tab.
     var bookings: [Booking] = []
     var bookingsLoaded = false
+    /// Features switched off on the server (see Features), kept here so screens update when it arrives.
+    var featuresOff = Features.off
 
     private let api = API.shared
     private var pollTask: Task<Void, Never>?
@@ -51,6 +53,8 @@ final class Store {
             async let j: [Job] = api.get("/v1/jobs?limit=30")
             async let h = api.get("/v1/home", as: HomeSetting?.self)
             (places, folders, trips, jobs) = try await (p, f, t, j)
+            await Features.refresh()
+            featuresOff = Features.off
             home = (try? await h) ?? home
             loaded = true
             error = nil

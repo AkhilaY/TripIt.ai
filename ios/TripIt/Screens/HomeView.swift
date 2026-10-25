@@ -148,7 +148,7 @@ struct HomeView: View {
         let parts = [p.neighborhood ?? Category(p.category).label, distance].compactMap { $0 }
         return HStack(spacing: 0) {
             Text(parts.joined(separator: " · ")).foregroundStyle(Theme.secondary)
-            if p.bookingNeed == "required" {
+            if p.shownNeed == "required" {
                 Text(" · ").foregroundStyle(Theme.secondary)
                 Text(p.bookingKind == "tickets" ? "Tickets needed" : "Book ahead").fontWeight(.semibold).foregroundStyle(Theme.attention)
             }
@@ -246,7 +246,7 @@ struct HomeView: View {
     private func needsBooking(_ trip: Trip) -> Place? {
         guard let detail = store.tripDetails[trip.id] else { return nil }
         let booked = Set(detail.bookings.compactMap(\.placeId))
-        return detail.places.first { $0.bookingNeed == "required" && !booked.contains($0.id) && !$0.suggested }
+        return detail.places.first { $0.shownNeed == "required" && !booked.contains($0.id) && !$0.suggested }
     }
 
     // MARK: Recent saves

@@ -214,7 +214,7 @@ struct BookingsView: View {
             ProgressView().frame(maxWidth: .infinity).padding(.top, 60)
         } else if all.isEmpty {
             EmptyState(symbol: "airplane", color: Theme.blue, title: "No bookings yet",
-                       text: "Keep flights, stays, tables and car rentals in one place. Add one from a screenshot, the confirmation email, or type it in.") {
+                       text: "Flights and stays for trips, and tickets and tables near home, in one place. Add one from a screenshot, the confirmation email, or type it in.") {
                 Button { addBooking() } label: { Label("Add a booking", systemImage: "plus") }
                     .buttonStyle(PrimaryButtonStyle()).frame(maxWidth: 220)
             }
@@ -258,19 +258,20 @@ struct BookingsView: View {
     }
 
     @ViewBuilder private func filters(present: Set<String>, kindNow: String) -> some View {
-        let tripsWith = store.realTrips.filter { t in mine.contains { $0.tripId == t.id } }
+        // Near home first, then trips: wherever there are bookings.
+        let tripsWith = (store.trips.filter(\.isLocal) + store.realTrips).filter { t in mine.contains { $0.tripId == t.id } }
         if present.count > 1 || (tripId == nil && (tripsWith.count > 1 || tripFilter != "all")) {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
                     if tripId == nil, tripsWith.count > 1 || tripFilter != "all" {
                         Menu {
                             Picker("Trip", selection: $tripFilter) {
-                                Text("All trips").tag("all")
+                                Text("Everything").tag("all")
                                 ForEach(tripsWith) { Text($0.name).tag($0.id) }
                             }
                         } label: {
                             HStack(spacing: 5) {
-                                Text(tripsWith.first { $0.id == tripFilter }?.name ?? "All trips").font(.subheadline.weight(.medium))
+                                Text(tripsWith.first { $0.id == tripFilter }?.name ?? "Everything").font(.subheadline.weight(.medium))
                                 Image(systemName: "chevron.down").font(.caption2.weight(.bold))
                             }
                             .foregroundStyle(Theme.label)
@@ -309,7 +310,7 @@ struct BookingsView: View {
     // MARK: Actions
 
     @ViewBuilder private func actions(for booking: Booking) -> some View {
-        if booking.bookingKind == .flight, let origin = booking.origin {
+        if booking.bookingKind == .flight, let origin = booking.origin, Features.isOn("lounges") {
             Button("Airport lounges at \(origin)") { lounges = booking }
         }
         Button("Edit") { router.bookingRequest = Router.BookingRequest(tripId: booking.tripId, booking: booking) }
@@ -573,7 +574,7 @@ struct BookingCard: View {
 
     @ViewBuilder private var actionRow: some View {
         let directions = booking.bookingKind == .hotel ? booking.address : nil
-        let lounges = booking.bookingKind == .flight ? booking.origin : nil
+        let lounges = booking.bookingKind == .flight && Features.isOn("lounges") ? booking.origin : nil
         if tripName != nil || directions != nil || booking.placeId != nil || lounges != nil {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 14) {

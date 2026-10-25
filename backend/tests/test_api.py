@@ -3352,3 +3352,23 @@ def test_open_signup_and_sign_in_with_apple(client):
     # Invite-only servers don't make new accounts from Apple sign-ins.
     app.state.accounts.open_signup = False
     assert client.post("/v1/auth/apple", json={"identity_token": "apple.777|someone@x.com"}).status_code == 403
+
+
+def test_switched_off_features_are_hidden_and_refused(client, monkeypatch):
+    from app import main as main_module
+    monkeypatch.setattr(main_module, "get_settings", lambda: Settings(app_api_key="secret", features_off="concierge, events"))
+    assert client.get("/v1/features").json() == {"off": ["concierge", "events"]}
+    r = client.post("/v1/concierge", json={"messages": [{"role": "user", "content": "hi"}]}, headers=H)
+    assert r.status_code == 404
+
+
+def test_bookings_near_home_go_in_the_home_collection(client):
+    assert client.post("/v1/home/collection", headers=H).status_code == 422
+    client.put("/v1/home", json={"city": "new york"}, headers=H)
+    first = client.post("/v1/home/collection", headers=H).json()
+    assert first["kind"] == "local" and first["name"].startswith("Around ")
+    assert client.post("/v1/home/collection", headers=H).json()["id"] == first["id"]  # made once
+    r = client.post(f"/v1/trips/{first['id']}/bookings", json={"kind": "reservation", "title": "Carbone", "start_at": "2026-11-02T19:30"}, headers=H)
+    assert r.status_code == 201
+    listed = client.get("/v1/bookings", headers=H).json()
+    assert listed[0]["trip_kind"] == "local"

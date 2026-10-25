@@ -177,6 +177,28 @@ struct BookingSheet: View {
 
     enum Step: Hashable { case paste, manual, drafts }
 
+    /// Stands for your home city's collection until it's made.
+    static let home = "home"
+
+    private var homeCollection: Trip? {
+        guard let home = store.home else { return nil }
+        return store.trips.first { $0.isLocal && $0.role != "editor" && Store.cityKey($0.city) == Store.cityKey(home.city) }
+    }
+
+    /// Bookings near home go in your home city's collection, made the first time.
+    private func useHomeCollection() async {
+        if let existing = homeCollection { tripId = existing.id; return }
+        do {
+            let trip: TripDetail = try await API.shared.post("/v1/home/collection")
+            store.apply(trip)
+            await store.reloadTrips()
+            tripId = trip.id
+        } catch {
+            store.fail(error)
+            tripId = store.likelyBookingTrip?.id ?? ""
+        }
+    }
+
     var body: some View {
         NavigationStack(path: $path) {
             root
@@ -192,9 +214,14 @@ struct BookingSheet: View {
                 }
         }
         .onAppear {
-            if tripId.isEmpty { tripId = request.tripId ?? request.booking?.tripId ?? store.likelyBookingTrip?.id ?? "" }
+            if tripId.isEmpty {
+                // Usually the trip you're on; at home, near home (a pop-up's tickets, a dinner reservation).
+                tripId = request.tripId ?? request.booking?.tripId ?? store.activeTrip?.trip.id
+                    ?? (store.home != nil ? Self.home : store.likelyBookingTrip?.id ?? "")
+            }
         }
         .task(id: tripId) {
+            if tripId == Self.home { await useHomeCollection(); return }
             if !tripId.isEmpty, store.tripDetails[tripId] == nil { _ = try? await store.loadTrip(tripId) }
         }
     }
@@ -210,23 +237,28 @@ struct BookingSheet: View {
         }
     }
 
+    /// Your trips, soonest first, after near home.
     private var tripsToChoose: [Trip] {
-        store.trips.filter { !$0.isLocal || $0.id == tripId }
+        store.realTrips.filter { $0.id != homeCollection?.id }
     }
 
     private var chooser: some View {
         Form {
-            if tripsToChoose.isEmpty {
+            if tripsToChoose.isEmpty && store.home == nil {
                 Section {
-                    Text("Save a trip first, then add its bookings.").foregroundStyle(Theme.secondary)
+                    Text("Set your home city in Profile for bookings near home, or save a trip for its flights and stays.")
+                        .foregroundStyle(Theme.secondary)
                 }
             } else {
-                if tripsToChoose.count > 1 {
-                    Section {
-                        Picker("For", selection: $tripId) {
-                            ForEach(tripsToChoose) { Text($0.name).tag($0.id) }
+                Section {
+                    Picker("For", selection: $tripId) {
+                        if let home = store.home {
+                            Text("Around \(home.city)").tag(homeCollection?.id ?? Self.home)
                         }
+                        ForEach(tripsToChoose) { Text($0.name).tag($0.id) }
                     }
+                } footer: {
+                    Text("Near home: tickets for a pop-up, a table at a restaurant. On a trip: flights, stays and tours.")
                 }
                 Section {
                     PhotosPicker(selection: $shots, maxSelectionCount: 6, matching: .images) {
@@ -241,7 +273,7 @@ struct BookingSheet: View {
                 } footer: {
                     Text("You check what Claude read before anything is saved. A confirmation number alone can't be looked up, so The Travel Edit reads the confirmation itself.")
                 }
-                .disabled(reading || tripId.isEmpty)
+                .disabled(reading || tripId.isEmpty || tripId == Self.home)
                 if reading {
                     Section {
                         HStack(spacing: 10) { ProgressView(); Text("Reading your confirmation…").foregroundStyle(Theme.secondary) }

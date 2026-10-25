@@ -162,7 +162,7 @@ struct PlaceRow: View {
             out.append(ChipItem(text: place.eventDate.map(Fmt.shortDay) ?? "Date TBC", symbol: "calendar", color: Theme.secondary))
         }
         if place.suggested { out.append(ChipItem(text: "Suggested", symbol: "sparkles", color: Theme.gold)) }
-        if place.bookingNeed == "required" {
+        if place.shownNeed == "required" {
             out.append(ChipItem(text: place.bookingKind == "tickets" ? "Tickets needed" : "Book ahead", symbol: nil, color: Theme.warn))
         }
         if let rating = place.rating {

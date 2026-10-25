@@ -21,9 +21,11 @@ struct MainTabs: View {
             NavigationStack(path: $router.bookings) { BookingsView().withRoutes() }
                 .tabItem { Label("Bookings", systemImage: "suitcase") }
                 .tag(AppTab.bookings)
-            NavigationStack(path: $router.concierge) { ConciergeView().withRoutes() }
-                .tabItem { Label("Concierge", systemImage: "sparkles") }
-                .tag(AppTab.concierge)
+            if !store.featuresOff.contains("concierge") {
+                NavigationStack(path: $router.concierge) { ConciergeView().withRoutes() }
+                    .tabItem { Label("Concierge", systemImage: "sparkles") }
+                    .tag(AppTab.concierge)
+            }
         }
         .environment(router)
         .modifier(ToastOverlay())
@@ -129,11 +131,13 @@ private struct RootToolbar: ViewModifier {
 
     func body(content: Content) -> some View {
         content.toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                Button { router.push(.calendar) } label: {
-                    Image(systemName: "calendar")
+            if Features.isOn("calendar") {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button { router.push(.calendar) } label: {
+                        Image(systemName: "calendar")
+                    }
+                    .accessibilityLabel("Calendar")
                 }
-                .accessibilityLabel("Calendar")
             }
             ToolbarItemGroup(placement: .topBarTrailing) {
                 if add {

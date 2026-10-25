@@ -45,7 +45,7 @@ struct TodayView: View {
         .task {
             if trip == nil { _ = try? await store.loadTrip(tripId) }
             packing = try? await API.shared.get("/v1/trips/\(tripId)/packing", as: PackingList?.self)
-            events = try? await API.shared.get("/v1/trips/\(tripId)/events")
+            if Features.isOn("events") { events = try? await API.shared.get("/v1/trips/\(tripId)/events") }
         }
     }
 

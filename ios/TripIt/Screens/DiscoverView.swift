@@ -39,7 +39,6 @@ struct DiscoverView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 header
-                edits
                 content
             }
             .padding(.horizontal, 20)
@@ -52,7 +51,6 @@ struct DiscoverView: View {
             settleArea()
             await load()
         }
-        .task { await loadEdits() }
         .onChange(of: location.current) { _, _ in
             if area == "here", results[key] == nil { Task { await load() } }
         }

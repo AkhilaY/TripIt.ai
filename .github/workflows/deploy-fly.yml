@@ -86,7 +86,9 @@ jobs:
           APNS_KEY: ${{ secrets.APNS_KEY }}
           APNS_KEY_ID: ${{ secrets.APNS_KEY_ID }}
           APNS_TEAM_ID: ${{ secrets.APNS_TEAM_ID }}
-          APNS_TOPIC: ${{ secrets.APNS_TOPIC }}
+          # The app's bundle ID: the topic for iPhone notifications, and who Sign in with Apple tokens must be for.
+          APNS_TOPIC: ${{ secrets.APNS_TOPIC || secrets.TRIPIT_BUNDLE_ID }}
+          APPLE_CLIENT_IDS: ${{ secrets.TRIPIT_BUNDLE_ID }}
           APPLE_SIGNIN_KEY: ${{ secrets.APPLE_SIGNIN_KEY }}
           APPLE_SIGNIN_KEY_ID: ${{ secrets.APPLE_SIGNIN_KEY_ID }}
           BACKUP_BUCKET: ${{ secrets.BACKUP_BUCKET }}
@@ -112,6 +114,7 @@ jobs:
             # Sign in with Apple (optional): lets account deletion revoke the Apple sign-in. Multi-line .p8 like APNS_KEY.
             [ -z "$APPLE_SIGNIN_KEY" ] || printf 'APPLE_SIGNIN_KEY=%s\n' "$(printf '%s' "$APPLE_SIGNIN_KEY" | awk '{printf "%s\\n", $0}')"
             [ -z "$APPLE_SIGNIN_KEY_ID" ] || printf 'APPLE_SIGNIN_KEY_ID=%s\n' "$APPLE_SIGNIN_KEY_ID"
+            [ -z "$APPLE_CLIENT_IDS" ] || printf 'APPLE_CLIENT_IDS=%s\n' "$APPLE_CLIENT_IDS"
             # Error reporting (Sentry), tagged with the commit so errors point at a release.
             [ -z "$SENTRY_DSN" ] || printf 'SENTRY_DSN=%s\nSENTRY_RELEASE=%s\n' "$SENTRY_DSN" "${GITHUB_SHA:0:12}"
             # Backups to Cloudflare R2 (start.sh).
@@ -133,6 +136,9 @@ jobs:
           url="https://$APP.fly.dev"
           for i in $(seq 1 20); do
             if curl -fsS "$url/health" >/dev/null; then
+              if ! curl -fsS "$url/v1/auth/status" | grep -q '"apple":true'; then
+                echo "::warning::Sign in with Apple is off on the server: add the TRIPIT_BUNDLE_ID secret (the app's bundle ID)."
+              fi
               echo "### TripIt is live at $url" >> "$GITHUB_STEP_SUMMARY"
               echo "Open it in Safari on your iPhone, enter your APP_API_KEY, then Share → Add to Home Screen." >> "$GITHUB_STEP_SUMMARY"
               echo "Live at $url"

@@ -21,7 +21,7 @@ struct MainTabs: View {
             NavigationStack(path: $router.bookings) { BookingsView().withRoutes() }
                 .tabItem { Label("Bookings", systemImage: "suitcase") }
                 .tag(AppTab.bookings)
-            NavigationStack(path: $router.concierge) { WebScreen(hash: "#/concierge", isRoot: true).withRoutes() }
+            NavigationStack(path: $router.concierge) { ConciergeView().withRoutes() }
                 .tabItem { Label("Concierge", systemImage: "sparkles") }
                 .tag(AppTab.concierge)
         }
@@ -115,6 +115,7 @@ struct RouteView: View {
         case .today(let tripId, let day): TodayView(tripId: tripId, day: day)
         case .packing(let tripId): PackingView(tripId: tripId)
         case .events(let tripId): EventsView(tripId: tripId)
+        case .calendar: CalendarView()
         case .web(let hash): WebScreen(hash: hash)
         }
     }
@@ -127,7 +128,7 @@ private struct RootToolbar: ViewModifier {
     func body(content: Content) -> some View {
         content.toolbar {
             ToolbarItem(placement: .topBarLeading) {
-                Button { router.push(.web(hash: "#/calendar")) } label: {
+                Button { router.push(.calendar) } label: {
                     Image(systemName: "calendar")
                 }
                 .accessibilityLabel("Calendar")

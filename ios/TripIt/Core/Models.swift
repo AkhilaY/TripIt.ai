@@ -527,3 +527,52 @@ struct DayBriefing: Codable, Hashable {
     var headline: String
     var points: [String]
 }
+
+/// One dated thing on the calendar: a saved event, a booking, a planned stop, or a trip's span of days.
+struct CalendarItem: Codable, Identifiable, Hashable {
+    var id: String
+    var kind: String  // event, booking, stop or trip
+    var title: String
+    var date: String?
+    var endDate: String?
+    var time: String?
+    var endTime: String?
+    var partOfDay: String?
+    var subtitle: String?
+    var category: String?
+    var placeId: String?
+    var tripId: String?
+    var bookingId: String?
+    var googleUrl: String?
+    var icsUrl: String?
+}
+
+/// A private link calendar apps can subscribe to.
+struct CalendarFeed: Codable, Hashable {
+    var url: String
+    var webcalUrl: String
+    var googleUrl: String
+}
+
+struct CalendarResult: Codable {
+    var items: [CalendarItem]
+    var undated: [CalendarItem]
+    var feed: CalendarFeed?
+}
+
+/// A change the concierge proposes; nothing changes until you apply it.
+struct ProposedAction: Codable, Hashable {
+    var type: String  // move, must_do, set_time, visited
+    var placeId: String
+    var day: Int?
+    var index: Int?
+    var value: Bool?
+    var time: String?
+    var label: String
+}
+
+struct ConciergeReply: Codable {
+    var reply: String
+    var placeIds: [String]
+    var actions: [ProposedAction]
+}

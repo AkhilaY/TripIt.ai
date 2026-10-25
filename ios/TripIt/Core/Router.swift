@@ -30,6 +30,8 @@ enum Route: Hashable {
     case packing(tripId: String)
     /// Events during a trip.
     case events(tripId: String)
+    /// Everything dated: events, bookings, planned days and trips.
+    case calendar
     /// A screen of the web app that isn't native yet, by its address inside the app (e.g. "#/packing/<trip id>").
     case web(hash: String)
 }
@@ -103,6 +105,8 @@ final class Router {
         case "trip" where parts.count > 1:
             if parts.count > 2, parts[2] == "bookings" { push(.bookings(tripId: parts[1])) }
             else { push(.trip(id: parts[1])) }
+        case "calendar":
+            push(.calendar)
         case "today" where parts.count > 1:
             push(.today(tripId: parts[1], day: param("day").flatMap { Int($0) }))
         case "packing" where parts.count > 1:

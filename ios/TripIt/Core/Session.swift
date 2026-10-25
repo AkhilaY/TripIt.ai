@@ -59,7 +59,6 @@ final class Session {
 
     func signOutLocally() {
         SessionStore.clear()
-        WebSession.clearCookies()
         Monitoring.setUser(nil)
         me = nil
         phase = .signedOut

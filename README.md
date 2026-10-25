@@ -100,7 +100,7 @@ To restore by hand:
 
 With [Sentry](https://sentry.io) set up (the free Developer plan covers 5,000 errors a month), you get an email the first time a new error happens, with the screen, stack trace and app version:
 - **Server:** crashes and logged errors. Failed imports and Claude API errors count as logged errors.
-- **Web app:** JavaScript errors, including the iOS app's web screens. They reach Sentry through the server (`POST /v1/client-errors`), so the web app needs no Sentry key.
+- **Web app:** JavaScript errors. They reach Sentry through the server (`POST /v1/client-errors`), so the web app needs no Sentry key.
 - **iOS app:** crashes and hangs. With debug symbols uploaded, crash reports show readable stack traces.
 - **Feedback:** **Profile → Send feedback**, in the app and on the web. Feedback is kept on the server (`GET /v1/admin/feedback`) and sent to Sentry with the sender's email, so you can reply.
 
@@ -314,27 +314,22 @@ All `/v1` routes need the `X-API-Key` header when `APP_API_KEY` is set.
 
 `ios/` is a native SwiftUI app for the same server and account. It has a **Share → Travel Edit** button in the share sheet, so you don't need the Shortcut.
 
-**Native screens:**
-- Sign in, or join with an invite.
-- **Library:**
-  - **Saved**: folders, type chips, cities, search, sort, and multi-select to file places in folders or trips.
-  - **Trips**: trip cards, today's trip, and the new-trip flow (AI or by hand).
-- **Place pages**:
-  - photos, map, hours, open now, reserve, maps and directions;
-  - folders and trips, the trip day and time, the event date, notes, and the posts it came from.
+**Every screen is native SwiftUI** (there are no web pages inside the app):
+- Sign in with Apple, or with email.
+- **Home**: this weekend and what's open now, or while you travel, today's stops, near you and the next city.
+- **Library**: your home city, trips, cities, lists, search, and the map.
+- **Place pages**: photos, hours, open now, reserve, the menu, maps and directions, folders and trips, notes and the posts it came from.
 - **Trips**:
-  - places by kind and the trip's edits;
-  - the day-by-day plan: drag to reorder, press and hold to move to another day, and walking, transit or driving times between stops;
-  - a map for each day, plus re-plan, tidy, quiet-day suggestions, sharing, and name and dates.
-- **The Map tab**: Apple Maps with filters.
+  - the day-by-day plan with travel times, a map per day, re-plan, tidy and quiet-day suggestions;
+  - places by kind, the trip's edits, people you plan with, sharing, and name and dates;
+  - **Today**: what's booked, today's bag, what's on tonight, a short briefing, the next stop and the rest of the day;
+  - the **packing list** (made for the trip, imported or your own) and **What's on** (events during the trip).
+- **Discover**: well-rated places near home, near you or around a trip, with that city's edits; each **edit** opens as its own page.
+- **Bookings**: by date, with what needs attention, boarding passes and lounges; add one from a screenshot, the confirmation email or by hand.
+- **Concierge**: chat about a trip; it proposes changes and nothing moves until you apply them.
+- **Calendar**: the month, the agenda, add to Apple or Google Calendar, and calendar sync.
 - **Add**: paste a reel or a maps link, search for a place, or pick screenshots.
-- **Profile**: home city, imports, notifications, password, sign out, and delete account.
-
-**Web screens for now:** Discover, Bookings, Concierge, the calendar, edits, packing lists, events, menus and taste.
-- They're the web app's own screens inside native ones. The `?embed=1` mode hides the web tab bar.
-- Links to screens the app has natively (a place, a trip, a folder, your profile) open the native screen.
-- Changes made there refresh the native lists.
-- They can be ported to native one at a time.
+- **Profile**: name, home city, imports, your travel taste, appearance, notifications, password, feedback, sign out and delete account (and, for the owner, people and usage).
 
 **Notifications:** the app registers with Apple's push service. When an import finishes, the server sends "3 new places saved in Lisbon". On the server, set the four `APNS_*` settings, all from your developer account:
 - `APNS_KEY`: the contents of a key with **Apple Push Notifications service** ticked, from developer.apple.com → **Keys**. A one-line secret with `\n` for the line breaks is fine.
@@ -399,4 +394,4 @@ Each run's build number is the workflow's run number. Raise `MARKETING_VERSION` 
 - **Account deletion.** Apple requires a way to delete your account inside the app. It's at the bottom of **Profile** (**Delete account**).
 - **Privacy.** You need a privacy policy URL and the **App Privacy** answers. The Travel Edit stores your email, the links you share and the places you save, and it sends reels to Claude and Google for processing. There's no tracking or ads.
 - **Screenshots and listing.** You need 6.9" iPhone screenshots, a subtitle, a description and keywords. The App Store name is The Travel Edit; the home screen shows "Travel Edit".
-- **Native features.** Apple rejects apps that are "just a website" (guideline 4.2). The Travel Edit's main screens, share button, maps and notifications are native, and the remaining web screens sit inside native navigation.
+- **Native features.** Apple rejects apps that are "just a website" (guideline 4.2). Every screen of The Travel Edit's app is native SwiftUI, with a share button, maps and notifications.

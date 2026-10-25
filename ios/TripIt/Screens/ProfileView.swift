@@ -48,7 +48,7 @@ struct ProfileView: View {
                     row("tray.full.fill", Theme.blue, "Imports",
                         store.jobs.contains(where: \.isActive) ? "Working on a post…" : "Posts you've shared and their status", chevron: false)
                 }
-                NavigationLink(value: Route.web(hash: "#/taste")) {
+                NavigationLink(value: Route.taste) {
                     row("sparkles", Theme.gold, "Your travel taste", "Tailors your edits, briefings and concierge", chevron: false)
                 }
             }
@@ -91,10 +91,10 @@ struct ProfileView: View {
                     Button { changingPassword = true } label: { row("lock.fill", Theme.gray, "Change password", nil) }
                 }
                 if session.me?.isAdmin == true {
-                    NavigationLink(value: Route.web(hash: "#/profile")) {
-                        row("person.2.fill", Theme.indigo, "Invites and people", "Invite testers; reset a forgotten password", chevron: false)
+                    NavigationLink(value: Route.people) {
+                        row("person.2.fill", Theme.indigo, "People", "Everyone with an account; reset a forgotten password", chevron: false)
                     }
-                    NavigationLink(value: Route.web(hash: "#/usage")) {
+                    NavigationLink(value: Route.usage) {
                         row("dollarsign.circle.fill", Theme.green, "Usage & costs", "AI spend, budgets and daily limits", chevron: false)
                     }
                 }

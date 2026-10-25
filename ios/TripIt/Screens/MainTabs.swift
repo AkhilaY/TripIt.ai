@@ -116,7 +116,9 @@ struct RouteView: View {
         case .packing(let tripId): PackingView(tripId: tripId)
         case .events(let tripId): EventsView(tripId: tripId)
         case .calendar: CalendarView()
-        case .web(let hash): WebScreen(hash: hash)
+        case .taste: TasteView()
+        case .people: PeopleAdminView()
+        case .usage: UsageView()
         }
     }
 }

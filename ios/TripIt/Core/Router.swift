@@ -32,11 +32,14 @@ enum Route: Hashable {
     case events(tripId: String)
     /// Everything dated: events, bookings, planned days and trips.
     case calendar
-    /// A screen of the web app that isn't native yet, by its address inside the app (e.g. "#/packing/<trip id>").
-    case web(hash: String)
+    /// Your travel taste: five questions that tailor edits, briefings and suggestions.
+    case taste
+    /// Owner only: everyone with an account, and AI spend.
+    case people
+    case usage
 }
 
-/// Which tab is showing and what's pushed on each, so links (from web screens and notifications) can open screens.
+/// Which tab is showing and what's pushed on each, so links (from notifications and shared links) can open screens.
 @MainActor
 @Observable
 final class Router {
@@ -107,6 +110,10 @@ final class Router {
             else { push(.trip(id: parts[1])) }
         case "calendar":
             push(.calendar)
+        case "taste":
+            push(.taste)
+        case "usage":
+            push(.usage)
         case "today" where parts.count > 1:
             push(.today(tripId: parts[1], day: param("day").flatMap { Int($0) }))
         case "packing" where parts.count > 1:
@@ -141,7 +148,7 @@ final class Router {
         case "add":
             addRequest = AddRequest(text: param("url") ?? "", tripId: param("trip"), folderId: param("folder"), city: param("city"))
         default:
-            push(.web(hash: "#" + hash))
+            break  // an address the app doesn't have a screen for
         }
     }
 }

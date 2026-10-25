@@ -10,7 +10,7 @@ kill_timeout = 30
   PORT = "8080"
   DATABASE_PATH = "/data/tripit.db"
   # Left out of the first App Store version; the apps hide them. Remove one to bring it back.
-  FEATURES_OFF = "events,concierge,menus,lounges,calendar,chatgpt,booking_needs"
+  FEATURES_OFF = "events,concierge,menus,lounges,chatgpt,booking_needs,discover"
 
 # Trips and places live in SQLite on this volume. Create it once with:
 #   fly volumes create tripit_data --size 1 --region iad

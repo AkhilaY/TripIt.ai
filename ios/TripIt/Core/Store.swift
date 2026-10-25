@@ -55,6 +55,7 @@ final class Store {
             (places, folders, trips, jobs) = try await (p, f, t, j)
             await Features.refresh()
             featuresOff = Features.off
+            await EventSync.shared.sync(saved)
             home = (try? await h) ?? home
             loaded = true
             error = nil
@@ -65,7 +66,7 @@ final class Store {
     }
 
     func reloadPlaces() async {
-        if let p: [Place] = try? await api.get("/v1/places") { places = p }
+        if let p: [Place] = try? await api.get("/v1/places") { places = p; await EventSync.shared.sync(saved) }
         if let f: [Folder] = try? await api.get("/v1/folders") { folders = f }
     }
 
@@ -188,6 +189,7 @@ final class Store {
                 tripDetails[tripId] = trip
             }
             update(fresh, inTrip: tripId != nil)
+            if Category(fresh.category) == .event { await EventSync.shared.sync(saved) }
             if tripId != nil, let saved = places.first(where: { $0.id == place.id }) {
                 // fields that aren't trip-specific (star, notes, visited) changed on the saved copy too
                 var s = saved

@@ -331,6 +331,12 @@ struct SaveReviewSheet: View {
             let ids = keep.filter { !$0.folderIds.contains(folder) }.map(\.id)
             if !ids.isEmpty { await store.addToFolder(folder, ids) }
         }
+        // Dated events go straight into Apple Calendar, with reminders.
+        let events = keep.filter { Category($0.category) == .event && $0.eventDate != nil }
+        if !events.isEmpty {
+            let added = await EventSync.shared.add(events)
+            if added > 0 { store.show(added == 1 ? "Added to your calendar, with reminders" : "\(added) events added to your calendar, with reminders") }
+        }
         store.reviewJob = nil
         dismiss()
     }

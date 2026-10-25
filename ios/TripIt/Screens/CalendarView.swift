@@ -4,6 +4,8 @@ import UIKit
 /// Everything dated in one place: saved events, bookings, planned trip days and trips. A month at the top, then
 /// what's on from the day you pick to the end of the month, and saved events that still need a date.
 struct CalendarView: View {
+    /// The Calendar tab (with your profile button), rather than a screen pushed from elsewhere.
+    var isTab = false
     @Environment(Store.self) private var store
     @Environment(Router.self) private var router
     @State private var result: CalendarResult?
@@ -65,6 +67,9 @@ struct CalendarView: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button { syncing = true } label: { Label("Sync", systemImage: "calendar.badge.plus") }
+            }
+            if isTab {
+                ToolbarItem(placement: .topBarTrailing) { ProfileButton() }
             }
         }
         .task { await load() }

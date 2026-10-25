@@ -1069,6 +1069,7 @@ async def discover(
     radius: int = Query(default=4000, ge=500, le=20000), refresh: bool = False,
 ) -> DiscoverResult:
     """Well-rated places near home, near a trip's stops, or near the given point, picked for the person's taste."""
+    _feature("discover")
     library = _library(request)
     where: Optional[DiscoverArea] = None
     if area == "home":

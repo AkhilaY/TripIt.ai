@@ -3,7 +3,7 @@ import Foundation
 /// Features switched off on the server (FEATURES_OFF), hidden in the app. Until the server answers, the first App
 /// Store version's list is assumed so nothing appears and then vanishes.
 enum Features {
-    nonisolated(unsafe) static var off: Set<String> = ["events", "concierge", "menus", "lounges", "calendar", "chatgpt", "booking_needs"]
+    nonisolated(unsafe) static var off: Set<String> = ["events", "concierge", "menus", "lounges", "chatgpt", "booking_needs", "discover"]
 
     static func isOn(_ name: String) -> Bool { !off.contains(name) }
 

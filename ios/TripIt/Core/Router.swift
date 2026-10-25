@@ -2,7 +2,7 @@ import Foundation
 import Observation
 
 enum AppTab: Hashable {
-    case home, library, discover, bookings, concierge
+    case home, library, calendar, bookings, concierge
 }
 
 /// Screens pushed onto a tab's navigation stack.
@@ -46,7 +46,7 @@ final class Router {
     var tab: AppTab = .home
     var home: [Route] = []
     var library: [Route] = []
-    var discover: [Route] = []
+    var calendar: [Route] = []
     var bookings: [Route] = []
     var concierge: [Route] = []
     var showProfile = false
@@ -77,7 +77,7 @@ final class Router {
         switch tab {
         case .home: home.append(route)
         case .library: library.append(route)
-        case .discover: discover.append(route)
+        case .calendar: calendar.append(route)
         case .bookings: bookings.append(route)
         case .concierge: concierge.append(route)
         }
@@ -108,8 +108,9 @@ final class Router {
         case "trip" where parts.count > 1:
             if parts.count > 2, parts[2] == "bookings" { push(.bookings(tripId: parts[1])) }
             else { push(.trip(id: parts[1])) }
-        case "calendar":
-            push(.calendar)
+        case "calendar", "discover":
+            showProfile = false
+            tab = .calendar
         case "taste":
             push(.taste)
         case "usage":
@@ -129,9 +130,6 @@ final class Router {
         case "map":
             showProfile = false
             push(.map)
-        case "discover":
-            showProfile = false
-            tab = .discover
         case "bookings":
             if let trip = param("trip") { push(.bookings(tripId: trip)); break }
             showProfile = false

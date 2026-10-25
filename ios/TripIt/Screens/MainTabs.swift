@@ -15,9 +15,9 @@ struct MainTabs: View {
             NavigationStack(path: $router.library) { LibraryView().withRoutes() }
                 .tabItem { Label("Library", systemImage: "bookmark") }
                 .tag(AppTab.library)
-            NavigationStack(path: $router.discover) { DiscoverView().withRoutes() }
-                .tabItem { Label("Discover", systemImage: "safari") }
-                .tag(AppTab.discover)
+            NavigationStack(path: $router.calendar) { CalendarView(isTab: true).withRoutes() }
+                .tabItem { Label("Calendar", systemImage: "calendar") }
+                .tag(AppTab.calendar)
             NavigationStack(path: $router.bookings) { BookingsView().withRoutes() }
                 .tabItem { Label("Bookings", systemImage: "suitcase") }
                 .tag(AppTab.bookings)
@@ -131,14 +131,6 @@ private struct RootToolbar: ViewModifier {
 
     func body(content: Content) -> some View {
         content.toolbar {
-            if Features.isOn("calendar") {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button { router.push(.calendar) } label: {
-                        Image(systemName: "calendar")
-                    }
-                    .accessibilityLabel("Calendar")
-                }
-            }
             ToolbarItemGroup(placement: .topBarTrailing) {
                 if add {
                     Button { router.addRequest = Router.AddRequest() } label: { Image(systemName: "plus") }

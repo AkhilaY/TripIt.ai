@@ -118,21 +118,6 @@ def check(link):
                         print(f"      {line}", flush=True)
                 images = sorted({u.split('?')[0][:110] for u in re.findall(r'https://[^"\'\s<>\\]+\.(?:jpe?g|webp|png|image)[^"\'\s<>\\]*', html.replace("\\u002F", "/"))})
                 show("  any images", f"{len(images)} {images[:4]}")
-    if match and link == sys.argv[1]:  # once, to keep the number of requests down
-        # Which browser TikTok treats best: status, size and whether the post data came back, three tries each.
-        from curl_cffi import requests as cffi_requests
-
-        pages = {"video": resolved.replace("/photo/", "/video/"), "embed": f"https://www.tiktok.com/embed/v2/{match.group(2)}"}
-        for target in ("chrome", "safari", "safari_ios", "chrome_android", "edge"):
-            for name, page_url in pages.items():
-                results = []
-                for _ in range(3):
-                    try:
-                        r = cffi_requests.get(page_url, impersonate=target, timeout=20, cookies=COOKIES or None)
-                        results.append(f"{r.status_code}/{len(r.text)}{'+post' if 'imagePost' in r.text else ''}")
-                    except Exception as e:  # noqa: BLE001
-                        results.append(type(e).__name__)
-                show(f"{target} {name}", " ".join(results))
     for candidate in dict.fromkeys([resolved, resolved.replace("/photo/", "/video/"), link]):
         try:
             r = httpx.get(OEMBED["tiktok"], params={"url": candidate, "format": "json"}, timeout=15, follow_redirects=True)
@@ -153,7 +138,7 @@ def check(link):
     with tempfile.TemporaryDirectory() as tmp:
         try:
             got = tiktok.download_photo_post(resolved, Path(tmp), cookies=COOKIES)
-            show("download_photo_post", f"{len(got[1])} slides, caption {(got[0].caption or '')[:60]!r}" if got else "None")
+            show("download_photo_post", f"{len(got[1])} slides, caption {(got[0].caption or '')[:60]!r}, by {got[0].uploader}" if got else "None")
         except Exception:  # noqa: BLE001
             show("download_photo_post", traceback.format_exc()[-300:])
 

@@ -1,0 +1,61 @@
+name: Diagnose imports
+
+# Runs each step of a TikTok import against the links below and prints what TikTok sent back: from GitHub's
+# servers, and from the Fly server itself (with its cookies), plus the server's recent import and Whisper logs.
+# Read-only. Runs when this file or .github/diagnose/ changes, or from the Actions tab.
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/diagnose-imports.yml"
+      - ".github/diagnose/**"
+
+env:
+  LINKS: "https://www.tiktok.com/t/ZTf9b8PbJ/ https://www.tiktok.com/t/ZTf9qrTmm/ https://www.tiktok.com/t/ZTf9qDpb7/"
+
+jobs:
+  github:
+    name: From GitHub's servers
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - run: pip install -r requirements.txt && pip install -U "yt-dlp[default,curl-cffi]"
+      - run: python ../.github/diagnose/tiktok_check.py $LINKS
+
+  fly:
+    name: From the Fly server
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      APP: ${{ vars.FLY_APP_NAME }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install flyctl
+        run: |
+          curl -fsSL https://fly.io/install.sh | sh
+          echo "$HOME/.fly/bin" >> "$GITHUB_PATH"
+      - name: Wake the server
+        run: curl -fsS -m 60 "https://$APP.fly.dev/health" || true
+      - name: Recent import and Whisper logs
+        run: |
+          flyctl logs --app "$APP" --no-tail 2>&1 \
+            | grep -iE "tiktok|whisper|oembed|download|transcri|slide|cover|photo post|Traceback|Error" \
+            | grep -v "GET /" | tail -150 || true
+      - name: Load Whisper on the server
+        run: |
+          B64=$(base64 -w0 .github/diagnose/whisper_check.py)
+          flyctl ssh console --app "$APP" -C "sh -c 'echo $B64 | base64 -d > /tmp/whisper_check.py && cd /app && timeout 240 python /tmp/whisper_check.py'" 2>&1 | tail -40 || true
+      - name: Run the import steps on the server
+        run: |
+          B64=$(base64 -w0 .github/diagnose/tiktok_check.py)
+          flyctl ssh console --app "$APP" -C "sh -c 'echo $B64 | base64 -d > /tmp/tiktok_check.py && cd /app && timeout 300 python /tmp/tiktok_check.py $LINKS'" 2>&1 || true

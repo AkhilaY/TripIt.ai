@@ -87,6 +87,8 @@ jobs:
           APNS_KEY_ID: ${{ secrets.APNS_KEY_ID }}
           APNS_TEAM_ID: ${{ secrets.APNS_TEAM_ID }}
           APNS_TOPIC: ${{ secrets.APNS_TOPIC }}
+          APPLE_SIGNIN_KEY: ${{ secrets.APPLE_SIGNIN_KEY }}
+          APPLE_SIGNIN_KEY_ID: ${{ secrets.APPLE_SIGNIN_KEY_ID }}
           BACKUP_BUCKET: ${{ secrets.BACKUP_BUCKET }}
           SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
           BACKUP_ENDPOINT: ${{ secrets.BACKUP_ENDPOINT }}
@@ -107,6 +109,9 @@ jobs:
             [ -z "$APNS_KEY_ID" ] || printf 'APNS_KEY_ID=%s\n' "$APNS_KEY_ID"
             [ -z "$APNS_TEAM_ID" ] || printf 'APNS_TEAM_ID=%s\n' "$APNS_TEAM_ID"
             [ -z "$APNS_TOPIC" ] || printf 'APNS_TOPIC=%s\n' "$APNS_TOPIC"
+            # Sign in with Apple (optional): lets account deletion revoke the Apple sign-in. Multi-line .p8 like APNS_KEY.
+            [ -z "$APPLE_SIGNIN_KEY" ] || printf 'APPLE_SIGNIN_KEY=%s\n' "$(printf '%s' "$APPLE_SIGNIN_KEY" | awk '{printf "%s\\n", $0}')"
+            [ -z "$APPLE_SIGNIN_KEY_ID" ] || printf 'APPLE_SIGNIN_KEY_ID=%s\n' "$APPLE_SIGNIN_KEY_ID"
             # Error reporting (Sentry), tagged with the commit so errors point at a release.
             [ -z "$SENTRY_DSN" ] || printf 'SENTRY_DSN=%s\nSENTRY_RELEASE=%s\n' "$SENTRY_DSN" "${GITHUB_SHA:0:12}"
             # Backups to Cloudflare R2 (start.sh).

@@ -17,8 +17,8 @@ struct TripPlaces: View {
                     shortcut("airplane", Theme.blue, "Bookings",
                              trip.bookings.isEmpty ? "Flights, stays and tables" : Fmt.plural(trip.bookings.count, "booking"),
                              .bookings(tripId: trip.id))
-                    shortcut("suitcase.fill", Theme.teal, "Packing list", "Made for the weather and your plans", .web(hash: "#/packing/\(trip.id)"))
-                    shortcut("music.mic", Category.event.color, "What's on", "Events while you're there", .web(hash: "#/events/\(trip.id)"))
+                    shortcut("suitcase.fill", Theme.teal, "Packing list", "Made for the weather and your plans", .packing(tripId: trip.id))
+                    shortcut("music.mic", Category.event.color, "What's on", "Events while you're there", .events(tripId: trip.id))
                 }
                 EditsRail(trip: trip)
             }

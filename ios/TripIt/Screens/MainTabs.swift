@@ -112,6 +112,9 @@ struct RouteView: View {
         case .editPlace(let tripId, let editId, let entryId): EditPlaceView(tripId: tripId, editId: editId, entryId: entryId)
         case .bookings(let tripId): BookingsView(tripId: tripId)
         case .edit(let tripId, let editId): EditView(tripId: tripId, editId: editId)
+        case .today(let tripId, let day): TodayView(tripId: tripId, day: day)
+        case .packing(let tripId): PackingView(tripId: tripId)
+        case .events(let tripId): EventsView(tripId: tripId)
         case .web(let hash): WebScreen(hash: hash)
         }
     }

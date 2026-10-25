@@ -462,3 +462,68 @@ struct DiscoverResult: Codable {
     var area: DiscoverArea?
     var items: [DiscoverItem]
 }
+
+struct PackingItem: Codable, Identifiable, Hashable {
+    var id: String
+    var text: String
+    var group: String
+    var reason: String?
+    var days: [Int]
+    var dayBag: Bool
+    var packed: Bool
+    var unused: Bool
+    var custom: Bool
+}
+
+/// A trip day's weather: a forecast, or the same dates last year when it's too far ahead.
+struct WeatherDay: Codable, Hashable {
+    var day: Int
+    var date: String
+    var summary: String
+    var tempMin: Double
+    var tempMax: Double
+    var rainChance: Int?
+    var source: String
+}
+
+struct PackingList: Codable, Hashable {
+    var tripId: String
+    var items: [PackingItem]
+    var weather: [WeatherDay]
+    var notes: String?
+    var carryOnOnly: Bool
+    var generatedBy: String  // claude, offline or manual
+}
+
+/// An event near where you'll be during a trip (from Ticketmaster).
+struct EventItem: Codable, Identifiable, Hashable {
+    var id: String
+    var name: String
+    var url: String
+    var image: String?
+    var startAt: String  // local "YYYY-MM-DDTHH:MM", or "YYYY-MM-DD" when the time isn't set
+    var status: String
+    var venue: String?
+    var category: String
+    var genre: String?
+    var priceMin: Double?
+    var priceMax: Double?
+    var currency: String?
+    var day: Int?
+    var match: Bool
+    var why: String?
+
+    var date: String { String(startAt.prefix(10)) }
+    var time: String? { startAt.count > 10 ? String(startAt.suffix(5)) : nil }
+}
+
+struct TripEvents: Codable {
+    var status: String  // ok, disabled, no_dates, no_location, error
+    var events: [EventItem]
+}
+
+/// A short note on a trip day: a headline and a few lines on how it goes.
+struct DayBriefing: Codable, Hashable {
+    var headline: String
+    var points: [String]
+}

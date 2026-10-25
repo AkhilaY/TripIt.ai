@@ -99,7 +99,7 @@ struct TravelHome: View {
                 .padding(.top, 12)
             }
             HStack(spacing: 8) {
-                Button("Open today") { router.push(.web(hash: "#/today/\(trip.id)")) }
+                Button("Open today") { router.push(.today(tripId: trip.id, day: nil)) }
                     .buttonStyle(PrimaryButtonStyle(compact: true))
                 if let next = nextSlot?.place {
                     Menu {

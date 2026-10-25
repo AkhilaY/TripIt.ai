@@ -11,7 +11,7 @@ struct TripsSection: View {
         if let active = activeTrip {
             let trip = active.trip, day = active.day
             Section {
-                Button { router.push(.web(hash: "#/today/\(trip.id)")) } label: {
+                Button { router.push(.today(tripId: trip.id, day: nil)) } label: {
                     HStack(spacing: 12) {
                         SymbolTile(symbol: "sun.max.fill", color: Theme.orange, size: 40)
                         VStack(alignment: .leading, spacing: 2) {

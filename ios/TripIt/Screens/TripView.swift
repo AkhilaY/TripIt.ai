@@ -108,8 +108,8 @@ struct TripView: View {
                 }
                 Section {
                     Button { router.push(.bookings(tripId: trip.id)) } label: { Label("Bookings", systemImage: "ticket") }
-                    Button { router.push(.web(hash: "#/packing/\(trip.id)")) } label: { Label("Packing list", systemImage: "suitcase") }
-                    Button { router.push(.web(hash: "#/events/\(trip.id)")) } label: { Label("What's on", systemImage: "music.mic") }
+                    Button { router.push(.packing(tripId: trip.id)) } label: { Label("Packing list", systemImage: "suitcase") }
+                    Button { router.push(.events(tripId: trip.id)) } label: { Label("What's on", systemImage: "music.mic") }
                 }
             }
             if !trip.isLocal {

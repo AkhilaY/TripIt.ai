@@ -664,12 +664,12 @@ def test_download_reel_routes_photo_posts(monkeypatch, tmp_path):
     monkeypatch.setattr(tiktok, "resolve", lambda url: "https://www.tiktok.com/@a/photo/123")
     slide = tmp_path / "slide_01.jpg"
     slide.write_bytes(b"\xff\xd8\xff")
-    monkeypatch.setattr(tiktok, "download_photo_post", lambda url, workdir, width: (
+    monkeypatch.setattr(tiktok, "download_photo_post", lambda url, workdir, width, cookies=None: (
         ReelMetadata(platform="tiktok", url=url, caption="Lisbon cafes"), [slide]))
     reel = media.download_reel("https://www.tiktok.com/t/ZTf8CpEsG/", tmp_path, Settings())
     assert reel.image_paths == [slide] and reel.metadata.url.endswith("/photo/123")
 
-    monkeypatch.setattr(tiktok, "download_photo_post", lambda url, workdir, width: None)
+    monkeypatch.setattr(tiktok, "download_photo_post", lambda url, workdir, width, cookies=None: None)
     with pytest.raises(media.DownloadFailed, match="photo post"):
         media.download_reel("https://www.tiktok.com/t/ZTf8CpEsG/", tmp_path, Settings())
 

@@ -11,6 +11,7 @@ from .config import Settings
 from .jobs import JobStore
 from .library import Library
 from .llm import ClaudeError, ClaudeService
+from .tiktok import fetch_cover
 from .media import (
     DownloadedReel,
     DownloadFailed,
@@ -99,9 +100,14 @@ class Pipeline:
                 metadata = await asyncio.to_thread(fetch_oembed, url)
                 if metadata is None and not shared_text:
                     raise JobFailed(self._download_error(url, reason)) from e
-                warnings.append(f"Couldn't download the post ({reason}), so only the caption was used. "
-                                "Places shown only in the video or slides may be missing.")
                 reel = DownloadedReel(metadata=metadata or ReelMetadata(platform=platform_for(url), url=url))
+                # TikTok's embed API gives the post's cover (its first slide or frame): better than no picture at all.
+                cover = await asyncio.to_thread(fetch_cover, metadata.thumbnail_url, workdir, self.settings.frame_width) \
+                    if metadata and metadata.thumbnail_url else None
+                if cover:
+                    reel.image_paths = [cover]
+                warnings.append(f"Couldn't download the post ({reason}), so only the caption{' and cover' if cover else ''} "
+                                "were used. Places shown only in the video or other slides may be missing.")
             self.store.update(job_id, reel=reel.metadata)
 
             transcript = None

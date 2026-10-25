@@ -71,12 +71,31 @@ def resolve(url: str) -> str:
     return f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
 
 
-def _get_page(url: str) -> Optional[str]:
+def cookies_for_tiktok(cookie_file: Optional[str]) -> dict[str, str]:
+    """TikTok cookies from a Netscape cookies.txt (the YTDLP_COOKIES setting). Signed-in cookies make TikTok far
+    more willing to send a post's data to a server."""
+    out: dict[str, str] = {}
+    if not cookie_file:
+        return out
+    try:
+        lines = Path(cookie_file).read_text().splitlines()
+    except OSError:
+        return out
+    for line in lines:
+        if line.startswith("#HttpOnly_"):
+            line = line[len("#HttpOnly_"):]
+        parts = line.split("\t")
+        if len(parts) == 7 and not line.startswith("#") and parts[0].lstrip(".").endswith("tiktok.com"):
+            out[parts[5]] = parts[6]
+    return out
+
+
+def _get_page(url: str, cookies: Optional[dict[str, str]] = None) -> Optional[str]:
     """Fetches the post page, impersonating Chrome when curl_cffi is installed (TikTok checks TLS fingerprints)."""
     try:
         from curl_cffi import requests as cffi_requests
 
-        response = cffi_requests.get(url, impersonate="chrome", timeout=20)
+        response = cffi_requests.get(url, impersonate="chrome", timeout=20, cookies=cookies or None)
         if response.status_code == 200:
             return response.text
         log.info("TikTok page returned %s", response.status_code)
@@ -87,7 +106,7 @@ def _get_page(url: str) -> Optional[str]:
         log.info("TikTok page fetch failed: %s", e)
         return None
     try:
-        response = httpx.get(url, headers={"User-Agent": BROWSER_UA}, timeout=20, follow_redirects=True)
+        response = httpx.get(url, headers={"User-Agent": BROWSER_UA}, timeout=20, follow_redirects=True, cookies=cookies or None)
         return response.text if response.status_code == 200 else None
     except httpx.HTTPError as e:
         log.info("TikTok page fetch failed: %s", e)
@@ -99,11 +118,14 @@ def parse_item(html: str) -> Optional[dict[str, Any]]:
     match = re.search(r'<script[^>]+id="__UNIVERSAL_DATA_FOR_REHYDRATION__"[^>]*>(.*?)</script>', html, re.S)
     if match:
         try:
-            data = json.loads(match.group(1))
-            item = data["__DEFAULT_SCOPE__"]["webapp.video-detail"]["itemInfo"]["itemStruct"]
-            if item:
-                return item
-        except (ValueError, KeyError, TypeError):
+            scope = json.loads(match.group(1)).get("__DEFAULT_SCOPE__") or {}
+            # Usually "webapp.video-detail"; TikTok renames these, so look through every part of the page data.
+            parts = [scope.get("webapp.video-detail")] + [v for k, v in scope.items() if k != "webapp.video-detail"]
+            for part in parts:
+                item = ((part or {}).get("itemInfo") or {}).get("itemStruct") if isinstance(part, dict) else None
+                if item and item.get("id"):
+                    return item
+        except (ValueError, AttributeError, TypeError):
             pass
     match = re.search(r'<script[^>]+id="SIGI_STATE"[^>]*>(.*?)</script>', html, re.S)
     if match:
@@ -140,16 +162,61 @@ def metadata_from_item(item: dict[str, Any], url: str) -> ReelMetadata:
     return ReelMetadata(platform="tiktok", url=url, title=title, caption=caption or None, uploader=uploader)
 
 
-def download_photo_post(url: str, workdir: Path, frame_width: int = 1024) -> Optional[tuple[ReelMetadata, list[Path]]]:
-    """Downloads a TikTok slideshow's caption and slide images. Returns None if TikTok didn't serve the post."""
-    html = _get_page(url)
-    item = parse_item(html) if html else None
-    if not item:
+def embed_slides(html: str) -> list[str]:
+    """Slide images from TikTok's embed page (meant for other sites, so served more readily than the post page).
+    Found by their address rather than the page's structure, which changes: photo-mode images on TikTok's CDN."""
+    text = html.replace("\\u002F", "/").replace("\\/", "/").replace("&amp;", "&")
+    seen, out = set(), []
+    for url in re.findall(r'https://[^"\'\s<>\\]+', text):
+        if "photomode" not in url or not _allowed_image(url):
+            continue
+        key = url.split("?")[0].split("~")[0]  # the same slide in several sizes
+        if key not in seen:
+            seen.add(key)
+            out.append(url)
+    return out[:MAX_SLIDES]
+
+
+def embed_caption(html: str) -> Optional[str]:
+    match = re.search(r'"desc"\s*:\s*("(?:[^"\\]|\\.)*")', html)
+    if match:
+        try:
+            return json.loads(match.group(1)).strip() or None
+        except ValueError:
+            pass
+    meta = re.search(r'<meta[^>]+property="og:description"[^>]+content="([^"]*)"', html)
+    return meta.group(1).strip() or None if meta else None
+
+
+def download_photo_post(url: str, workdir: Path, frame_width: int = 1024,
+                        cookies: Optional[dict[str, str]] = None) -> Optional[tuple[ReelMetadata, list[Path]]]:
+    """Downloads a TikTok slideshow's caption and slide images: from the post page (as a photo, then as a video
+    address, which TikTok often serves when the photo one is blocked), then from the embed page. Returns None if
+    TikTok served none of them."""
+    item, images = None, []
+    for page in dict.fromkeys([url, url.replace("/photo/", "/video/")]):
+        html = _get_page(page, cookies)
+        found = parse_item(html) if html else None
+        if found:
+            item = item or found
+            images = slide_urls(found)
+            if images:
+                break
+    metadata = metadata_from_item(item, url) if item else None
+    if not images:
+        match = ITEM_RE.search(urlparse(url).path)
+        embed = _get_page(f"https://www.tiktok.com/embed/v2/{match.group(2)}", cookies) if match else None
+        if embed:
+            images = embed_slides(embed)
+            caption = embed_caption(embed)
+            if metadata is None and (images or caption):
+                metadata = ReelMetadata(platform="tiktok", url=url, title=(caption or "")[:120] or None, caption=caption)
+    if metadata is None:
+        log.info("TikTok served neither the post nor its embed for %s", url)
         return None
-    metadata = metadata_from_item(item, url)
     paths: list[Path] = []
     with httpx.Client(timeout=20, headers={"User-Agent": BROWSER_UA, "Referer": "https://www.tiktok.com/"}) as client:
-        for i, image_url in enumerate(slide_urls(item), start=1):
+        for i, image_url in enumerate(images, start=1):
             try:
                 response = client.get(image_url)
                 response.raise_for_status()
@@ -175,3 +242,19 @@ def _normalize(src: Path, dst: Path, width: int) -> Optional[Path]:
         log.info("Couldn't convert %s: %s", src.name, result.stderr.decode(errors="ignore")[:200])
         return None
     return dst
+
+
+def fetch_cover(image_url: str, workdir: Path, width: int = 1024) -> Optional[Path]:
+    """Downloads a post's cover image (from TikTok's embed API), so a post that can't be downloaded still shows
+    Claude its first slide or frame."""
+    if not image_url or not _allowed_image(image_url):
+        return None
+    try:
+        response = httpx.get(image_url, headers={"User-Agent": BROWSER_UA, "Referer": "https://www.tiktok.com/"}, timeout=20)
+        response.raise_for_status()
+    except httpx.HTTPError as e:
+        log.info("Cover download failed: %s", e)
+        return None
+    raw = workdir / "cover.img"
+    raw.write_bytes(response.content)
+    return _normalize(raw, workdir / "cover.jpg", width)

@@ -71,3 +71,53 @@ def test_an_edit_cover_is_the_photo_claude_picks():
     # One photo per place first (skipping Reel frames), then second photos; Claude chose the second: the tower.
     assert len(Claude.seen[0]) == 3
     assert edits[0]["cover"] == {"place_id": "tower", "index": 1}
+
+
+def test_whisper_falls_back_when_the_cpu_refuses_int8(monkeypatch):
+    import sys
+    import types
+    from app import transcribe
+    from app.config import Settings
+
+    tried = []
+
+    class FakeModel:
+        def __init__(self, name, device, compute_type, local_files_only):
+            tried.append((compute_type, local_files_only))
+            if compute_type != "float32":
+                raise ValueError("Requested int8 compute type, but the target device or backend do not support efficient int8 computation.")
+
+    monkeypatch.setitem(sys.modules, "faster_whisper", types.SimpleNamespace(WhisperModel=FakeModel))
+    monkeypatch.setattr(transcribe, "_model", None)
+    model = transcribe._get_model(Settings(anthropic_api_key="x"))
+    assert isinstance(model, FakeModel)
+    assert tried == [("int8", True), ("int8_float32", True), ("float32", True)]  # the copy in the image, no download
+    assert transcribe.load_error is None
+    monkeypatch.setattr(transcribe, "_model", None)
+
+
+def test_tiktok_slides_found_in_any_page_shape():
+    import json
+    from app.tiktok import embed_caption, embed_slides, parse_item
+
+    # The post data under a renamed part of the page.
+    item = {"id": "7431", "desc": "10 cafés in Paris", "imagePost": {"images": [{"imageURL": {"urlList": ["https://p16-sign.tiktokcdn-us.com/a~tplv-photomode-image.jpeg"]}}]}}
+    page = '<script id="__UNIVERSAL_DATA_FOR_REHYDRATION__" type="application/json">' + json.dumps(
+        {"__DEFAULT_SCOPE__": {"webapp.app-context": {}, "webapp.photo-detail": {"itemInfo": {"itemStruct": item}}}}) + "</script>"
+    assert parse_item(page)["desc"] == "10 cafés in Paris"
+    # The embed page: slides by their address (escaped as TikTok writes them), each once, nothing from other hosts.
+    embed = ('<script>{"desc":"Best croissants \\u00e9 Paris","images":["https:\\u002F\\u002Fp16-sign.tiktokcdn.com\\u002Ftos-photomode\\u002Fabc~tplv-photomode-image.jpeg?x=1",'
+             '"https:\\u002F\\u002Fp16-sign.tiktokcdn.com\\u002Ftos-photomode\\u002Fabc~tplv-photomode-small.jpeg",'
+             '"https:\\u002F\\u002Fp16-sign.tiktokcdn.com\\u002Ftos-photomode\\u002Fdef~tplv-photomode-image.jpeg",'
+             '"https:\\u002F\\u002Fevil.example\\u002Fphotomode.jpg"]}</script>')
+    slides = embed_slides(embed)
+    assert [s.split("/")[-1].split("~")[0] for s in slides] == ["abc", "def"]
+    assert embed_caption(embed) == "Best croissants é Paris"
+
+
+def test_tiktok_cookies_from_a_cookies_file(tmp_path):
+    from app.tiktok import cookies_for_tiktok
+    f = tmp_path / "cookies.txt"
+    f.write_text("# Netscape HTTP Cookie File\n.tiktok.com\tTRUE\t/\tTRUE\t0\tsessionid\tabc\n#HttpOnly_.tiktok.com\tTRUE\t/\tTRUE\t0\tmsToken\txyz\n"
+                 ".instagram.com\tTRUE\t/\tTRUE\t0\tsessionid\tnope\n")
+    assert cookies_for_tiktok(str(f)) == {"sessionid": "abc", "msToken": "xyz"}

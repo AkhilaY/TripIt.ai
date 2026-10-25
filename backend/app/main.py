@@ -192,10 +192,20 @@ async def notify_import(app: FastAPI, job: Optional[Job]) -> None:
         title, body, url = "Couldn't import a reel", job.message or "Tap to see what happened", "/#/imports"
     await app.state.push.send_all({"title": title, "body": body, "url": url, "tag": job.id})
 
+def _warm_whisper(settings: Settings) -> None:
+    from .transcribe import _get_model
+    try:
+        _get_model(settings)
+    except Exception:  # noqa: BLE001 - logged inside; imports still work without speech
+        pass
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     if not hasattr(app.state, "pipeline"):  # tests inject their own services
         build_services(app, get_settings())
+        # Load Whisper in the background now, so the first import doesn't wait and a problem shows in the logs.
+        asyncio.get_running_loop().run_in_executor(None, _warm_whisper, get_settings())
     app.state.tasks = set()
     # Pick up imports that were interrupted by a restart, each as the person who started it.
     for job in app.state.db.unfinished_jobs():

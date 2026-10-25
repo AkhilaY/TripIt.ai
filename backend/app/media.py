@@ -107,7 +107,8 @@ def download_reel(url: str, workdir: Path, settings: Settings) -> DownloadedReel
 
 
 def _tiktok_photo_post(url: str, workdir: Path, settings: Settings) -> DownloadedReel:
-    got = tiktok.download_photo_post(url, workdir, settings.frame_width)
+    cookies = tiktok.cookies_for_tiktok(settings.ytdlp_cookies_file or _cookies_from_env(settings.ytdlp_cookies))
+    got = tiktok.download_photo_post(url, workdir, settings.frame_width, cookies)
     if not got or not (got[1] or got[0].caption):
         raise DownloadFailed("TikTok didn't send this photo post to the server")
     metadata, slides = got

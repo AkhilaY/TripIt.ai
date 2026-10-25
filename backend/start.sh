@@ -28,9 +28,9 @@ FILES="backup:${BACKUP_BUCKET}/files"
 mkdir -p "$DATA_DIR"
 
 sync_files() {
-  # Everything on the volume except the database (Litestream has that). --max-delete guards against a
-  # half-empty disk wiping the backup.
-  rclone sync "$DATA_DIR" "$FILES" --exclude "*.db" --exclude "*.db-*" --exclude "*.bak" --exclude ".*" \
+  # Everything on the volume except the database (Litestream has that, and keeps its working files in the
+  # hidden .tripit.db-litestream folder). --max-delete guards against a half-empty disk wiping the backup.
+  rclone sync "$DATA_DIR" "$FILES" --exclude "*.db" --exclude "*.db-*" --exclude "*.bak" --exclude ".*" --exclude ".*/**" \
     --max-delete 200 --fast-list --quiet || echo "File backup failed; will retry"
 }
 

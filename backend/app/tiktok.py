@@ -8,6 +8,7 @@ import json
 import logging
 import re
 import subprocess
+import time
 from pathlib import Path
 from typing import Any, Optional
 from urllib.parse import urlparse
@@ -27,6 +28,10 @@ ITEM_RE = re.compile(r"/(video|photo)/(\d+)")
 # Slide images come from TikTok's CDNs; never fetch anything else from data in the page.
 IMAGE_HOST_SUFFIXES = ("tiktokcdn.com", "tiktokcdn-us.com", "tiktokcdn-eu.com", "ibyteimg.com", "byteimg.com", "muscdn.com")
 MAX_SLIDES = 20
+# Browsers to look like when fetching TikTok pages, best first. TikTok sends servers that look like desktop Chrome a
+# 1.5 KB page without the post, while these four get the whole page (checked from the Fly server).
+PROFILES = ("chrome_android", "safari_ios", "safari", "edge", "chrome")
+EMBED_PAUSE = 0.8  # seconds between embed page tries; TikTok answers 503 to quick repeats
 
 
 def is_tiktok(url: str) -> bool:
@@ -90,20 +95,21 @@ def cookies_for_tiktok(cookie_file: Optional[str]) -> dict[str, str]:
     return out
 
 
-def _get_page(url: str, cookies: Optional[dict[str, str]] = None) -> Optional[str]:
-    """Fetches the post page, impersonating Chrome when curl_cffi is installed (TikTok checks TLS fingerprints)."""
+def _get_page(url: str, cookies: Optional[dict[str, str]] = None, profile: str = PROFILES[0]) -> Optional[str]:
+    """Fetches a TikTok page looking like the given browser when curl_cffi is installed (TikTok checks TLS
+    fingerprints)."""
     try:
         from curl_cffi import requests as cffi_requests
 
-        response = cffi_requests.get(url, impersonate="chrome", timeout=20, cookies=cookies or None)
+        response = cffi_requests.get(url, impersonate=profile, timeout=20, cookies=cookies or None)
         if response.status_code == 200:
             return response.text
-        log.info("TikTok page returned %s", response.status_code)
+        log.info("TikTok page returned %s as %s", response.status_code, profile)
         return None
     except ImportError:
         pass
-    except Exception as e:  # curl_cffi raises its own error types
-        log.info("TikTok page fetch failed: %s", e)
+    except Exception as e:  # curl_cffi raises its own error types, also for a profile it doesn't know
+        log.info("TikTok page fetch failed as %s: %s", profile, e)
         return None
     try:
         response = httpx.get(url, headers={"User-Agent": BROWSER_UA}, timeout=20, follow_redirects=True, cookies=cookies or None)
@@ -170,7 +176,7 @@ def embed_slides(html: str) -> list[str]:
     for url in re.findall(r'https://[^"\'\s<>\\]+', text):
         if "photomode" not in url or not _allowed_image(url):
             continue
-        key = url.split("?")[0].split("~")[0]  # the same slide in several sizes
+        key = urlparse(url).path.split("~")[0]  # the same slide in several sizes and from several hosts
         if key not in seen:
             seen.add(key)
             out.append(url)
@@ -188,32 +194,76 @@ def embed_caption(html: str) -> Optional[str]:
     return meta.group(1).strip() or None if meta else None
 
 
+def embed_post(html: str, url: str) -> Optional[tuple[ReelMetadata, list[str]]]:
+    """Caption, creator and slides from the embed page's data (__FRONTITY_CONNECT_STATE__ → source.data →
+    videoData), or from the slide addresses in the page if that data moves."""
+    video = None
+    match = re.search(r'<script[^>]+id="__FRONTITY_CONNECT_STATE__"[^>]*>(.*?)</script>', html, re.S)
+    if match:
+        try:
+            data = ((json.loads(match.group(1)).get("source") or {}).get("data")) or {}
+            video = next((v["videoData"] for v in data.values() if isinstance(v, dict) and isinstance(v.get("videoData"), dict)), None)
+        except (ValueError, AttributeError, TypeError):
+            video = None
+    if video:
+        caption = ((video.get("itemInfos") or {}).get("text") or "").strip()
+        uploader = (video.get("authorInfos") or {}).get("uniqueId")
+        images = []
+        for image in (video.get("imagePostInfo") or {}).get("displayImages") or []:
+            candidate = next((u for u in (image.get("urlList") or []) if _allowed_image(u)), None)
+            if candidate:
+                images.append(candidate)
+        images = images[:MAX_SLIDES]
+    else:
+        caption, uploader, images = embed_caption(html) or "", None, embed_slides(html)
+    if not (caption or images):
+        return None
+    metadata = ReelMetadata(platform="tiktok", url=url, title=caption[:120] or None, caption=caption or None, uploader=uploader)
+    return metadata, images
+
+
+def find_photo_post(url: str, cookies: Optional[dict[str, str]] = None) -> Optional[tuple[ReelMetadata, list[str]]]:
+    """A slideshow's caption and slide addresses, from whichever page TikTok will serve: the post as a video address
+    (the photo address never carries the data for a server), looking like each browser in turn; then the embed page;
+    then the photo page itself."""
+    match = ITEM_RE.search(urlparse(url).path)
+    if not match:
+        return None
+    caption_only: Optional[ReelMetadata] = None
+    video_url = url.replace("/photo/", "/video/")
+    for profile in PROFILES:
+        html = _get_page(video_url, cookies, profile)
+        item = parse_item(html) if html else None
+        if item:
+            slides = slide_urls(item)
+            if slides:
+                return metadata_from_item(item, url), slides
+            caption_only = caption_only or metadata_from_item(item, url)
+    for i, profile in enumerate(PROFILES):
+        if i:
+            time.sleep(EMBED_PAUSE)
+        html = _get_page(f"https://www.tiktok.com/embed/v2/{match.group(2)}", cookies, profile)
+        found = embed_post(html, url) if html else None
+        if found and found[1]:
+            return found
+        caption_only = caption_only or (found[0] if found else None)
+    html = _get_page(url, cookies)
+    item = parse_item(html) if html else None
+    if item and slide_urls(item):
+        return metadata_from_item(item, url), slide_urls(item)
+    if caption_only is None:
+        log.info("TikTok served none of the pages for %s", url)
+        return None
+    return caption_only, []
+
+
 def download_photo_post(url: str, workdir: Path, frame_width: int = 1024,
                         cookies: Optional[dict[str, str]] = None) -> Optional[tuple[ReelMetadata, list[Path]]]:
-    """Downloads a TikTok slideshow's caption and slide images: from the post page (as a photo, then as a video
-    address, which TikTok often serves when the photo one is blocked), then from the embed page. Returns None if
-    TikTok served none of them."""
-    item, images = None, []
-    for page in dict.fromkeys([url, url.replace("/photo/", "/video/")]):
-        html = _get_page(page, cookies)
-        found = parse_item(html) if html else None
-        if found:
-            item = item or found
-            images = slide_urls(found)
-            if images:
-                break
-    metadata = metadata_from_item(item, url) if item else None
-    if not images:
-        match = ITEM_RE.search(urlparse(url).path)
-        embed = _get_page(f"https://www.tiktok.com/embed/v2/{match.group(2)}", cookies) if match else None
-        if embed:
-            images = embed_slides(embed)
-            caption = embed_caption(embed)
-            if metadata is None and (images or caption):
-                metadata = ReelMetadata(platform="tiktok", url=url, title=(caption or "")[:120] or None, caption=caption)
-    if metadata is None:
-        log.info("TikTok served neither the post nor its embed for %s", url)
+    """Downloads a TikTok slideshow's caption and slide images. Returns None if TikTok served none of its pages."""
+    found = find_photo_post(url, cookies)
+    if found is None:
         return None
+    metadata, images = found
     paths: list[Path] = []
     with httpx.Client(timeout=20, headers={"User-Agent": BROWSER_UA, "Referer": "https://www.tiktok.com/"}) as client:
         for i, image_url in enumerate(images, start=1):

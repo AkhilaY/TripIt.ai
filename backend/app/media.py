@@ -223,7 +223,7 @@ def _posted_on(info: dict):
 def extract_audio(video: Path, workdir: Path) -> Optional[Path]:
     out = workdir / "audio.wav"
     result = subprocess.run(
-        ["ffmpeg", "-y", "-loglevel", "error", "-i", str(video), "-vn", "-ac", "1", "-ar", "16000", str(out)],
+        ["ffmpeg", "-y", "-loglevel", "error", "-i", str(video), "-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", str(out)],
         capture_output=True,
         timeout=180,
     )

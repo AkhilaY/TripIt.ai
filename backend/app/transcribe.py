@@ -1,5 +1,6 @@
 import logging
 import threading
+import wave
 from pathlib import Path
 from typing import Optional
 
@@ -42,9 +43,22 @@ def _get_model(settings: Settings):
 def transcribe(audio: Path, settings: Settings) -> Optional[str]:
     """Transcribe speech with timestamps. Returns None when the reel is music-only."""
     model = _get_model(settings)
-    segments, info = model.transcribe(str(audio), vad_filter=True, beam_size=5)
+    segments, info = model.transcribe(read_wav(audio), vad_filter=True, beam_size=5)
     lines = [f"[{seg.start:5.1f}s] {seg.text.strip()}" for seg in segments if seg.text.strip()]
     if not lines:
         return None
     log.info("Transcribed %d segments (language=%s)", len(lines), info.language)
     return "\n".join(lines)
+
+
+def read_wav(path: Path):
+    """The 16 kHz mono WAV that extract_audio writes, as the float samples Whisper takes. Reading it ourselves
+    skips faster-whisper's own decoder, which breaks on newer PyAV versions (it passes an option they dropped)."""
+    import numpy as np
+
+    with wave.open(str(path), "rb") as f:
+        if f.getsampwidth() != 2 or f.getnchannels() != 1 or f.getframerate() != 16000:
+            raise ValueError(f"Expected 16 kHz 16-bit mono audio, got {f.getframerate()} Hz "
+                             f"{f.getsampwidth() * 8}-bit x{f.getnchannels()}")
+        frames = f.readframes(f.getnframes())
+    return np.frombuffer(frames, dtype=np.int16).astype(np.float32) / 32768.0

@@ -96,6 +96,38 @@ def test_whisper_falls_back_when_the_cpu_refuses_int8(monkeypatch):
     monkeypatch.setattr(transcribe, "_model", None)
 
 
+def test_transcribe_reads_the_audio_itself(tmp_path, monkeypatch):
+    """faster-whisper's own decoder breaks on newer PyAV (an option it passes was removed), so the samples are
+    read from the WAV and handed over as an array."""
+    import subprocess
+
+    import numpy as np
+
+    from app import transcribe
+    from app.config import Settings
+    from app.media import extract_audio
+
+    video = tmp_path / "reel.mp4"
+    subprocess.run(["ffmpeg", "-loglevel", "error", "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=44100:duration=1",
+                    "-ac", "2", str(video)], check=True)
+    audio = extract_audio(video, tmp_path)
+    got = []
+
+    class Segment:
+        start, text = 0.0, " Go to Joe's Pizza "
+
+    class FakeModel:
+        def transcribe(self, samples, **kwargs):
+            got.append(samples)
+            return [Segment()], type("Info", (), {"language": "en"})()
+
+    monkeypatch.setattr(transcribe, "_model", FakeModel())
+    assert transcribe.transcribe(audio, Settings(anthropic_api_key="x")) == "[  0.0s] Go to Joe's Pizza"
+    assert isinstance(got[0], np.ndarray) and got[0].dtype == np.float32 and 15000 < len(got[0]) < 17000
+    assert 0 < float(np.abs(got[0]).max()) <= 1
+    monkeypatch.setattr(transcribe, "_model", None)
+
+
 def test_tiktok_slides_found_in_any_page_shape():
     import json
     from app.tiktok import embed_caption, embed_slides, parse_item
@@ -121,3 +153,74 @@ def test_tiktok_cookies_from_a_cookies_file(tmp_path):
     f.write_text("# Netscape HTTP Cookie File\n.tiktok.com\tTRUE\t/\tTRUE\t0\tsessionid\tabc\n#HttpOnly_.tiktok.com\tTRUE\t/\tTRUE\t0\tmsToken\txyz\n"
                  ".instagram.com\tTRUE\t/\tTRUE\t0\tsessionid\tnope\n")
     assert cookies_for_tiktok(str(f)) == {"sessionid": "abc", "msToken": "xyz"}
+
+
+def _rehydration(item):
+    import json
+    return ('<script id="__UNIVERSAL_DATA_FOR_REHYDRATION__" type="application/json">'
+            + json.dumps({"__DEFAULT_SCOPE__": {"webapp.video-detail": {"itemInfo": {"itemStruct": item}}}}) + "</script>")
+
+
+def _embed(post_id, caption, urls):
+    import json
+    state = {"source": {"data": {f"/embed/v2/{post_id}": {"videoData": {
+        "itemInfos": {"id": post_id, "text": caption}, "authorInfos": {"uniqueId": "londontodolife"},
+        "imagePostInfo": {"displayImages": [{"urlList": [u]} for u in urls]}}}}}}
+    return f'<script id="__FRONTITY_CONNECT_STATE__" type="application/json">{json.dumps(state)}</script>'
+
+
+def test_tiktok_embed_post_reads_the_page_data():
+    from app.tiktok import embed_post
+
+    page = _embed("7695", "Insta highlights #london ", [
+        "https://p16-common-sign.tiktokcdn.com/tos-no1a-i-photomode-no/a~tplv-photomode-image.jpeg?x=1",
+        "https://evil.example/tos-no1a-i-photomode-no/b.jpeg",
+        "https://p19-common-sign.tiktokcdn.com/tos-no1a-i-photomode-no/c~tplv-photomode-image.jpeg"])
+    metadata, slides = embed_post(page, "https://www.tiktok.com/@londontodolife/photo/7695")
+    assert metadata.caption == "Insta highlights #london" and metadata.uploader == "londontodolife"
+    assert [s.split("/")[-1].split("~")[0] for s in slides] == ["a", "c"]
+
+
+def test_tiktok_same_slide_from_two_hosts_counts_once():
+    from app.tiktok import embed_slides
+
+    page = ('"https://p16-common-sign.tiktokcdn.com/tos-no1a-i-photomode-no/abc~tplv-photomode-image.jpeg" '
+            '"https://p19-common-sign.tiktokcdn-us.com/tos-no1a-i-photomode-no/abc~tplv-photomode-image.jpeg"')
+    assert len(embed_slides(page)) == 1
+
+
+def test_tiktok_photo_post_tries_other_browsers_then_the_embed(monkeypatch):
+    from app import tiktok
+
+    url = "https://www.tiktok.com/@londontodolife/photo/7695"
+    item = {"id": "7695", "desc": "Insta highlights", "author": {"uniqueId": "londontodolife"},
+            "imagePost": {"images": [{"imageURL": {"urlList": ["https://p16-sign.tiktokcdn.com/s1~tplv-photomode-image.jpeg"]}}]}}
+    calls = []
+
+    # The first browser gets TikTok's 1.5 KB page without the post; the next one gets the post.
+    def video_page(page, cookies=None, profile="chrome_android"):
+        calls.append((page.split("/")[-2], profile))
+        return _rehydration(item) if profile == "safari_ios" else "<html>blocked</html>"
+
+    monkeypatch.setattr(tiktok, "_get_page", video_page)
+    metadata, slides = tiktok.find_photo_post(url)
+    assert calls == [("video", "chrome_android"), ("video", "safari_ios")]
+    assert metadata.caption == "Insta highlights" and len(slides) == 1
+
+    # No video page at all: the embed page, after one 503.
+    calls.clear()
+    monkeypatch.setattr(tiktok, "EMBED_PAUSE", 0)
+    answers = iter([None, _embed("7695", "From the embed", ["https://p16-common-sign.tiktokcdn.com/tos-photomode/x~tplv-photomode-image.jpeg"])])
+
+    def embed_only(page, cookies=None, profile="chrome_android"):
+        calls.append((page.split("/")[-2], profile))
+        return next(answers) if "/embed/v2/" in page else None
+
+    monkeypatch.setattr(tiktok, "_get_page", embed_only)
+    metadata, slides = tiktok.find_photo_post(url)
+    assert metadata.caption == "From the embed" and len(slides) == 1
+    assert calls[-2:] == [("v2", "chrome_android"), ("v2", "safari_ios")]
+
+    # Nothing served anywhere.
+    monkeypatch.setattr(tiktok, "_get_page", lambda page, cookies=None, profile="chrome_android": None)
+    assert tiktok.find_photo_post(url) is None

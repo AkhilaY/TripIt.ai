@@ -3371,3 +3371,32 @@ def test_bookings_near_home_go_in_the_home_collection(client):
     assert r.status_code == 201
     listed = client.get("/v1/bookings", headers=H).json()
     assert listed[0]["trip_kind"] == "local"
+
+
+def test_free_plan_video_saves_then_plus(client):
+    owner = signup(client, "a@x.com", "secret")
+    b = signup(client, "b@x.com", client.post("/v1/admin/invites", json={}, headers=owner).json()["code"])
+    plan = client.get("/v1/me/plan", headers=b).json()
+    assert plan["plan"] == "free" and plan["video_saves_used"] == 0 and plan["video_saves_limit"] == 5
+    for i in range(5):
+        r = client.post("/v1/jobs", json={"url": f"https://www.tiktok.com/@x/video/{i}"}, headers=b)
+        assert r.status_code == 202, r.text
+        wait_for(client, r.json()["id"], headers=b)
+    assert client.get("/v1/me/plan", headers=b).json()["video_saves_used"] == 5
+
+    blocked = client.post("/v1/jobs", json={"url": "https://www.tiktok.com/@x/video/99"}, headers=b)
+    assert blocked.status_code == 402
+    assert "5 free video saves" in blocked.json()["detail"] and "Plus" in blocked.json()["detail"]
+    # Sharing a post that's already saved doesn't use a save.
+    assert client.post("/v1/jobs", json={"url": "https://www.tiktok.com/@x/video/0"}, headers=b).status_code == 202
+    # The owner has no limit.
+    owner_plan = client.get("/v1/me/plan", headers=owner).json()
+    assert owner_plan["plan"] == "plus" and owner_plan["video_saves_limit"] is None
+
+    b_id = client.get("/v1/me", headers=b).json()["id"]
+    assert client.put(f"/v1/admin/users/{b_id}/plan", json={"plan": "plus"}, headers=b).status_code == 403
+    assert client.put(f"/v1/admin/users/{b_id}/plan", json={"plan": "gold"}, headers=owner).status_code == 422
+    assert client.put(f"/v1/admin/users/{b_id}/plan", json={"plan": "plus"}, headers=owner).status_code == 200
+    assert client.get("/v1/me/plan", headers=b).json()["video_saves_limit"] is None
+    assert client.post("/v1/jobs", json={"url": "https://www.tiktok.com/@x/video/99"}, headers=b).status_code == 202
+    assert next(u for u in client.get("/v1/admin/users", headers=owner).json() if u["id"] == b_id)["plan"] == "plus"

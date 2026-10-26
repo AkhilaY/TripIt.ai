@@ -7,6 +7,7 @@ struct ProfileView: View {
     @Environment(Store.self) private var store
     @Environment(Router.self) private var router
     @Environment(\.dismiss) private var dismiss
+    @State private var paywall: PaywallRequest?
     @State private var home: HomeSetting?
     @State private var editingHome = false
     @State private var editingName = false
@@ -87,6 +88,11 @@ struct ProfileView: View {
                 if notifications == .denied { Text("Notifications are off for Travel Edit. Turn them on in Settings → Notifications → Travel Edit.") }
             }
             Section("Account") {
+                if let plan = store.plan, session.me?.isAdmin != true {
+                    Button { paywall = PaywallRequest() } label: {
+                        row("sparkles", Theme.gold, plan.isPlus ? "Travel Edit Plus" : "Free plan", planLine(plan), chevron: true)
+                    }
+                }
                 if session.me?.hasPassword != false {
                     Button { changingPassword = true } label: { row("lock.fill", Theme.gray, "Change password", nil) }
                 }
@@ -119,6 +125,7 @@ struct ProfileView: View {
             notifications = await Push.shared.status()
             home = try? await API.shared.get("/v1/home", as: HomeSetting?.self)
         }
+        .sheet(item: $paywall) { PaywallView(request: $0).environment(store) }
         .alert("Your name", isPresented: $editingName) {
             TextField("First name", text: $nameText).textContentType(.givenName)
             Button("Cancel", role: .cancel) {}
@@ -152,6 +159,11 @@ struct ProfileView: View {
                 store.show("Home set to \(home?.city ?? city)")
             }
         } catch { store.fail(error) }
+    }
+
+    private func planLine(_ plan: PlanInfo) -> String {
+        guard let left = plan.savesLeft else { return "Unlimited video saves" }
+        return (left == 1 ? "1 video save left" : "\(left) video saves left") + " this month · Upgrade to Plus"
     }
 
     private func row(_ symbol: String, _ color: Color, _ title: String, _ subtitle: String?, chevron: Bool = false) -> some View {

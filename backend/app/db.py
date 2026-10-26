@@ -295,7 +295,7 @@ MIGRATIONS = {
     "trips": [("share_token", "TEXT"), ("kind", "TEXT NOT NULL DEFAULT 'trip'"), ("user_id", "TEXT"), ("stops", "TEXT"),
               ("invite_token", "TEXT")],
     "folders": [("user_id", "TEXT")],
-    "users": [("apple_sub", "TEXT"), ("apple_token", "TEXT")],
+    "users": [("apple_sub", "TEXT"), ("apple_token", "TEXT"), ("plan", "TEXT NOT NULL DEFAULT 'free'")],
     "reels": [("user_id", "TEXT")],
     "jobs": [("user_id", "TEXT")],
     "push_subscriptions": [("user_id", "TEXT")],
@@ -1090,6 +1090,21 @@ class Database:
         if row["reel_id"] and self.get_reel(row["reel_id"]):
             return self._job(row)
         return None
+
+    def video_saves_since(self, user_id: str, since: str) -> int:
+        """Link imports (not screenshots) someone started since then, leaving out ones that failed."""
+        rows = self._rows(
+            "SELECT COUNT(*) AS n FROM jobs WHERE user_id = ? AND created_at >= ? AND status != ? AND url NOT LIKE 'upload:%'",
+            (user_id, since, JobStatus.failed.value),
+        )
+        return rows[0]["n"]
+
+    def user_plan(self, user_id: str) -> str:
+        rows = self._rows("SELECT plan FROM users WHERE id = ?", (user_id,))
+        return (rows[0]["plan"] or "free") if rows else "free"
+
+    def set_user_plan(self, user_id: str, plan: str) -> None:
+        self._exec("UPDATE users SET plan = ? WHERE id = ?", (plan, user_id))
 
     def unfinished_jobs(self) -> list[Job]:
         rows = self._rows(

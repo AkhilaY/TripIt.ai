@@ -303,6 +303,23 @@ struct Job: Codable, Identifiable, Hashable {
     var isActive: Bool { ["queued", "downloading", "transcribing", "analyzing"].contains(status) }
 }
 
+/// Your plan: Free has a few video saves a month, Plus has no limit.
+struct PlanInfo: Codable, Hashable {
+    var plan: String
+    var videoSavesUsed: Int
+    var videoSavesLimit: Int?
+    var resetsAt: String
+
+    var isPlus: Bool { plan == "plus" }
+    var savesLeft: Int? { videoSavesLimit.map { max(0, $0 - videoSavesUsed) } }
+    var resetDay: String {
+        guard let date = ISO8601DateFormatter().date(from: resetsAt) else { return "next month" }
+        var style = Date.FormatStyle.dateTime.month(.wide).day()
+        style.timeZone = .gmt  // the month turns over in UTC
+        return date.formatted(style)
+    }
+}
+
 struct Me: Codable, Hashable {
     var id: String
     var email: String

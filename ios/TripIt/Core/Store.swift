@@ -20,6 +20,8 @@ final class Store {
     var toast: Toast?
     /// An import that just finished, to review: its places by city, a trip that passes through, lists.
     var reviewJob: Job?
+    var plan: PlanInfo?
+    var paywall: PaywallRequest?
     /// Every booking across your trips, soonest first (undated ones last), for the Bookings tab.
     var bookings: [Booking] = []
     var bookingsLoaded = false
@@ -122,6 +124,7 @@ final class Store {
             featuresOff = Features.off
             await EventSync.shared.sync(saved)
             home = (try? await h) ?? home
+            await loadPlan()
             loaded = true
             error = nil
             saveSnapshot()
@@ -223,7 +226,13 @@ final class Store {
     }
 
     func importLink(_ text: String) async throws {
-        let job: Job = try await api.post("/v1/jobs", ["url": text, "shared_text": text])
+        let job: Job
+        do {
+            job = try await api.post("/v1/jobs", ["url": text, "shared_text": text])
+        } catch let error as APIError where error.status == 402 {
+            PendingLink.keep(text)
+            throw UpgradeNeeded(link: text, message: error.message)
+        }
         jobs.removeAll { $0.id == job.id }
         jobs.insert(job, at: 0)
         pollJobs()
@@ -241,7 +250,21 @@ final class Store {
             let fresh: Job = try await api.post("/v1/jobs/\(job.id)/retry")
             if let i = jobs.firstIndex(where: { $0.id == job.id }) { jobs[i] = fresh }
             pollJobs()
+        } catch let error as APIError where error.status == 402 {
+            paywall = PaywallRequest(link: nil, message: error.message)
         } catch { fail(error) }
+    }
+
+    // MARK: Plan
+
+    /// Your plan and this month's video saves; on Plus, saves the post you shared while out of free saves.
+    func loadPlan() async {
+        guard let fresh: PlanInfo = try? await api.get("/v1/me/plan") else { return }
+        plan = fresh
+        if fresh.isPlus, let link = PendingLink.take() {
+            try? await importLink(link)
+            show("Saving the post you shared earlier")
+        }
     }
 
     // MARK: Places

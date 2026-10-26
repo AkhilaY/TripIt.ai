@@ -41,6 +41,8 @@ class Settings(BaseSettings):
     monthly_budget_usd: float = 150.0
     user_daily_budget_usd: float = 3.0
     limit_imports_per_day: int = 25
+    # Video saves (TikTok, Instagram and YouTube links) on the free plan each calendar month (UTC); Plus is unlimited.
+    free_video_saves_per_month: int = 5
     limit_plans_per_day: int = 15  # AI plans, tidies and suggestions
     limit_concierge_per_day: int = 50
     limit_menus_per_day: int = 20

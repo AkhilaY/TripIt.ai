@@ -177,6 +177,10 @@ struct AddPlaceSheet: View {
         do {
             try await store.importLink(text)
             finish("Finding the places in that post…")
+        } catch let upgrade as UpgradeNeeded {
+            dismiss()
+            try? await Task.sleep(for: .milliseconds(600))  // one sheet at a time
+            store.paywall = PaywallRequest(link: upgrade.link, message: upgrade.message)
         } catch { self.error = error.localizedDescription }
         busy = false
     }

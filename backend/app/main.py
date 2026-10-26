@@ -114,6 +114,7 @@ from .menus import MENU_CATEGORIES, MenuService, SafeFetcher
 from .needs import NeedsService
 from .packing import PackingService
 from .photos import PhotoStore, fetch_bytes as fetch_photo_bytes
+from .plans import PLANS, PlanOut, out_of_saves, plan_for, upgrade_message
 from .packing import parse_lines
 from .apple import AppleError, AppleSignIn
 from .reserve import find_reserve_link
@@ -489,6 +490,12 @@ class NameChange(BaseModel):
     name: str = Field(max_length=80)
 
 
+@app.get("/v1/me/plan", response_model=PlanOut, dependencies=[Auth])
+async def my_plan(request: Request) -> PlanOut:
+    """Your plan and how many of this month's free video saves you've used."""
+    return _plan(request, _me(request))
+
+
 @app.patch("/v1/me", response_model=MeOut, dependencies=[Auth])
 async def update_me(body: NameChange, request: Request) -> MeOut:
     """Your name, as the greeting and shared trips show it."""
@@ -538,8 +545,25 @@ async def delete_account(body: PasswordCheck, request: Request) -> Response:
 @app.get("/v1/admin/users", dependencies=[Auth])
 async def admin_users(request: Request) -> list[dict]:
     _admin(request)
-    return [{"id": u.id, "email": u.email, "name": u.name, "is_admin": u.is_admin, "created_at": u.created_at}
+    return [{"id": u.id, "email": u.email, "name": u.name, "is_admin": u.is_admin, "created_at": u.created_at,
+             "plan": _db(request).user_plan(u.id)}
             for u in _accounts(request).list_users()]
+
+
+class PlanChange(BaseModel):
+    plan: str
+
+
+@app.put("/v1/admin/users/{user_id}/plan", dependencies=[Auth])
+async def admin_set_plan(user_id: str, body: PlanChange, request: Request) -> dict:
+    """Puts someone on Free or Plus by hand (testers, refunds) until purchases are in the app."""
+    _admin(request)
+    if body.plan not in PLANS:
+        raise HTTPException(status_code=422, detail="Plan must be free or plus")
+    if _accounts(request).get_user(user_id) is None:
+        raise HTTPException(status_code=404, detail="No such account")
+    _db(request).set_user_plan(user_id, body.plan)
+    return {"id": user_id, "plan": body.plan}
 
 
 @app.post("/v1/admin/users/{user_id}/reset-password", dependencies=[Auth])
@@ -708,11 +732,27 @@ async def create_job(body: CreateJobRequest, request: Request) -> Job:
         raise HTTPException(status_code=422, detail=str(e))
 
     shared_text = body.shared_text if body.shared_text and body.shared_text.strip() != url else None
+    if _db(request).reusable_job(url) is None:
+        _check_video_saves(request)
     _allow(request, "import")
     job, created = await request.app.state.store.create(url, shared_text)
     if created:
         start_job(request.app, job.id, url, shared_text)
     return job
+
+
+def _plan(request: Request, user: User) -> PlanOut:
+    return plan_for(_db(request), user.id, user.is_admin, get_settings().free_video_saves_per_month)
+
+
+def _check_video_saves(request: Request) -> None:
+    """402 once the free plan's video saves for the month are used up (the app and share sheet offer Plus)."""
+    user = getattr(request.state, "user", None)
+    if user is None:
+        return
+    plan = _plan(request, user)
+    if out_of_saves(plan):
+        raise HTTPException(status_code=402, detail=upgrade_message(plan))
 
 
 def _decode_images(items: list[str]) -> list[bytes]:
@@ -767,6 +807,8 @@ async def retry_job(job_id: str, request: Request) -> Job:
         raise HTTPException(status_code=404, detail="Job not found")
     if job.status != JobStatus.failed:
         raise HTTPException(status_code=409, detail="Only failed imports can be retried")
+    if not job.url.startswith("upload:"):
+        _check_video_saves(request)  # failed saves don't count, so trying again does
     _allow(request, "import")
     store.update(job_id, status=JobStatus.queued, message="Retrying", warnings=[])
     start_job(request.app, job_id, job.url, _db(request).job_shared_text(job_id))

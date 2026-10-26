@@ -48,6 +48,10 @@ struct MainTabs: View {
                 .environment(router).environment(store)
                 .modifier(ToastOverlay())
         }
+        .sheet(item: Binding(get: { store.paywall }, set: { store.paywall = $0 })) { request in
+            PaywallView(request: request)
+                .environment(router).environment(store)
+        }
         .task(id: pendingJoin) {
             guard !pendingJoin.isEmpty else { return }
             let token = pendingJoin
@@ -74,8 +78,19 @@ struct MainTabs: View {
             }
         }
         .onOpenURL { url in
-            // tripit://open?url=… from the Share Extension, or a link to the web app
-            if let link = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "url" })?.value {
+            let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+            if url.host == "upgrade" {
+                // From the share sheet when the month's free video saves are used up
+                let link = query.first(where: { $0.name == "url" })?.value
+                if let link { PendingLink.keep(link) }
+                store.paywall = PaywallRequest(link: link, message: nil)
+            } else if url.host == "review", let id = query.first(where: { $0.name == "job" })?.value {
+                // "Review places" in the share sheet once an import is done
+                Task {
+                    await store.refresh()
+                    if let job = store.jobs.first(where: { $0.id == id }) { store.reviewJob = job }
+                }
+            } else if let link = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "url" })?.value {
                 router.addRequest = Router.AddRequest(text: link)
             } else if let fragment = url.fragment {
                 router.open("#" + fragment)

@@ -39,7 +39,7 @@ struct MenuView: View {
                 default: unknown
                 }
             } else {
-                ProgressView().frame(maxWidth: .infinity).listRowBackground(Color.clear)
+                SkeletonRows(photo: false).listRowBackground(Color.clear)
             }
         }
         .tripBackground()

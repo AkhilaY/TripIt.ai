@@ -384,7 +384,7 @@ class MenuService:
 
     async def _look(self, place: Place) -> PlaceMenu:
         if self.claude is None:
-            raise ClaudeError("Claude isn't configured on the server")
+            raise ClaudeError("This isn't available right now.")
         result: Optional[MenuResult] = None
         kind: Optional[str] = None
         source: Optional[str] = None
@@ -448,7 +448,7 @@ class MenuService:
     async def read_upload(self, place: Place, images: list[bytes], pdfs: list[bytes]) -> Optional[PlaceMenu]:
         """A menu the person photographed or downloaded: for sites the server can't read. None when it holds no menu."""
         if self.claude is None:
-            raise ClaudeError("Claude isn't configured on the server")
+            raise ClaudeError("This isn't available right now.")
         materials = [Material("image", f"Photo {i}", "", data=d, media_type="image/jpeg") for i, d in enumerate(images, start=1)]
         materials += [Material("pdf", f"PDF {i}", "", data=d, media_type="application/pdf") for i, d in enumerate(pdfs, start=1)]
         result = clean_menu(await self.claude.extract_menu(place, materials, from_photos=bool(images)))

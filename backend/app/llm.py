@@ -246,17 +246,17 @@ class ClaudeService:
                     betas=[FALLBACK_BETA], fallbacks="default",
                 )
             except anthropic.RateLimitError as e:
-                raise ClaudeError("Claude is rate limited, try again in a minute") from e
+                raise ClaudeError("We're a little busy right now. Try again in a minute.") from e
             except anthropic.APIStatusError as e:
                 log.error("Claude API error %s (request %s): %s", e.status_code, e.request_id, e.message)
-                raise ClaudeError(f"Claude API error ({e.status_code})") from e
+                raise ClaudeError("Something went wrong on our side. Try again in a moment.") from e
             except anthropic.APIConnectionError as e:
-                raise ClaudeError("Couldn't reach Claude") from e
+                raise ClaudeError("Something went wrong on our side. Try again in a moment.") from e
             except anthropic.AnthropicError as e:
-                raise ClaudeError("Claude isn't configured on the server") from e
+                raise ClaudeError("This isn't available right now.") from e
             self._record("edits_research", response)
             if response.stop_reason == "refusal":
-                raise ClaudeError("Claude declined to research this")
+                raise ClaudeError("We couldn't find anything for this.")
             for block in response.content:
                 kind = getattr(block, "type", None)
                 if kind == "web_search_tool_result" and isinstance(getattr(block, "content", None), list):
@@ -345,21 +345,21 @@ class ClaudeService:
                 fallbacks="default",
             )
         except anthropic.RateLimitError as e:
-            raise ClaudeError("Claude is rate limited, try again in a minute") from e
+            raise ClaudeError("We're a little busy right now. Try again in a minute.") from e
         except anthropic.APIStatusError as e:
             log.error("Claude API error %s (request %s): %s", e.status_code, e.request_id, e.message)
-            raise ClaudeError(f"Claude API error ({e.status_code})") from e
+            raise ClaudeError("Something went wrong on our side. Try again in a moment.") from e
         except anthropic.APIConnectionError as e:
-            raise ClaudeError("Couldn't reach Claude") from e
+            raise ClaudeError("Something went wrong on our side. Try again in a moment.") from e
         except anthropic.AnthropicError as e:  # e.g. no API key configured
             log.error("Claude client error: %s", e)
-            raise ClaudeError("Claude isn't configured on the server") from e
+            raise ClaudeError("This isn't available right now.") from e
 
         self._record(feature, response)
         if response.stop_reason == "refusal":
-            raise ClaudeError("Claude declined to process this post")
+            raise ClaudeError("We couldn't read this post.")
         if response.stop_reason == "max_tokens" or response.parsed_output is None:
-            raise ClaudeError("Claude's response was incomplete")
+            raise ClaudeError("Something went wrong reading this. Try again.")
         return response.parsed_output
 
 

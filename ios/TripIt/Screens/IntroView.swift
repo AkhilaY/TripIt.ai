@@ -7,7 +7,7 @@ struct IntroView: View {
     @State private var page = 0
 
     private let slides: [(title: String, text: String)] = [
-        ("Save it from a Reel", "Share a TikTok or Instagram post to The Travel Edit. It finds every place mentioned and puts them on your map."),
+        ("Save it from a post", "Share a TikTok or Instagram post to The Travel Edit. It finds every place mentioned and puts them on your map."),
         ("Everything finds its city", "Places file themselves by city, so London, Lisbon and the spots near home are always one tap away."),
         ("Days that actually work", "Turn your saves into a plan with realistic times: breakfast, a market, lunch, dinner. Never five lunches at once."),
         ("Plan it together", "Invite a partner or friends to a trip. Add places, move days and keep your bookings in one place."),

@@ -128,9 +128,9 @@ struct NewTripSheet: View {
         List {
             Section {
                 choice(ai: true, symbol: "sparkles", color: Theme.gold, title: "Plan it for me",
-                       text: "AI arranges your places into \(Fmt.plural(days, "day")), grouped by area with sensible times. It can suggest a few extras for quiet days.")
+                       text: "Your places, arranged into \(Fmt.plural(days, "day")), grouped by area with sensible times. It can suggest a few extras for quiet days.")
                 choice(ai: false, symbol: "calendar", color: Theme.indigo, title: "I'll build it myself",
-                       text: "\(Fmt.plural(days, "empty day")) for you to fill from your saved places. You can ask AI to tidy it later.")
+                       text: "\(Fmt.plural(days, "empty day")) for you to fill from your saved places. You can fix the order later.")
             } header: {
                 Text("How would you like to plan it?")
             }
@@ -218,7 +218,7 @@ struct NewTripSheet: View {
                 store.apply(trip)
                 await store.reloadTrips()
                 await store.reloadPlaces()
-                store.show(aiPlans ? (trip.plannedBy == "claude" ? "Your trip is planned" : "Planned by location (AI unavailable)")
+                store.show(aiPlans ? (trip.plannedBy == "claude" ? "Your trip is planned" : "Planned by neighbourhood")
                                    : "Your days are ready to fill")
                 dismiss()
                 router.push(.trip(id: trip.id))

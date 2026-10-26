@@ -834,7 +834,7 @@ async def suggest_for_trip(trip_id: str, request: Request) -> TripDetail:
     if not trip.day_count:
         raise HTTPException(status_code=422, detail="Set up the trip's days first")
     if request.app.state.claude is None:
-        raise HTTPException(status_code=503, detail="Suggestions need Claude, which isn't set up on the server")
+        raise HTTPException(status_code=503, detail="Suggestions aren't available right now")
     await _library(request).fill_gaps(trip_id, request.app.state.claude, _taste(request))
     return _trip_or_404(request, trip_id)
 

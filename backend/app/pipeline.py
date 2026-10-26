@@ -75,12 +75,17 @@ class Pipeline:
                 log.exception("Finished-import callback failed for %s", job_id)
 
     def _download_error(self, url: str, reason: str) -> str:
-        message = f"Couldn't download this reel: {reason}."
-        if platform_for(url) == "instagram" and not (self.settings.ytdlp_cookies or self.settings.ytdlp_cookies_file):
-            message += " Instagram needs a logged-in session: add the YTDLP_COOKIES secret and redeploy."
-        elif "private" in reason.lower() or "login" in reason.lower():
-            message += " The reel may be private or need a login."
-        return message
+        """What to tell the person when a post can't be opened: what happened and what to do, in plain words.
+        The technical reason goes to the logs."""
+        low = reason.lower()
+        if "private" in low or "login" in low or "log in" in low:
+            return "This post is private or needs you to be signed in to see it. Save a screenshot of it instead."
+        platform = platform_for(url)
+        if platform == "instagram":
+            return "Instagram didn't let us open this reel. Try again later, or save screenshots of it instead."
+        if platform == "tiktok":
+            return "TikTok didn't let us open this post. Try again, or save a screenshot of it instead."
+        return "We couldn't open this post. Try again, or save a screenshot of it instead."
 
     async def _run(self, job_id: str, url: str, shared_text: Optional[str]) -> None:
         if url.startswith(UPLOAD_PREFIX):
@@ -106,8 +111,8 @@ class Pipeline:
                     if metadata and metadata.thumbnail_url else None
                 if cover:
                     reel.image_paths = [cover]
-                warnings.append(f"Couldn't download the post ({reason}), so only the caption{' and cover' if cover else ''} "
-                                "were used. Places shown only in the video or other slides may be missing.")
+                warnings.append(f"We could only read the caption{' and cover' if cover else ''}, so places shown only in "
+                                "the video or other slides may be missing.")
             self.store.update(job_id, reel=reel.metadata)
 
             transcript = None
@@ -123,11 +128,11 @@ class Pipeline:
                         transcript = await asyncio.to_thread(transcribe, audio, self.settings)
                     except Exception:
                         log.exception("Transcription failed")
-                        warnings.append("Couldn't transcribe the audio.")
+                        warnings.append("We couldn't hear the audio, so places only mentioned out loud may be missing.")
                 video_frames = await asyncio.to_thread(extract_frames, video, workdir, self.settings)
                 frames = (frames + [(f"Frame at {s:.0f}s", p) for s, p in video_frames])[: self.settings.max_frames]
             elif not reel.image_paths:
-                warnings.append("Only the caption was available; places mentioned in the video may be missing.")
+                warnings.append("We only had the caption to go on, so places shown in the video may be missing.")
 
             self.store.update(job_id, status=JobStatus.analyzing, message="Finding places")
             result = await self.claude.extract_places(reel.metadata, shared_text, transcript, frames)
@@ -146,7 +151,7 @@ class Pipeline:
         folder = self._upload_folder(url)
         files = sorted(folder.glob("*.jpg")) if folder and folder.is_dir() else []
         if not files:
-            raise JobFailed("These screenshots are no longer on the server. Add them again.")
+            raise JobFailed("These screenshots expired. Add them again.")
         frames = [(f"Screenshot {i}", p) for i, p in enumerate(files[: self.settings.max_frames], start=1)]
         metadata = ReelMetadata(platform="screenshot", url=url, caption=note)
         self.store.update(job_id, reel=metadata, status=JobStatus.analyzing, message="Reading your screenshots")

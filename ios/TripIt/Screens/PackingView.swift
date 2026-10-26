@@ -33,7 +33,7 @@ struct PackingView: View {
     var body: some View {
         List {
             if !loaded {
-                ProgressView().frame(maxWidth: .infinity).listRowBackground(Color.clear)
+                SkeletonRows(photo: false).listRowBackground(Color.clear)
             } else if let error {
                 EmptyState(symbol: "wifi.slash", title: "Couldn't load the list", text: error) {
                     Button("Try again") { Task { await load() } }.buttonStyle(PrimaryButtonStyle(tinted: true)).frame(maxWidth: 200)

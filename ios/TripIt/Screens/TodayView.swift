@@ -31,7 +31,7 @@ struct TodayView: View {
                     content(trip, day: min(max(1, day ?? todayNumber ?? 1), trip.dayCount))
                 }
             } else {
-                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+                SkeletonRows().padding(20).frame(maxHeight: .infinity, alignment: .top)
             }
         }
         .background(Theme.background.ignoresSafeArea())

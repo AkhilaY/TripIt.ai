@@ -281,7 +281,7 @@ struct UsageView: View {
     @State private var editing = false
 
     static let featureLabels = [
-        "import": "Imports", "plan": "AI plans", "tidy": "Tidy with AI", "suggest": "Suggestions", "concierge": "Concierge",
+        "import": "Imports", "plan": "AI plans", "tidy": "Fix the order", "suggest": "Suggestions", "concierge": "Concierge",
         "menu": "Menus", "menu_retry": "Menus (extra tries)", "menu_links": "Menus (finding links)", "bookings": "Reading bookings",
         "packing": "Packing lists", "edits": "Edits", "edits_research": "Edits (web research)", "discover": "Discover notes",
         "lounges": "Lounges", "booking_needs": "Booking checks", "events": "What's on", "briefing": "Daily briefings", "other": "Other",

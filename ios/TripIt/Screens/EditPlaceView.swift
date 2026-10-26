@@ -25,7 +25,7 @@ struct EditPlaceView: View {
                 EmptyState(symbol: "sparkles", title: "Couldn't open this place", text: error)
                     .frame(maxHeight: .infinity)
             } else {
-                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+                SkeletonRows(count: 3).padding(20).frame(maxHeight: .infinity, alignment: .top)
             }
         }
         .background(Theme.background.ignoresSafeArea())

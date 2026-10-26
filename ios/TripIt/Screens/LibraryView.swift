@@ -35,12 +35,12 @@ struct LibraryView: View {
                         Button("Try again") { Task { await store.refresh() } }.buttonStyle(PrimaryButtonStyle()).frame(maxWidth: 200)
                     }
                 } else if !store.loaded {
-                    ProgressView().frame(maxWidth: .infinity).padding(.top, 60)
+                    SkeletonRows().padding(.top, 20)
                 } else if !query.trimmingCharacters(in: .whitespaces).isEmpty {
                     searchResults
                 } else if store.saved.isEmpty && store.realTrips.isEmpty {
                     EmptyState(symbol: "bookmark", title: "Nothing saved yet",
-                               text: "Share a TikTok or Instagram Reel to The Travel Edit, paste a link, or search for a place. Places file themselves by city.") {
+                               text: "Share a TikTok or Instagram post to The Travel Edit, paste a link, or search for a place. Places file themselves by city.") {
                         Button { router.addRequest = Router.AddRequest() } label: { Label("Save a place", systemImage: "plus") }
                             .buttonStyle(PrimaryButtonStyle()).frame(maxWidth: 220)
                     }

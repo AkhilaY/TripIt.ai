@@ -510,7 +510,7 @@ class Curator:
 
     async def chat(self, req: ConciergeRequest) -> ConciergeReply:
         if self.claude is None:
-            raise ClaudeError("The concierge needs Claude, which isn't configured on the server")
+            raise ClaudeError("This isn't available right now.")
         # Claude expects the conversation to start with the traveler and alternate turns.
         messages: list[dict] = []
         for m in req.messages:

@@ -383,7 +383,7 @@ def test_download_failure_without_text_fails(client, monkeypatch):
     r = client.post("/v1/jobs", json={"url": "https://www.instagram.com/reel/private/"}, headers=H)
     job = wait_for(client, r.json()["id"])
     assert job["status"] == "failed"
-    assert "download" in job["message"]
+    assert "private" in job["message"] and "screenshot" in job["message"]  # plain words, a way forward
 
 
 # ---------- Trips, places, planning ----------
@@ -595,7 +595,7 @@ def test_download_failure_falls_back_to_tiktok_caption(client, monkeypatch):
     r = client.post("/v1/jobs", json={"url": "https://www.tiktok.com/@a/video/42"}, headers=H)
     job = wait_for(client, r.json()["id"])
     assert job["status"] == "done", job
-    assert "IP address is blocked" in job["warnings"][0]
+    assert "only read the caption" in job["warnings"][0]
     prompt = client.messages.calls[-1]["messages"][0]["content"][-1]["text"]
     assert "Best pizza in NYC" in prompt
 
@@ -611,8 +611,7 @@ def test_download_failure_explains_reason(client, monkeypatch):
     r = client.post("/v1/jobs", json={"url": "https://www.instagram.com/reel/zzz/"}, headers=H)
     job = wait_for(client, r.json()["id"])
     assert job["status"] == "failed"
-    assert "login required" in job["message"]
-    assert "YTDLP_COOKIES" in job["message"]
+    assert "signed in" in job["message"] and "YTDLP" not in job["message"]
 
 
 def test_clean_error():

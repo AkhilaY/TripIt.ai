@@ -8,7 +8,7 @@ struct CalendarView: View {
     var isTab = false
     @Environment(Store.self) private var store
     @Environment(Router.self) private var router
-    @State private var result: CalendarResult?
+    @State private var result: CalendarResult? = DiskCache.load("calendar")
     @State private var error: String?
     @State private var filter = "all"
     @State private var month = String(Fmt.iso(Date()).prefix(7))  // "2026-10"
@@ -44,32 +44,33 @@ struct CalendarView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                if let error {
+                if isTab { tabHeader }
+                if let error, result == nil {
                     EmptyState(symbol: "wifi.slash", title: "Couldn't load your calendar", text: error) {
                         Button("Try again") { Task { await load() } }.buttonStyle(PrimaryButtonStyle(tinted: true)).frame(maxWidth: 200)
                     }
                 } else if let result {
                     if result.items.isEmpty && result.undated.isEmpty {
                         EmptyState(symbol: "calendar", color: Self.color("event"), title: "Nothing on your calendar yet",
-                                   text: "Save a reel about a pop-up, a class or a show and it lands here on its date. Bookings and planned trip days appear too.")
+                                   text: "Save a post about a pop-up, a class or a show and it lands here on its date. Bookings and planned trip days appear too.")
                     } else {
                         content(result)
                     }
                 } else {
-                    ProgressView().frame(maxWidth: .infinity).padding(.top, 80)
+                    SkeletonRows(photo: false).padding(.top, 20)
                 }
             }
             .padding(.horizontal, 20)
             .padding(.bottom, 40)
         }
         .background(Theme.background.ignoresSafeArea())
-        .navigationTitle("Calendar")
+        .navigationTitle(isTab ? "" : "Calendar")
+        .toolbar(isTab ? .hidden : .automatic, for: .navigationBar)
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button { syncing = true } label: { Label("Sync", systemImage: "calendar.badge.plus") }
-            }
-            if isTab {
-                ToolbarItem(placement: .topBarTrailing) { ProfileButton() }
+            if !isTab {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { syncing = true } label: { Label("Sync", systemImage: "calendar.badge.plus") }
+                }
             }
         }
         .task { await load() }
@@ -80,9 +81,24 @@ struct CalendarView: View {
         }
     }
 
+    /// The same header as the other tabs: actions top right, the title in the serif.
+    private var tabHeader: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 10) {
+                Spacer()
+                RoundIconButton(symbol: "calendar.badge.plus", label: "Sync with Apple or Google Calendar") { syncing = true }
+                ProfileButton()
+            }
+            .padding(.top, 8)
+            Text("Calendar").font(Theme.serif(32)).foregroundStyle(Theme.label).padding(.top, 8).padding(.bottom, 4)
+        }
+    }
+
     private func load() async {
         do {
-            result = try await API.shared.get("/v1/calendar")
+            let fresh: CalendarResult = try await API.shared.get("/v1/calendar")
+            result = fresh
+            DiskCache.save("calendar", fresh)
             error = nil
         } catch is CancellationError {
         } catch { self.error = error.localizedDescription }

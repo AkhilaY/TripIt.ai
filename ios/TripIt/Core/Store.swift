@@ -35,6 +35,8 @@ final class Store {
         var trips: [Trip]
         var jobs: [Job]
         var home: HomeSetting?
+        var bookings: [Booking]?
+        var tripDetails: [String: TripDetail]?
     }
 
     private static var snapshotURL: URL? {
@@ -45,11 +47,14 @@ final class Store {
         guard let url = Self.snapshotURL, let data = try? Data(contentsOf: url),
               let saved = try? JSONDecoder().decode(Snapshot.self, from: data) else { return }
         (places, folders, trips, jobs, home) = (saved.places, saved.folders, saved.trips, saved.jobs, saved.home)
+        tripDetails = saved.tripDetails ?? [:]
+        if let b = saved.bookings { bookings = b; bookingsLoaded = true }
         loaded = true
     }
 
     private func saveSnapshot() {
-        let snapshot = Snapshot(places: places, folders: folders, trips: trips, jobs: jobs, home: home)
+        let snapshot = Snapshot(places: places, folders: folders, trips: trips, jobs: jobs, home: home,
+                                bookings: bookingsLoaded ? bookings : nil, tripDetails: tripDetails)
         guard let url = Self.snapshotURL, let data = try? JSONEncoder().encode(snapshot) else { return }
         try? data.write(to: url, options: .atomic)
     }
@@ -105,6 +110,7 @@ final class Store {
     func loadTrip(_ id: String) async throws -> TripDetail {
         let trip: TripDetail = try await api.get("/v1/trips/\(id)")
         tripDetails[id] = trip
+        saveSnapshot()
         return trip
     }
 
@@ -346,6 +352,8 @@ final class Store {
     func reloadBookings() async {
         do {
             bookings = try await api.get("/v1/bookings")
+            bookingsLoaded = true
+            saveSnapshot()
         } catch { if bookingsLoaded { fail(error) } }
         bookingsLoaded = true
     }
@@ -369,6 +377,7 @@ final class Store {
         places = []; folders = []; trips = []; jobs = []; tripDetails = [:]; home = nil; loaded = false
         bookings = []; bookingsLoaded = false
         if let url = Self.snapshotURL { try? FileManager.default.removeItem(at: url) }
+        DiskCache.clear()
         pollTask?.cancel(); pollTask = nil
     }
 }

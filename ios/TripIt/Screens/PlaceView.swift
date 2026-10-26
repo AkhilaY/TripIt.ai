@@ -36,7 +36,7 @@ struct PlaceView: View {
                 EmptyState(symbol: "mappin.slash", title: "Couldn't open this place", text: loadError)
                     .frame(maxHeight: .infinity)
             } else {
-                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+                SkeletonRows(count: 4).padding(20).frame(maxHeight: .infinity, alignment: .top)
             }
         }
         .background(Theme.background.ignoresSafeArea())
@@ -137,7 +137,7 @@ struct PlaceView: View {
                 Text("On maps as \(resolved)").font(.footnote).foregroundStyle(Theme.secondary)
             }
             if p.confidence == "low" {
-                Text("The name was hard to make out in the Reel; double-check it.").font(.footnote).foregroundStyle(Theme.attention)
+                Text("The name was hard to make out in the post; double-check it.").font(.footnote).foregroundStyle(Theme.attention)
             }
         }
     }
@@ -167,7 +167,7 @@ struct PlaceView: View {
                 Image(systemName: "sparkles").foregroundStyle(Theme.link)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Suggested for this trip").font(.subheadline.weight(.semibold))
-                    Text(p.suggestionNote ?? "Added by AI to fill a quiet day").font(.caption).foregroundStyle(Theme.secondary)
+                    Text(p.suggestionNote ?? "Suggested for a quiet day").font(.caption).foregroundStyle(Theme.secondary)
                 }
                 Spacer()
                 Button("Keep") {
@@ -219,12 +219,12 @@ struct PlaceView: View {
                     if let reel {
                         Button { Links.open(URL(string: reel.url)) } label: { ReelThumb(reel: reel, place: p) }
                             .buttonStyle(.plain)
-                            .accessibilityLabel("Watch the Reel")
+                            .accessibilityLabel("Open the post")
                     }
                     VStack(alignment: .leading, spacing: 3) {
                         if let reel {
                             Text(reel.creator.map { "@\($0)" } ?? reel.platform.capitalized).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.label)
-                            Text("From a Reel · saved \(Self.savedDate(p.createdAt))").font(.caption).foregroundStyle(Theme.secondary)
+                            Text("From a post · saved \(Self.savedDate(p.createdAt))").font(.caption).foregroundStyle(Theme.secondary)
                         } else {
                             Text("Saved by you").font(.subheadline.weight(.semibold)).foregroundStyle(Theme.label)
                             Text("Saved \(Self.savedDate(p.createdAt))").font(.caption).foregroundStyle(Theme.secondary)
@@ -234,11 +234,11 @@ struct PlaceView: View {
                                 .fixedSize(horizontal: false, vertical: true).padding(.top, 6)
                         }
                         if let reel {
-                            Button("Watch the Reel") { Links.open(URL(string: reel.url)) }
+                            Button("Open the post") { Links.open(URL(string: reel.url)) }
                                 .font(.subheadline.weight(.semibold)).foregroundStyle(Theme.link).frame(minHeight: 36)
                         }
                         if p.mentionCount >= 2 {
-                            Text("In \(p.mentionCount) of your saved Reels").font(.caption).foregroundStyle(Theme.secondary)
+                            Text("In \(p.mentionCount) posts you saved").font(.caption).foregroundStyle(Theme.secondary)
                         }
                     }
                     Spacer(minLength: 0)
@@ -751,7 +751,7 @@ private struct Hero: View {
                             .overlay { RemoteImage(url: photo.url(width: 1200)) { Theme.raised } }
                             .clipped()
                             .overlay(alignment: .bottomLeading) {
-                                if let credit = photo.attribution ?? (photo.source == "reel" ? "From the Reel" : nil) {
+                                if let credit = photo.attribution ?? (photo.source == "reel" ? "From the post" : nil) {
                                     Text(credit).font(.caption2).foregroundStyle(.white.opacity(0.9))
                                         .lineLimit(1).truncationMode(.middle)
                                         .frame(maxWidth: 150, alignment: .leading)

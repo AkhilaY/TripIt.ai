@@ -211,7 +211,7 @@ struct BookingsView: View {
         let past = list.filter { $0.startAt != nil && ($0.lastDay ?? "") < today }.sorted { ($0.startAt ?? "") > ($1.startAt ?? "") }
 
         if !store.bookingsLoaded {
-            ProgressView().frame(maxWidth: .infinity).padding(.top, 60)
+            SkeletonRows().padding(.top, 20)
         } else if all.isEmpty {
             EmptyState(symbol: "airplane", color: Theme.blue, title: "No bookings yet",
                        text: "Flights and stays for trips, and tickets and tables near home, in one place. Add one from a screenshot, the confirmation email, or type it in.") {

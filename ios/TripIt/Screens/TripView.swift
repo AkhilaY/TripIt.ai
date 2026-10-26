@@ -24,7 +24,7 @@ struct TripView: View {
                 }
                 .frame(maxHeight: .infinity)
             } else {
-                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+                SkeletonRows().padding(20).frame(maxHeight: .infinity, alignment: .top)
             }
         }
         .background(Theme.background.ignoresSafeArea())
@@ -100,9 +100,9 @@ struct TripView: View {
             }
             if !trip.isLocal {
                 Section {
-                    Button { sheet = .plan } label: { Label(trip.dayCount > 0 ? "Re-plan with AI" : "Plan with AI", systemImage: "sparkles") }
+                    Button { sheet = .plan } label: { Label(trip.dayCount > 0 ? "Re-plan my days" : "Plan my days", systemImage: "sparkles") }
                     if trip.dayCount > 0 {
-                        Button { sheet = .tidy } label: { Label("Tidy with AI", systemImage: "wand.and.stars") }
+                        Button { sheet = .tidy } label: { Label("Fix the order", systemImage: "wand.and.stars") }
                         Button { Task { await suggest(trip) } } label: { Label("Suggest places for quiet days", systemImage: "lightbulb") }
                     }
                 }
@@ -202,14 +202,14 @@ struct PlanSheet: View {
                     Toggle("Start date", isOn: $hasStart.animation())
                     if hasStart { DatePicker("Starts", selection: $start, displayedComponents: .date) }
                 } footer: {
-                    Text("AI groups your \(Fmt.plural(trip.places.count, "place")) by neighbourhood and time of day. Starred places always fit in. This replaces the current plan.")
+                    Text("Your \(Fmt.plural(trip.places.count, "place")), grouped by neighbourhood and time of day. Starred places always fit in. This replaces the current plan.")
                 }
                 Section("Anything to keep in mind?") {
                     TextField("e.g. slow mornings, no museums", text: $preferences, axis: .vertical)
                 }
             }
             .tripBackground()
-            .navigationTitle(trip.dayCount > 0 ? "Re-plan" : "Plan with AI")
+            .navigationTitle(trip.dayCount > 0 ? "Re-plan" : "Plan my days")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
@@ -232,7 +232,7 @@ struct PlanSheet: View {
             let body: [String: Any?] = ["days": days, "start_date": hasStart ? Fmt.iso(start) : nil,
                                         "preferences": preferences.isEmpty ? nil : preferences]
             if let fresh = await store.tripCall("POST", "/v1/trips/\(trip.id)/plan", body) {
-                store.show(fresh.plannedBy == "claude" ? "Your trip is planned" : "Planned by location (AI unavailable)")
+                store.show(fresh.plannedBy == "claude" ? "Your trip is planned" : "Planned by neighbourhood")
                 dismiss()
             }
             busy = false
@@ -266,7 +266,7 @@ struct TidySheet: View {
                 }
             }
             .tripBackground()
-            .navigationTitle("Tidy with AI")
+            .navigationTitle("Fix the order")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }

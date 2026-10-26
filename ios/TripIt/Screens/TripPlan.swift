@@ -16,11 +16,11 @@ struct TripPlan: View {
         if trip.dayCount == 0 {
             ScrollView {
                 EmptyState(symbol: "calendar", color: Theme.indigo, title: "No itinerary yet",
-                           text: "Build it yourself from your \(Fmt.plural(trip.places.count, "saved place")), or let AI group them by neighbourhood and time of day. You can ask AI to tidy your own plan later.") {
+                           text: "Build it yourself from your \(Fmt.plural(trip.places.count, "saved place")), or have them grouped into days by neighbourhood and time. You can fix the order of your own plan later.") {
                     VStack(spacing: 10) {
                         Button { addToDay(nil) } label: { Label("Build it myself", systemImage: "calendar.badge.plus") }
                             .buttonStyle(PrimaryButtonStyle())
-                        Button { sheet = .plan } label: { Label("Plan with AI", systemImage: "sparkles") }
+                        Button { sheet = .plan } label: { Label("Plan my days", systemImage: "sparkles") }
                             .buttonStyle(PrimaryButtonStyle(tinted: true))
                     }
                     .frame(maxWidth: 260)
@@ -101,7 +101,7 @@ struct TripPlan: View {
 
     private var plannedBy: String {
         switch trip.plannedBy ?? "" {
-        case "claude": "Planned with AI"
+        case "claude": "Planned for you"
         case "offline": "Grouped by location"
         default: "Your itinerary"
         }

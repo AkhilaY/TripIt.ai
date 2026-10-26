@@ -265,13 +265,13 @@ struct BookingSheet: View {
                         option("photo.on.rectangle", Theme.green, "Screenshot or photo", "Of a confirmation, e-ticket or itinerary")
                     }
                     Button { path.append(.paste) } label: {
-                        option("doc.plaintext", Theme.orange, "Paste the email text", "Claude reads flight, hotel and reservation details")
+                        option("doc.plaintext", Theme.orange, "Paste the email text", "We read the flight, hotel or reservation details")
                     }
                     Button { path.append(.manual) } label: {
                         option("square.and.pencil", Theme.gray, "Enter it yourself", "Flight, stay, table, tour or car")
                     }
                 } footer: {
-                    Text("You check what Claude read before anything is saved. A confirmation number alone can't be looked up, so The Travel Edit reads the confirmation itself.")
+                    Text("You check what we read before anything is saved. A confirmation number alone can't be looked up, so we read the confirmation itself.")
                 }
                 .disabled(reading || tripId.isEmpty || tripId == Self.home)
                 if reading {

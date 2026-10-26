@@ -169,7 +169,7 @@ struct PlaceRow: View {
             let count = place.ratingCount.map { " (\(Fmt.count($0)))" } ?? ""
             out.append(ChipItem(text: String(format: "%.1f", rating) + count, symbol: "star.fill", color: Theme.secondary))
         }
-        if place.mentionCount >= 2 { out.append(ChipItem(text: "\(place.mentionCount) Reels", symbol: nil, color: Theme.secondary)) }
+        if place.mentionCount >= 2 { out.append(ChipItem(text: "\(place.mentionCount) posts", symbol: nil, color: Theme.secondary)) }
         if showDay, let day = place.dayNumber { out.append(ChipItem(text: "Day \(day)", symbol: nil, color: Theme.secondary)) }
         if let distance { out.append(ChipItem(text: Fmt.distance(distance), symbol: nil, color: Theme.secondary)) }
         return out
@@ -409,5 +409,59 @@ extension View {
     /// TripIt's warm background behind lists and scroll views.
     func tripBackground() -> some View {
         scrollContentBackground(.hidden).background(Theme.background.ignoresSafeArea())
+    }
+}
+
+// MARK: - Loading placeholders
+
+/// Grey placeholder rows shown while something loads, in the shape of what's coming, instead of a spinner.
+struct SkeletonRows: View {
+    var count = 5
+    var photo = true
+    @State private var dim = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            ForEach(0..<count, id: \.self) { i in
+                HStack(spacing: 12) {
+                    if photo { RoundedRectangle(cornerRadius: 12, style: .continuous).frame(width: 56, height: 56) }
+                    VStack(alignment: .leading, spacing: 8) {
+                        Capsule().frame(width: i % 2 == 0 ? 170 : 130, height: 12)
+                        Capsule().frame(width: i % 3 == 0 ? 110 : 150, height: 10)
+                    }
+                    Spacer(minLength: 0)
+                }
+            }
+        }
+        .foregroundStyle(Theme.fill)
+        .opacity(dim ? 0.55 : 1)
+        .animation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true), value: dim)
+        .onAppear { dim = true }
+        .padding(.vertical, 12)
+        .accessibilityLabel("Loading")
+    }
+}
+
+/// Copies of screens' data on the phone, so they open with what was there last time while the fresh copy loads.
+enum DiskCache {
+    private static func url(_ key: String) -> URL? {
+        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?.appendingPathComponent("cache-\(key).json")
+    }
+
+    static func load<T: Decodable>(_ key: String, as type: T.Type = T.self) -> T? {
+        guard let url = url(key), let data = try? Data(contentsOf: url) else { return nil }
+        return try? JSONDecoder().decode(T.self, from: data)
+    }
+
+    static func save<T: Encodable>(_ key: String, _ value: T) {
+        guard let url = url(key), let data = try? JSONEncoder().encode(value) else { return }
+        try? data.write(to: url, options: .atomic)
+    }
+
+    /// Signing out removes every copy.
+    static func clear() {
+        guard let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first,
+              let files = try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) else { return }
+        for file in files where file.lastPathComponent.hasPrefix("cache-") { try? FileManager.default.removeItem(at: file) }
     }
 }

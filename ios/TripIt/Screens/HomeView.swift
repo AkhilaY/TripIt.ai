@@ -20,7 +20,7 @@ struct HomeView: View {
                         Button("Try again") { Task { await store.refresh() } }.buttonStyle(PrimaryButtonStyle()).frame(maxWidth: 200)
                     }
                 } else if !store.loaded {
-                    ProgressView().frame(maxWidth: .infinity).padding(.top, 80)
+                    SkeletonRows().padding(.top, 24)
                 } else {
                     ForEach(store.jobs.filter(\.isActive)) { job in
                         Card(padding: 12) { JobRow(job: job) }.padding(.top, 16)
@@ -278,7 +278,7 @@ struct HomeView: View {
             }
         } else if store.home != nil {
             EmptyState(symbol: "bookmark", title: "Nothing saved yet",
-                       text: "Share a TikTok or Instagram Reel to The Travel Edit, paste a link, or search for a place.") {
+                       text: "Share a TikTok or Instagram post to The Travel Edit, paste a link, or search for a place.") {
                 Button { router.addRequest = Router.AddRequest() } label: { Label("Save a place", systemImage: "plus") }
                     .buttonStyle(PrimaryButtonStyle()).frame(maxWidth: 220)
             }

@@ -31,7 +31,7 @@ struct TripsSection: View {
                     SymbolTile(symbol: "airplane", color: Theme.gold, size: 40)
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Plan a new trip").font(.body.weight(.semibold))
-                        Text("Pick a city and your saved places. AI can plan it, or build it yourself.")
+                        Text("Pick a city and your saved places. Have it planned for you, or build it yourself.")
                             .font(.subheadline).foregroundStyle(Theme.secondary)
                     }
                     Spacer()

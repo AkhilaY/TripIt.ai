@@ -26,7 +26,7 @@ struct EditView: View {
                 EmptyState(symbol: "sparkles", title: "This edit was refreshed", text: "Open the trip to see the latest ones.")
                     .frame(maxHeight: .infinity)
             } else {
-                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+                SkeletonRows().padding(20).frame(maxHeight: .infinity, alignment: .top)
             }
         }
         .background(Theme.background.ignoresSafeArea())

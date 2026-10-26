@@ -7,13 +7,21 @@ import Observation
 final class Session {
     enum Phase { case checking, signedOut, signedIn }
 
-    var phase: Phase = SessionStore.token == nil ? .signedOut : .checking
-    var me: Me?
+    /// Signed in from the last launch: the app opens straight away and checks with the server in the background.
+    var phase: Phase = SessionStore.token == nil ? .signedOut : (Session.cachedMe == nil ? .checking : .signedIn)
+    var me: Me? = Session.cachedMe
+
+    private static let meKey = "session.me"
+    static var cachedMe: Me? {
+        get { UserDefaults.standard.data(forKey: meKey).flatMap { try? JSONDecoder().decode(Me.self, from: $0) } }
+        set { UserDefaults.standard.set(newValue.flatMap { try? JSONEncoder().encode($0) }, forKey: meKey) }
+    }
 
     func restore() async {
         guard SessionStore.token != nil else { phase = .signedOut; return }
         do {
             me = try await API.shared.get("/v1/me", as: Me?.self)
+            Session.cachedMe = me
             Monitoring.setUser(me?.id)
             phase = .signedIn
         } catch let error as APIError where error.isSignedOut {
@@ -42,11 +50,13 @@ final class Session {
 
     func setName(_ name: String) async throws {
         me = try await API.shared.patch("/v1/me", ["name": name.trimmingCharacters(in: .whitespaces)], as: Me.self)
+        Session.cachedMe = me
     }
 
     private func start(_ out: SessionOut) {
         SessionStore.save(out.token)
         me = out.user
+        Session.cachedMe = out.user
         Monitoring.setUser(out.user.id)
         phase = .signedIn
     }
@@ -61,6 +71,7 @@ final class Session {
         SessionStore.clear()
         Monitoring.setUser(nil)
         me = nil
+        Session.cachedMe = nil
         phase = .signedOut
     }
 }

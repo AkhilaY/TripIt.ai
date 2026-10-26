@@ -28,6 +28,32 @@ final class Store {
     private let api = API.shared
     private var pollTask: Task<Void, Never>?
 
+    /// What the app showed last time, so it opens instantly and refreshes in the background.
+    private struct Snapshot: Codable {
+        var places: [Place]
+        var folders: [Folder]
+        var trips: [Trip]
+        var jobs: [Job]
+        var home: HomeSetting?
+    }
+
+    private static var snapshotURL: URL? {
+        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?.appendingPathComponent("library.json")
+    }
+
+    init() {
+        guard let url = Self.snapshotURL, let data = try? Data(contentsOf: url),
+              let saved = try? JSONDecoder().decode(Snapshot.self, from: data) else { return }
+        (places, folders, trips, jobs, home) = (saved.places, saved.folders, saved.trips, saved.jobs, saved.home)
+        loaded = true
+    }
+
+    private func saveSnapshot() {
+        let snapshot = Snapshot(places: places, folders: folders, trips: trips, jobs: jobs, home: home)
+        guard let url = Self.snapshotURL, let data = try? JSONEncoder().encode(snapshot) else { return }
+        try? data.write(to: url, options: .atomic)
+    }
+
     struct Toast: Equatable, Identifiable {
         let id = UUID()
         let text: String
@@ -59,6 +85,7 @@ final class Store {
             home = (try? await h) ?? home
             loaded = true
             error = nil
+            saveSnapshot()
             if jobs.contains(where: \.isActive) { pollJobs() }
         } catch {
             if !loaded { self.error = error.localizedDescription }
@@ -341,6 +368,7 @@ final class Store {
     func reset() {
         places = []; folders = []; trips = []; jobs = []; tripDetails = [:]; home = nil; loaded = false
         bookings = []; bookingsLoaded = false
+        if let url = Self.snapshotURL { try? FileManager.default.removeItem(at: url) }
         pollTask?.cancel(); pollTask = nil
     }
 }

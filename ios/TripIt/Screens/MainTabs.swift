@@ -55,7 +55,7 @@ struct MainTabs: View {
             await TripInvite.join(token, store: store, router: router)
         }
         .task {
-            if !store.loaded { await store.refresh() }
+            await store.refresh()  // the saved copy shows meanwhile
             await Push.shared.registerIfAllowed()
         }
         .onChange(of: scenePhase) { _, phase in

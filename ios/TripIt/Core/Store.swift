@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 import Observation
 
 /// Your library as the app knows it: saved places, folders, trips and imports, refreshed from the server.
@@ -63,15 +64,48 @@ final class Store {
         let id = UUID()
         let text: String
         let isError: Bool
+        var actionLabel: String?
+        var action: (() -> Void)?
+
+        static func == (a: Toast, b: Toast) -> Bool { a.id == b.id }
     }
 
-    func show(_ text: String, error: Bool = false) {
-        toast = Toast(text: text, isError: error)
+    func show(_ text: String, error: Bool = false, action: (label: String, run: () -> Void)? = nil) {
+        toast = Toast(text: text, isError: error, actionLabel: action?.label, action: action?.run)
+        if error { Haptics.error() } else { Haptics.success() }
     }
 
     func fail(_ error: Error) {
         if error is CancellationError { return }
         show(error.localizedDescription, error: true)
+    }
+
+    /// Deletes a place with a few seconds to undo, instead of asking first: it disappears now and is deleted on
+    /// the server only if Undo isn't tapped.
+    func deleteWithUndo(_ place: Place) async {
+        let keptPlaces = places, keptTrips = tripDetails
+        withAnimation {
+            places.removeAll { $0.id == place.id }
+            for (id, var trip) in tripDetails where trip.places.contains(where: { $0.id == place.id }) {
+                trip.places.removeAll { $0.id == place.id }
+                tripDetails[id] = trip
+            }
+        }
+        var undone = false
+        show("Deleted \(place.name)", action: ("Undo", { [weak self] in
+            undone = true
+            withAnimation { self?.places = keptPlaces; self?.tripDetails = keptTrips }
+        }))
+        try? await Task.sleep(for: .seconds(4.5))
+        guard !undone else { return }
+        do {
+            try await api.call("DELETE", "/v1/places/\(place.id)")
+            await reloadPlaces()
+            await reloadTrips()
+        } catch {
+            fail(error)
+            await reloadPlaces()
+        }
     }
 
     // MARK: Loading

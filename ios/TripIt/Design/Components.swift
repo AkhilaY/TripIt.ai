@@ -326,12 +326,21 @@ extension EmptyState where Actions == EmptyView {
 
 struct ToastView: View {
     let toast: Store.Toast
+    @Environment(Store.self) private var store
 
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: toast.isError ? "exclamationmark.circle.fill" : "checkmark.circle.fill")
                 .foregroundStyle(toast.isError ? Theme.warn : Theme.ok)
             Text(toast.text).font(.subheadline.weight(.medium)).multilineTextAlignment(.leading)
+            if let label = toast.actionLabel, let action = toast.action {
+                Button(label) {
+                    action()
+                    withAnimation { store.toast = nil }
+                }
+                .font(.subheadline.weight(.bold)).foregroundStyle(Theme.link)
+                .padding(.leading, 4)
+            }
         }
         .padding(.horizontal, 16).padding(.vertical, 11)
         .background(.regularMaterial, in: Capsule())
@@ -351,7 +360,7 @@ struct ToastOverlay: ViewModifier {
                     .transition(.move(edge: .bottom).combined(with: .opacity))
                     .id(toast.id)
                     .task(id: toast.id) {
-                        try? await Task.sleep(for: .seconds(toast.isError ? 4 : 2.6))
+                        try? await Task.sleep(for: .seconds(toast.action != nil ? 4.5 : toast.isError ? 4 : 2.6))
                         withAnimation { if store.toast?.id == toast.id { store.toast = nil } }
                     }
                     .onTapGesture { withAnimation { store.toast = nil } }
@@ -464,4 +473,12 @@ enum DiskCache {
               let files = try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) else { return }
         for file in files where file.lastPathComponent.hasPrefix("cache-") { try? FileManager.default.removeItem(at: file) }
     }
+}
+
+/// The phone's tap feedback for saves, errors and small changes.
+@MainActor
+enum Haptics {
+    static func success() { UINotificationFeedbackGenerator().notificationOccurred(.success) }
+    static func error() { UINotificationFeedbackGenerator().notificationOccurred(.error) }
+    static func tap() { UIImpactFeedbackGenerator(style: .light).impactOccurred() }
 }

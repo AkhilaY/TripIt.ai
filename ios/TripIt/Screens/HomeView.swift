@@ -23,11 +23,15 @@ struct HomeView: View {
                     SkeletonRows().padding(.top, 24)
                 } else {
                     ForEach(store.jobs.filter(\.isActive)) { job in
-                        Card(padding: 12) { JobRow(job: job) }.padding(.top, 16)
+                        ImportProgressCard(job: job).padding(.top, 16)
+                    }
+                    if store.saved.isEmpty && store.realTrips.isEmpty {
+                        GetStartedCard().padding(.top, 20)
                     }
                     if let active = store.activeTrip {
                         TravelHome(trip: active.trip, day: active.day)
                     } else {
+                        NextUpCard().padding(.top, 20)
                         weekend.padding(.top, 20)
                         openNow
                         comingUp
@@ -45,6 +49,7 @@ struct HomeView: View {
             if let trip = store.upcomingTrips.first, store.tripDetails[trip.id] == nil { _ = try? await store.loadTrip(trip.id) }
         }
         .onAppear { location.request() }
+        .task { if !store.bookingsLoaded { await store.reloadBookings() } }
         .alert("Your home city", isPresented: $settingHome) {
             TextField("e.g. Atlanta", text: $homeCity)
             Button("Cancel", role: .cancel) {}

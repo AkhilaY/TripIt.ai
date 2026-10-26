@@ -77,6 +77,7 @@ struct SaveReviewSheet: View {
                 .padding(.horizontal, 20).padding(.vertical, 10)
                 .background(Theme.background)
             }
+            .onAppear { Haptics.success() }  // the places found, revealed
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } }
                 ToolbarItem(placement: .principal) {

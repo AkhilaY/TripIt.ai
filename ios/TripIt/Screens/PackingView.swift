@@ -202,7 +202,7 @@ struct PackingView: View {
 
     private func row(_ item: PackingItem) -> some View {
         HStack(alignment: .top, spacing: 12) {
-            Button { Task { await change(item, ["packed": !item.packed]) } } label: {
+            Button { Haptics.tap(); Task { await change(item, ["packed": !item.packed]) } } label: {
                 Image(systemName: item.packed ? "checkmark.circle.fill" : "circle")
                     .font(.title3).foregroundStyle(item.packed ? Theme.ok : Theme.tertiary)
             }

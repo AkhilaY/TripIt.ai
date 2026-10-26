@@ -64,7 +64,7 @@ struct CityView: View {
                     NavigationLink(value: Route.place(id: place.id, tripId: nil)) {
                         PlaceRow(place: place, showCategory: true, distance: sort == .closest ? place.distance(from: location.current) : nil)
                     }
-                    .placeActions(place, onDelete: { deleting = place }, sheet: $sheet)
+                    .placeActions(place, onDelete: { Task { await store.deleteWithUndo(place) } }, sheet: $sheet)
                     .listRowBackground(Theme.cell)
                 }
             }

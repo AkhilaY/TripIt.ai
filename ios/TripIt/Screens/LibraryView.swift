@@ -47,7 +47,7 @@ struct LibraryView: View {
                     .padding(.top, 24)
                 } else {
                     ForEach(store.jobs.filter(\.isActive)) { job in
-                        Card(padding: 12) { JobRow(job: job) }.padding(.top, 14)
+                        ImportProgressCard(job: job).padding(.top, 14)
                     }
                     aroundHome.padding(.top, 20)
                     trips
@@ -153,7 +153,7 @@ struct LibraryView: View {
                     PlaceRow(place: place).padding(.vertical, 6)
                 }
                 .buttonStyle(.plain)
-                .placeActions(place, onDelete: { deleting = place }, sheet: $sheet)
+                .placeActions(place, onDelete: { Task { await store.deleteWithUndo(place) } }, sheet: $sheet)
                 Divider().overlay(Theme.divider)
             }
         }
@@ -504,6 +504,12 @@ private struct PlaceActions: ViewModifier {
                 }
                 Button { sheet = .folders([place.id]) } label: { Label("Folders…", systemImage: "folder") }
                 Button { sheet = .trips([place.id]) } label: { Label("Add to a trip…", systemImage: "airplane") }
+                if let url = place.directionsURL {
+                    Button { Links.open(url) } label: { Label("Directions", systemImage: "arrow.triangle.turn.up.right.diamond") }
+                }
+                if let url = place.googleMapsURL {
+                    ShareLink(item: url, subject: Text(place.name)) { Label("Share", systemImage: "square.and.arrow.up") }
+                }
                 Button(role: .destructive, action: onDelete) { Label("Delete", systemImage: "trash") }
             }
     }

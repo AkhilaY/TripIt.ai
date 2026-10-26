@@ -353,7 +353,7 @@ struct PlaceView: View {
                     }
                 } label: { Label("Remove from \(slotTrip.name)", systemImage: "minus.circle") }
             }
-            Button(role: .destructive) { confirmDelete = true } label: { Label("Delete place", systemImage: "trash") }
+            Button(role: .destructive) { dismiss(); Task { await store.deleteWithUndo(p) } } label: { Label("Delete place", systemImage: "trash") }
         } label: {
             Image(systemName: "ellipsis")
         }

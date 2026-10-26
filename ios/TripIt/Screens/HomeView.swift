@@ -17,7 +17,7 @@ struct HomeView: View {
                 header
                 if !store.loaded, let error = store.error {
                     EmptyState(symbol: "wifi.slash", title: "Can't reach The Travel Edit", text: error) {
-                        Button("Try again") { Task { await store.refresh() } }.buttonStyle(PrimaryButtonStyle()).frame(maxWidth: 200)
+                        Button("Try again") { Task { await store.refresh() } }.buttonStyle(PrimaryButtonStyle(tinted: true)).frame(maxWidth: 200)
                     }
                 } else if !store.loaded {
                     SkeletonRows().padding(.top, 24)
@@ -142,7 +142,7 @@ struct HomeView: View {
                 Text("Set your home city and places you save there are kept as Around your city, with weekend picks and what's open now.")
                     .font(.subheadline).foregroundStyle(Theme.secondary).padding(.top, 4)
                 Button("Set home city") { homeCity = ""; settingHome = true }
-                    .buttonStyle(PrimaryButtonStyle()).padding(.top, 16)
+                    .buttonStyle(PrimaryButtonStyle(tinted: true)).padding(.top, 16)
             }
         }
     }
@@ -285,7 +285,7 @@ struct HomeView: View {
             EmptyState(symbol: "bookmark", title: "Nothing saved yet",
                        text: "Share a TikTok or Instagram post to The Travel Edit, paste a link, or search for a place.") {
                 Button { router.addRequest = Router.AddRequest() } label: { Label("Save a place", systemImage: "plus") }
-                    .buttonStyle(PrimaryButtonStyle()).frame(maxWidth: 220)
+                    .buttonStyle(PrimaryButtonStyle(tinted: true)).frame(maxWidth: 220)
             }
             .padding(.top, 16)
         }

@@ -65,6 +65,20 @@ struct FolderView: View {
                                     Task { await store.removeFromFolder(folder.id, place.id) }
                                 } label: { Label("Remove", systemImage: "folder.badge.minus") }
                             }
+                            .contextMenu {
+                                Button { Task { await store.toggleStar(place) } } label: {
+                                    Label(place.mustDo ? "Remove star" : "Star", systemImage: place.mustDo ? "star.slash" : "star")
+                                }
+                                if let url = place.directionsURL {
+                                    Button { Links.open(url) } label: { Label("Directions", systemImage: "arrow.triangle.turn.up.right.diamond") }
+                                }
+                                if let url = place.googleMapsURL {
+                                    ShareLink(item: url, subject: Text(place.name)) { Label("Share", systemImage: "square.and.arrow.up") }
+                                }
+                                Button(role: .destructive) { Task { await store.removeFromFolder(folder.id, place.id) } } label: {
+                                    Label("Remove from folder", systemImage: "folder.badge.minus")
+                                }
+                            }
                         }
                     } footer: {
                         Text("Swipe left to take a place out of this folder. It stays in your saved places.")
@@ -72,6 +86,7 @@ struct FolderView: View {
                 }
             }
             .tripBackground()
+            .animation(.snappy, value: shown.map(\.id))
             .navigationTitle(folder.name)
             .searchable(text: $filter.query, prompt: "Search this folder")
             .refreshable { await store.reloadPlaces() }

@@ -117,6 +117,7 @@ struct TripPlaces: View {
         }
         .listStyle(.insetGrouped)
         .tripBackground()
+        .animation(.snappy, value: trip.places.map(\.id))
     }
 
     private func shortcut(_ symbol: String, _ color: Color, _ title: String, _ subtitle: String, _ route: Route) -> some View {

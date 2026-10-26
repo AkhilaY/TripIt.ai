@@ -32,7 +32,7 @@ struct LibraryView: View {
                 header
                 if !store.loaded, let error = store.error {
                     EmptyState(symbol: "wifi.slash", title: "Can't load your library", text: error) {
-                        Button("Try again") { Task { await store.refresh() } }.buttonStyle(PrimaryButtonStyle()).frame(maxWidth: 200)
+                        Button("Try again") { Task { await store.refresh() } }.buttonStyle(PrimaryButtonStyle(tinted: true)).frame(maxWidth: 200)
                     }
                 } else if !store.loaded {
                     SkeletonRows().padding(.top, 20)
@@ -60,6 +60,7 @@ struct LibraryView: View {
         }
         .background(Theme.background.ignoresSafeArea())
         .toolbar(.hidden, for: .navigationBar)
+        .animation(.snappy, value: store.saved.map(\.id))
         .refreshable { await store.refresh() }
         .sheet(item: $sheet) { sheet in sheet.view.environment(store).environment(router) }
         .alert("New list", isPresented: $newFolder) {
@@ -598,7 +599,7 @@ struct JobRow: View {
             if job.isActive {
                 ProgressView()
             } else if job.status == "failed" {
-                Button("Retry") { Task { await store.retry(job) } }.buttonStyle(.bordered).controlSize(.small)
+                Button("Retry") { Task { await store.retry(job) } }.buttonStyle(PrimaryButtonStyle(tinted: true, compact: true)).fixedSize()
             }
         }
     }

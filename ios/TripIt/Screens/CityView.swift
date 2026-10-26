@@ -71,6 +71,7 @@ struct CityView: View {
         }
         .listStyle(.insetGrouped)
         .tripBackground()
+        .animation(.snappy, value: store.saved.map(\.id))
         .searchable(text: $filter.query, prompt: "Search \(isHome ? "around \(city)" : city)")
         .navigationTitle(isHome ? "Around \(city)" : city)
         .navigationBarTitleDisplayMode(.inline)

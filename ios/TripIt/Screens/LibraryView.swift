@@ -128,7 +128,7 @@ struct LibraryView: View {
 
     @ViewBuilder private var searchResults: some View {
         let q = PlaceFilter.normalize(query)
-        let places = shown.filter { PlaceFilter.normalize("\($0.name) \($0.neighborhood ?? "") \($0.city) \($0.venue ?? "")").contains(q) }
+        let places = shown.filter { PlaceFilter.searchText($0).contains(q) }
         let folders = store.folders.filter { PlaceFilter.normalize($0.name).contains(q) }
         let cityHits = store.cityGroups(shown).filter { PlaceFilter.normalize($0.name).contains(q) }
         if places.isEmpty && folders.isEmpty && cityHits.isEmpty {

@@ -197,13 +197,19 @@ struct FilterChip: View {
     let label: String
     var count: Int?
     var symbol: String?
+    var tint: Color?  // colours the symbol while the chip is off
+    var emoji: String?
     let isOn: Bool
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
             HStack(spacing: 5) {
-                if let symbol { Image(systemName: symbol).font(.caption.weight(.bold)) }
+                if let emoji { Text(emoji).font(.subheadline) }
+                if let symbol {
+                    Image(systemName: symbol).font(.caption.weight(.bold))
+                        .foregroundStyle(isOn ? Theme.accentInk : tint ?? Theme.label)
+                }
                 Text(label).font(.subheadline.weight(.medium))
                 if let count { Text("\(count)").font(.caption.weight(.semibold)).opacity(0.6) }
             }

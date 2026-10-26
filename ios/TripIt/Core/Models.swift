@@ -26,6 +26,7 @@ struct Place: Codable, Identifiable, Hashable {
     var reelId: String?
     var name: String
     var category: String
+    var cuisine: String?  // restaurants: "indian", "italian", "pizza"…
     var summary: String
     var recommendedItems: [String]
     var priceHint: String?

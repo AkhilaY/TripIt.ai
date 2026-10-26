@@ -8,10 +8,49 @@ struct PlaceChecklist: View {
     @Binding var filter: PlaceFilter
     @Environment(Store.self) private var store
     @State private var sort: PlaceSort = .popular
-    @State private var folderId: String?
+    @State private var scope: Scope = .everything
+
+    /// Which saved places to choose from: all of them, one city's, or one folder's.
+    private enum Scope: Hashable {
+        case everything
+        case city(String)
+        case folder(String)
+    }
+
+    private struct CityCount: Identifiable {
+        let city: String
+        let count: Int
+        var id: String { city }
+    }
+
+    /// Cities among these places, most places first.
+    private var cities: [CityCount] {
+        Dictionary(grouping: places.filter { !$0.city.isEmpty }, by: \.city).map { CityCount(city: $0.key, count: $0.value.count) }
+            .sorted { $0.count != $1.count ? $0.count > $1.count : $0.city < $1.city }
+    }
+
+    private var scopeLabel: String {
+        switch scope {
+        case .everything: "Everything saved"
+        case .city(let city): city
+        case .folder(let id): store.folders.first { $0.id == id }?.name ?? "Everything saved"
+        }
+    }
+
+    private var scopeSymbol: String {
+        switch scope {
+        case .everything: "tray.full"
+        case .city: "building.2"
+        case .folder: "folder"
+        }
+    }
 
     var body: some View {
-        let inFolder = folderId.map { id in places.filter { $0.folderIds.contains(id) } } ?? places
+        let inFolder: [Place] = switch scope {
+        case .everything: places
+        case .city(let city): places.filter { $0.city == city }
+        case .folder(let id): places.filter { $0.folderIds.contains(id) }
+        }
         let shown = sort.sorted(filter.apply(inFolder), from: nil)
         Section {
             PlaceFilterBar(places: inFolder, filter: $filter, sort: $sort, showSort: false)
@@ -19,18 +58,29 @@ struct PlaceChecklist: View {
                 .listRowBackground(Color.clear)
         } header: {
             HStack {
-                if !store.folders.isEmpty {
-                    Menu {
-                        Picker("Folder", selection: $folderId) {
-                            Text("Everything saved").tag(String?.none)
-                            ForEach(store.folders) { Text($0.name).tag(String?.some($0.id)) }
-                        }
-                    } label: {
-                        Label(store.folders.first { $0.id == folderId }?.name ?? "Everything saved", systemImage: "folder")
-                            .font(.subheadline.weight(.semibold))
+                Menu {
+                    Picker("Show", selection: $scope) {
+                        Label("Everything saved", systemImage: "tray.full").tag(Scope.everything)
                     }
-                    .textCase(nil)
+                    if cities.count > 1 {
+                        Picker("Cities", selection: $scope) {
+                            ForEach(cities) { Text("\($0.city) (\($0.count))").tag(Scope.city($0.city)) }
+                        }
+                    }
+                    if !store.folders.isEmpty {
+                        Picker("Folders", selection: $scope) {
+                            ForEach(store.folders) { Text($0.name).tag(Scope.folder($0.id)) }
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 5) {
+                        Label(scopeLabel, systemImage: scopeSymbol)
+                        Image(systemName: "chevron.up.chevron.down").font(.caption2.weight(.bold))
+                    }
+                    .font(.subheadline.weight(.semibold))
                 }
+                .textCase(nil)
+                .onChange(of: scope) { _, _ in filter.cities = [] }
                 Spacer()
                 let allPicked = !shown.isEmpty && shown.allSatisfy { picked.contains($0.id) }
                 Button(allPicked ? "Untick all" : "Tick all") {

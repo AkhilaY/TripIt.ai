@@ -5,23 +5,45 @@ import SwiftUI
 struct PlaceFilter: Equatable {
     var query = ""
     var groups = Set<PlaceGroup>()
+    var cuisines = Set<String>()  // narrows Food when it's on
     var cities = Set<String>()
     var starred = false
     var unplanned = false
 
-    var isActive: Bool { !query.isEmpty || !groups.isEmpty || !cities.isEmpty || starred || unplanned }
+    var isActive: Bool { !query.isEmpty || !groups.isEmpty || !cuisines.isEmpty || !cities.isEmpty || starred || unplanned }
     var moreCount: Int { cities.count + (unplanned ? 1 : 0) }
 
     func apply(_ places: [Place]) -> [Place] {
         let q = Self.normalize(query)
         return places.filter { p in
-            (groups.isEmpty || groups.contains(PlaceGroup.of(p.category)))
+            matchesGroup(p)
                 && (cities.isEmpty || cities.contains(p.city.isEmpty ? "Somewhere" : p.city))
                 && (!starred || p.mustDo)
                 && (!unplanned || p.tripIds.isEmpty)
-                && (q.isEmpty || Self.normalize("\(p.name) \(p.neighborhood ?? "") \(p.city) \(p.venue ?? "")").contains(q))
+                && (q.isEmpty || Self.searchText(p).contains(q))
         }
     }
+
+    private func matchesGroup(_ p: Place) -> Bool {
+        if groups.isEmpty { return true }
+        let group = PlaceGroup.of(p.category)
+        guard groups.contains(group) else { return false }
+        return group != .food || cuisines.isEmpty || cuisines.contains(p.cuisine ?? "")
+    }
+
+    /// What search looks through: name, area, city (with its short forms, so "nyc" finds New York), venue and cuisine.
+    static func searchText(_ p: Place) -> String {
+        let city = normalize(p.city)
+        let aliases = cityAliases[city] ?? ""
+        let cuisine = p.cuisine.flatMap { Cuisine(rawValue: $0)?.label } ?? ""
+        return normalize("\(p.name) \(p.neighborhood ?? "") \(p.city) \(aliases) \(p.venue ?? "") \(cuisine) \(p.address ?? "")")
+    }
+
+    private static let cityAliases: [String: String] = [
+        "new york": "nyc ny new york city manhattan brooklyn", "new york city": "nyc ny", "brooklyn": "nyc ny new york",
+        "los angeles": "la", "san francisco": "sf", "washington": "dc", "las vegas": "vegas", "london": "ldn",
+        "philadelphia": "philly", "new orleans": "nola", "mexico city": "cdmx", "rio de janeiro": "rio",
+    ]
 
     static func normalize(_ s: String) -> String {
         s.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil).trimmingCharacters(in: .whitespaces)
@@ -73,16 +95,43 @@ struct PlaceFilterBar: View {
     var showSort = true
 
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
+        VStack(alignment: .leading, spacing: 10) {
+            FlowLayout(spacing: 8) {
                 if showSort { sortMenu }
-                FilterChip(label: "Starred", symbol: "star.fill", isOn: filter.starred) { filter.starred.toggle() }
+                FilterChip(label: "Starred", symbol: "star.fill", tint: Theme.gold, isOn: filter.starred) { filter.starred.toggle() }
                 groupChips
                 moreMenu
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 2)
+            if filter.groups.contains(.food), !cuisineCounts.isEmpty {
+                FlowLayout(spacing: 8) {
+                    ForEach(cuisineCounts, id: \.cuisine) { item in
+                        FilterChip(label: item.cuisine.label, count: item.count, emoji: item.cuisine.emoji,
+                                   isOn: filter.cuisines.contains(item.cuisine.rawValue)) { toggle(item.cuisine) }
+                    }
+                }
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
         }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 2)
+        .animation(.snappy, value: filter.groups)
+    }
+
+    private struct CuisineCount {
+        let cuisine: Cuisine
+        let count: Int
+    }
+
+    /// The cuisines among the food places here, most common first.
+    private var cuisineCounts: [CuisineCount] {
+        let counts = Dictionary(grouping: places.filter { PlaceGroup.of($0.category) == .food }.compactMap { $0.cuisine.flatMap(Cuisine.init) },
+                                by: { $0 }).mapValues(\.count)
+        return counts.map { CuisineCount(cuisine: $0.key, count: $0.value) }
+            .sorted { $0.count != $1.count ? $0.count > $1.count : $0.cuisine.label < $1.cuisine.label }
+    }
+
+    private func toggle(_ cuisine: Cuisine) {
+        if filter.cuisines.contains(cuisine.rawValue) { filter.cuisines.remove(cuisine.rawValue) } else { filter.cuisines.insert(cuisine.rawValue) }
     }
 
     private var groupCounts: [PlaceGroup: Int] {
@@ -118,14 +167,20 @@ struct PlaceFilterBar: View {
         let counts = groupCounts
         let shown: [PlaceGroup] = PlaceGroup.allCases.filter { counts[$0] != nil }
         return ForEach(shown) { group in
-            FilterChip(label: group.label, count: counts[group], isOn: filter.groups.contains(group)) {
+            FilterChip(label: group.label, count: counts[group], symbol: group.symbol, tint: group.color,
+                       isOn: filter.groups.contains(group)) {
                 toggle(group)
             }
         }
     }
 
     private func toggle(_ group: PlaceGroup) {
-        if filter.groups.contains(group) { filter.groups.remove(group) } else { filter.groups.insert(group) }
+        if filter.groups.contains(group) {
+            filter.groups.remove(group)
+            if group == .food { filter.cuisines = [] }
+        } else {
+            filter.groups.insert(group)
+        }
     }
 
     private func cityBinding(_ city: String) -> Binding<Bool> {

@@ -548,6 +548,7 @@ class Place(BaseModel):
     reel_id: Optional[str] = None
     name: str
     category: PlaceCategory
+    cuisine: Optional[str] = None  # for restaurants: "indian", "italian", "pizza"… (see cuisine.py)
     summary: str = ""
     recommended_items: list[str] = []
     price_hint: Optional[str] = None

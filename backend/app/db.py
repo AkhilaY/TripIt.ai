@@ -14,6 +14,7 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterable, Optional
 
+from .cuisine import cuisine_of
 from .models import Booking, BookingListItem, ExtractionResult, Folder, Job, JobStatus, Place, Reel, ReelMetadata, Trip, TripDetail
 
 log = logging.getLogger(__name__)
@@ -808,6 +809,7 @@ class Database:
             for i, r in enumerate(refs)
         ]
         data["recommended_items"] = json.loads(data["recommended_items"])
+        data["cuisine"] = cuisine_of(data["category"], data["name"], data.get("summary") or "", data["recommended_items"])
         data["visited"] = bool(data["visited"])
         data["must_do"] = bool(data["must_do"])
         mentions = data.pop("mention_reels", None)

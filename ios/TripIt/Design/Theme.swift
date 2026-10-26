@@ -187,4 +187,63 @@ enum PlaceGroup: String, CaseIterable, Identifiable {
         let c = Category(category)
         return allCases.first { $0.categories.contains(c) } ?? .other
     }
+
+    var symbol: String {
+        switch self {
+        case .events: "ticket.fill"
+        case .activities: "figure.walk"
+        default: categories[0].symbol
+        }
+    }
+
+    var color: Color { categories[0].color }
+}
+
+/// A restaurant's cuisine, as the server works it out (see backend/app/cuisine.py), with an emoji for its chip.
+enum Cuisine: String, CaseIterable, Identifiable {
+    case pizza, italian, indian, mexican, japanese, chinese, korean, thai, vietnamese, mediterranean, french, latin,
+         spanish, american, seafood, vegan
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .pizza: "Pizza"
+        case .italian: "Italian"
+        case .indian: "Indian"
+        case .mexican: "Mexican"
+        case .japanese: "Japanese"
+        case .chinese: "Chinese"
+        case .korean: "Korean"
+        case .thai: "Thai"
+        case .vietnamese: "Vietnamese"
+        case .mediterranean: "Mediterranean"
+        case .french: "French"
+        case .latin: "Latin"
+        case .spanish: "Spanish"
+        case .american: "Burgers & BBQ"
+        case .seafood: "Seafood"
+        case .vegan: "Vegetarian"
+        }
+    }
+
+    var emoji: String {
+        switch self {
+        case .pizza: "🍕"
+        case .italian: "🍝"
+        case .indian: "🍛"
+        case .mexican: "🌮"
+        case .japanese: "🍣"
+        case .chinese: "🥟"
+        case .korean: "🥢"
+        case .thai: "🍜"
+        case .vietnamese: "🥖"
+        case .mediterranean: "🥙"
+        case .french: "🥐"
+        case .latin: "🫓"
+        case .spanish: "🥘"
+        case .american: "🍔"
+        case .seafood: "🦞"
+        case .vegan: "🥗"
+        }
+    }
 }

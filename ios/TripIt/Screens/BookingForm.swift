@@ -497,30 +497,109 @@ struct BookingFormView: View {
     }
 }
 
-/// A booking's date, with or without a time ("2026-11-07" or "2026-11-07T19:25"), or none.
+/// A booking's date, with or without a time ("2026-11-07" or "2026-11-07T19:25"), or none. Tapping the date opens a
+/// calendar; tapping the time opens a time wheel. Both can be cleared from their pickers.
 private struct WhenRow: View {
     let label: String
     @Binding var value: String?
     var allowsTime = true
     var suggestedDay: String?
+    @State private var picking: Choosing?
+
+    private enum Choosing: String, Identifiable {
+        case day, time
+        var id: String { rawValue }
+    }
+
+    private var day: String? { value.map { String($0.prefix(10)) } }
+    private var time: String? { value.flatMap { $0.count > 10 ? String($0.suffix(5)) : nil } }
 
     var body: some View {
-        Toggle(label, isOn: Binding(get: { value != nil }, set: { on in
-            let day = suggestedDay ?? Fmt.iso(Date())
-            value = on ? (allowsTime ? day + "T12:00" : day) : nil
-        }).animation())
-        if let current = value {
-            let hasTime = current.count > 10
-            DatePicker(hasTime ? "Date and time" : "Date",
-                       selection: Binding(get: { BookingTime.date(current) ?? Date() },
-                                          set: { value = BookingTime.string($0, time: hasTime) }),
-                       displayedComponents: hasTime ? [.date, .hourAndMinute] : [.date])
-            if allowsTime {
-                Toggle("Time", isOn: Binding(get: { hasTime }, set: { on in
-                    let day = String(current.prefix(10))
-                    value = on ? day + "T12:00" : day
-                }))
+        LabeledContent(label) {
+            Button { picking = .day } label: {
+                Text(day.flatMap(Fmt.day).map { $0.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day().year()) } ?? "Add date")
+            }
+            .buttonStyle(ValueButtonStyle(empty: day == nil))
+        }
+        .sheet(item: $picking) { choosing in
+            switch choosing {
+            case .day: dayPicker
+            case .time: timePicker
             }
         }
+        if allowsTime, day != nil {
+            LabeledContent("Time") {
+                Button { picking = .time } label: {
+                    Text(time.flatMap { BookingTime.date("2000-01-01T" + $0) }.map { $0.formatted(date: .omitted, time: .shortened) } ?? "Add time")
+                }
+                .buttonStyle(ValueButtonStyle(empty: time == nil))
+            }
+        }
+    }
+
+    private var dayPicker: some View {
+        NavigationStack {
+            DatePicker("Date", selection: Binding(
+                get: { (day ?? suggestedDay).flatMap(Fmt.day) ?? Date() },
+                set: { value = Fmt.iso($0) + (time.map { "T" + $0 } ?? "") }),
+                displayedComponents: .date)
+                .datePickerStyle(.graphical)
+                .tint(Theme.accent)
+                .padding(.horizontal)
+                .navigationTitle(label)
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    if value != nil {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Remove", role: .destructive) { value = nil; picking = nil }
+                        }
+                    }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Done") {
+                            if value == nil { value = suggestedDay ?? Fmt.iso(Date()) }
+                            picking = nil
+                        }
+                    }
+                }
+                .onAppear { if value == nil { value = suggestedDay ?? Fmt.iso(Date()) } }
+        }
+        .presentationDetents([.medium, .large])
+    }
+
+    private var timePicker: some View {
+        NavigationStack {
+            DatePicker("Time", selection: Binding(
+                get: { BookingTime.date("2000-01-01T" + (time ?? "19:00")) ?? Date() },
+                set: { value = (day ?? Fmt.iso(Date())) + "T" + String(BookingTime.string($0, time: true).suffix(5)) }),
+                displayedComponents: .hourAndMinute)
+                .datePickerStyle(.wheel)
+                .labelsHidden()
+                .frame(maxWidth: .infinity)
+                .navigationTitle("Time")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    if time != nil {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("No time") { value = day; picking = nil }
+                        }
+                    }
+                    ToolbarItem(placement: .confirmationAction) { Button("Done") { picking = nil } }
+                }
+                .onAppear { if time == nil, let day { value = day + "T19:00" } }
+        }
+        .presentationDetents([.height(320)])
+    }
+}
+
+/// The value side of a form row: a soft pill with the date or time, or "Add …" in the link colour.
+private struct ValueButtonStyle: ButtonStyle {
+    let empty: Bool
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.body.weight(empty ? .semibold : .regular))
+            .foregroundStyle(empty ? Theme.link : Theme.label)
+            .padding(.horizontal, 12).padding(.vertical, 6)
+            .background(empty ? Color.clear : Theme.fill, in: Capsule())
+            .opacity(configuration.isPressed ? 0.6 : 1)
     }
 }

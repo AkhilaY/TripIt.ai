@@ -224,3 +224,13 @@ def test_tiktok_photo_post_tries_other_browsers_then_the_embed(monkeypatch):
     # Nothing served anywhere.
     monkeypatch.setattr(tiktok, "_get_page", lambda page, cookies=None, profile=None: None)
     assert tiktok.find_photo_post(url) is None
+
+
+def test_cuisine_from_name_summary_and_dishes():
+    from app.cuisine import cuisine_of
+    assert cuisine_of("food", "Dhamaka", "Bold regional Indian cooking", ["goat neck biryani"]) == "indian"
+    assert cuisine_of("food", "Joe's Pizza", "The classic New York slice") == "pizza"
+    assert cuisine_of("food", "Los Tacos No. 1", "Adobada tacos in Chelsea Market") == "mexican"
+    assert cuisine_of("food", "Via Carota", "West Village trattoria", ["cacio e pepe"]) == "italian"
+    assert cuisine_of("food", "Somewhere", "A lovely spot") is None
+    assert cuisine_of("cafe", "Pizza Cafe", "coffee") is None  # only restaurants get a cuisine

@@ -71,7 +71,7 @@ struct NewTripSheet: View {
             Section {
                 TextField("City, e.g. Lisbon", text: $city)
                     .textInputAutocapitalization(.words)
-                    .font(.title3)
+                    .font(Theme.text(.title3))
                 if !cities.isEmpty {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 8) {
@@ -145,8 +145,8 @@ struct NewTripSheet: View {
             HStack(spacing: 14) {
                 SymbolTile(symbol: symbol, color: color, size: 44)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(title).font(.headline).foregroundStyle(Theme.label)
-                    Text(text).font(.subheadline).foregroundStyle(Theme.secondary)
+                    Text(title).font(Theme.text(.headline)).foregroundStyle(Theme.label)
+                    Text(text).font(Theme.text(.subheadline)).foregroundStyle(Theme.secondary)
                 }
                 Spacer()
                 Image(systemName: "chevron.right").foregroundStyle(Theme.tertiary)
@@ -164,7 +164,7 @@ struct NewTripSheet: View {
                     Toggle(isOn: $fillGaps) {
                         VStack(alignment: .leading) {
                             Text("Suggest places for quiet days")
-                            Text("Marked “Suggested”, easy to keep or remove").font(.caption).foregroundStyle(Theme.secondary)
+                            Text("Marked “Suggested”, easy to keep or remove").font(Theme.text(.caption)).foregroundStyle(Theme.secondary)
                         }
                     }
                     TextField("Anything to keep in mind? e.g. slow mornings", text: $preferences, axis: .vertical)
@@ -175,7 +175,7 @@ struct NewTripSheet: View {
         .searchable(text: $filter.query, prompt: "Search your saved places")
         .safeAreaInset(edge: .bottom) {
             VStack(spacing: 6) {
-                if let error { Text(error).font(.footnote).foregroundStyle(Theme.danger) }
+                if let error { Text(error).font(Theme.text(.footnote)).foregroundStyle(Theme.danger) }
                 Button(action: create) {
                     HStack(spacing: 6) {
                         Image(systemName: aiPlans ? "sparkles" : "calendar.badge.plus")
@@ -194,8 +194,8 @@ struct NewTripSheet: View {
             Color.black.opacity(0.25).ignoresSafeArea()
             VStack(spacing: 12) {
                 ProgressView().controlSize(.large)
-                Text(aiPlans ? "Planning your trip…" : "Creating your trip…").font(.headline)
-                if aiPlans { Text("This can take up to a minute.").font(.subheadline).foregroundStyle(Theme.secondary) }
+                Text(aiPlans ? "Planning your trip…" : "Creating your trip…").font(Theme.text(.headline))
+                if aiPlans { Text("This can take up to a minute.").font(Theme.text(.subheadline)).foregroundStyle(Theme.secondary) }
             }
             .padding(28)
             .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))

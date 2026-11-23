@@ -75,7 +75,7 @@ struct TripMapView: View {
                     }
                     if missing > 0 {
                         Text("\(Fmt.plural(missing, "place")) not on the map yet")
-                            .font(.caption.weight(.medium))
+                            .font(Theme.text(.caption))
                             .padding(.horizontal, 10).padding(.vertical, 5)
                             .background(.regularMaterial, in: Capsule())
                     }

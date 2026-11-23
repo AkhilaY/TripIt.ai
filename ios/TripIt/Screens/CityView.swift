@@ -24,7 +24,7 @@ struct CityView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     if isHome { Eyebrow(text: "Your city") }
                     Text(isHome ? "Around \(city)" : city).font(Theme.serif(28)).foregroundStyle(Theme.label)
-                    Text(subtitle(all, trip: trip)).font(.subheadline).foregroundStyle(Theme.secondary)
+                    Text(subtitle(all, trip: trip)).font(Theme.text(.subheadline)).foregroundStyle(Theme.secondary)
                 }
                 .listRowBackground(Color.clear)
                 .listRowInsets(EdgeInsets(top: 4, leading: 20, bottom: 8, trailing: 20))

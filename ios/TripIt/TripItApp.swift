@@ -16,7 +16,8 @@ struct TripItApp: App {
             RootView()
                 .environment(session)
                 .environment(store)
-                .tint(Theme.gold)
+                .tint(Theme.accent)
+                .font(Theme.text(.body))
         }
     }
 }
@@ -33,9 +34,8 @@ enum Appearance: String, CaseIterable, Identifiable {
 struct RootView: View {
     @Environment(Session.self) private var session
     @Environment(Store.self) private var store
-    @AppStorage(Appearance.key) private var appearance: Appearance = .system
+    @AppStorage(Appearance.key) private var appearance: Appearance = .light
     @AppStorage(RootView.pendingJoinKey) private var pendingJoin = ""
-    @AppStorage("seenIntro") private var seenIntro = false
     static let pendingJoinKey = "pendingJoin"
 
     var body: some View {
@@ -44,12 +44,13 @@ struct RootView: View {
             case .checking:
                 ZStack { Theme.background.ignoresSafeArea(); ProgressView() }
             case .signedOut:
-                if seenIntro { SignInView() } else { IntroView { withAnimation { seenIntro = true } } }
+                WelcomeView()
             case .signedIn:
                 MainTabs()
             }
         }
-        .preferredColorScheme(appearance.scheme)
+        // The welcome screen sits on dark scenery, so it (and its sign-in sheet) is always dark.
+        .preferredColorScheme(session.phase == .signedOut ? .dark : appearance.scheme)
         // An invite link opened in the app (traveledit://join?token=…): joined once you're signed in.
         .onOpenURL { url in
             guard url.scheme == "traveledit", url.host == "join",

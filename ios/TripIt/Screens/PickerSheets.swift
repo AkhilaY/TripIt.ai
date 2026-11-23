@@ -75,9 +75,9 @@ struct PlaceChecklist: View {
                 } label: {
                     HStack(spacing: 5) {
                         Label(scopeLabel, systemImage: scopeSymbol)
-                        Image(systemName: "chevron.up.chevron.down").font(.caption2.weight(.bold))
+                        Image(systemName: "chevron.up.chevron.down").font(Theme.text(.caption2))
                     }
-                    .font(.subheadline.weight(.semibold))
+                    .font(Theme.text(.subheadline))
                 }
                 .textCase(nil)
                 .onChange(of: scope) { _, _ in filter.cities = [] }
@@ -86,7 +86,7 @@ struct PlaceChecklist: View {
                 Button(allPicked ? "Untick all" : "Tick all") {
                     if allPicked { shown.forEach { picked.remove($0.id) } } else { shown.forEach { picked.insert($0.id) } }
                 }
-                .font(.subheadline.weight(.semibold))
+                .font(Theme.text(.subheadline))
                 .textCase(nil)
                 .disabled(shown.isEmpty)
             }
@@ -101,7 +101,7 @@ struct PlaceChecklist: View {
                 } label: {
                     HStack(spacing: 12) {
                         Image(systemName: picked.contains(place.id) ? "checkmark.circle.fill" : "circle")
-                            .font(.title3)
+                            .font(Theme.text(.title3))
                             .foregroundStyle(picked.contains(place.id) ? Theme.accent : Theme.tertiary)
                         PlaceRow(place: place)
                     }
@@ -181,7 +181,7 @@ struct FolderPickerSheet: View {
                                 SymbolTile(symbol: "folder.fill", color: Theme.gold)
                                 VStack(alignment: .leading) {
                                     Text(folder.name).foregroundStyle(Theme.label)
-                                    Text(Fmt.plural(folder.placeCount, "place")).font(.caption).foregroundStyle(Theme.secondary)
+                                    Text(Fmt.plural(folder.placeCount, "place")).font(Theme.text(.caption)).foregroundStyle(Theme.secondary)
                                 }
                                 Spacer()
                                 if inside { Image(systemName: "checkmark").foregroundStyle(Theme.link).fontWeight(.semibold) }
@@ -248,7 +248,7 @@ struct TripPickerSheet: View {
                                 VStack(alignment: .leading) {
                                     Text(trip.name).foregroundStyle(Theme.label)
                                     Text([trip.city, Fmt.plural(trip.placeCount, "place")].joined(separator: " · "))
-                                        .font(.caption).foregroundStyle(Theme.secondary)
+                                        .font(Theme.text(.caption)).foregroundStyle(Theme.secondary)
                                 }
                                 Spacer()
                                 if inside { Image(systemName: "checkmark").foregroundStyle(Theme.link).fontWeight(.semibold) }

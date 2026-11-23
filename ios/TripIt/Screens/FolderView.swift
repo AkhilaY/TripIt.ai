@@ -25,7 +25,7 @@ struct FolderView: View {
                             Button { router.addRequest = Router.AddRequest(folderId: folder.id) } label: { Label("Search for a new place", systemImage: "magnifyingglass") }
                         } label: {
                             Label("Add places", systemImage: "plus")
-                                .font(.body.weight(.semibold)).foregroundStyle(Theme.accent)
+                                .font(Theme.text(.body)).foregroundStyle(Theme.accent)
                                 .padding(.horizontal, 20).padding(.vertical, 13).frame(maxWidth: .infinity)
                                 .background(Theme.fill, in: Capsule())
                         }

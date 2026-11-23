@@ -297,10 +297,10 @@ struct BookingSheet: View {
             SymbolTile(symbol: symbol, color: color)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).foregroundStyle(Theme.label)
-                Text(subtitle).font(.footnote).foregroundStyle(Theme.secondary)
+                Text(subtitle).font(Theme.text(.footnote)).foregroundStyle(Theme.secondary)
             }
             Spacer(minLength: 0)
-            Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(Theme.quiet)
+            Image(systemName: "chevron.right").font(Theme.text(.footnote)).foregroundStyle(Theme.quiet)
         }
     }
 
@@ -596,7 +596,7 @@ private struct ValueButtonStyle: ButtonStyle {
     let empty: Bool
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.body.weight(empty ? .semibold : .regular))
+            .font(Theme.text(.body).weight(empty ? .semibold : .regular))
             .foregroundStyle(empty ? Theme.link : Theme.label)
             .padding(.horizontal, 12).padding(.vertical, 6)
             .background(empty ? Color.clear : Theme.fill, in: Capsule())

@@ -241,10 +241,28 @@ final class ShareModel: ObservableObject {
 }
 
 private enum Palette {
-    static let espresso = Color(red: 0.17, green: 0.13, blue: 0.10)
-    static let gold = Color(red: 0.72, green: 0.56, blue: 0.33)
-    static let ok = Color(red: 0.24, green: 0.52, blue: 0.36)
-    static let accent = Color(light: espresso, dark: Color(red: 0.93, green: 0.88, blue: 0.80))
+    static let ink = Color(red: 0.098, green: 0.067, blue: 0.043)  // #19110B, as in the app
+    static let gold = Color(light: Color(red: 0.435, green: 0.416, blue: 0.4), dark: Color(red: 0.66, green: 0.635, blue: 0.61))  // quiet grey
+    static let ok = Color(red: 0.184, green: 0.42, blue: 0.278)
+    static let accent = Color(light: ink, dark: .white)
+}
+
+/// Futura (built into iOS) at a system text style's size, as in the app.
+private func futura(_ style: Font.TextStyle) -> Font {
+    let size: CGFloat = switch style {
+    case .largeTitle: 34
+    case .title: 28
+    case .title2: 22
+    case .title3: 20
+    case .headline, .body: 17
+    case .callout: 16
+    case .subheadline: 15
+    case .footnote: 13
+    case .caption: 12
+    case .caption2: 11
+    @unknown default: 17
+    }
+    return .custom("Futura-Medium", size: size, relativeTo: style)
 }
 
 private extension Color {
@@ -259,9 +277,10 @@ struct ShareView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("The Travel Edit").font(.system(.subheadline, design: .serif).weight(.semibold))
+                Text("THE TRAVEL EDIT").font(.custom("Futura-Medium", size: 12, relativeTo: .footnote)).kerning(3)
+                    .accessibilityLabel("The Travel Edit")
                 Spacer()
-                Button(closeLabel) { model.onFinish() }.font(.body.weight(.semibold)).tint(Palette.accent)
+                Button(closeLabel) { model.onFinish() }.font(futura(.body)).tint(Palette.accent)
             }
             .padding(.horizontal, 20).padding(.vertical, 14)
             Divider()
@@ -292,9 +311,9 @@ struct ShareView: View {
     private var progress: some View {
         VStack(alignment: .leading, spacing: 22) {
             VStack(alignment: .leading, spacing: 6) {
-                Text(heading).font(.system(.title2, design: .serif).weight(.semibold))
+                Text(heading).font(futura(.title2))
                     .contentTransition(.opacity)
-                if let source { Text(source).font(.subheadline).foregroundStyle(.secondary).lineLimit(2) }
+                if let source { Text(source).font(futura(.subheadline)).foregroundStyle(.secondary).lineLimit(2) }
             }
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(ShareModel.steps.indices, id: \.self) { i in
@@ -336,18 +355,18 @@ struct ShareView: View {
             Button { model.review() } label: {
                 Text(again ? "Open in Travel Edit" : "Review places").frame(maxWidth: .infinity)
             }
-            .buttonStyle(.borderedProminent).controlSize(.large).tint(Palette.espresso)
+            .buttonStyle(.borderedProminent).controlSize(.large).tint(Palette.accent)
             .transition(.move(edge: .bottom).combined(with: .opacity))
             if let left = model.savesLeft, !again {
                 Text(left == 1 ? "1 free video save left this month." : "\(left) free video saves left this month.")
-                    .font(.footnote).foregroundStyle(.secondary)
+                    .font(futura(.footnote)).foregroundStyle(.secondary)
             }
         case .background:
             Text("This one's taking longer. It keeps going after you close this, and you'll get a notification when the places are saved.")
-                .font(.subheadline).foregroundStyle(.secondary)
+                .font(futura(.subheadline)).foregroundStyle(.secondary)
         default:
             Text("You can close this. Saving carries on, and the places show up in your library.")
-                .font(.footnote).foregroundStyle(.secondary)
+                .font(futura(.footnote)).foregroundStyle(.secondary)
         }
     }
 
@@ -358,15 +377,15 @@ struct ShareView: View {
             Image(systemName: "sparkles")
                 .font(.system(size: 34)).foregroundStyle(Palette.gold)
                 .symbolEffect(.bounce, value: message)
-            Text("You're out of free saves").font(.system(.title2, design: .serif).weight(.semibold))
-            Text(message).font(.body).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Text("You're out of free saves").font(futura(.title2))
+            Text(message).font(futura(.body)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             VStack(alignment: .leading, spacing: 10) {
                 perk("infinity", "Unlimited video saves from TikTok, Instagram and YouTube")
                 perk("bookmark", "We'll keep this post and save it as soon as you upgrade")
                 perk("photo.on.rectangle", "Screenshots and map links stay free")
             }
             Button { model.upgrade() } label: { Text("Upgrade to Plus").frame(maxWidth: .infinity) }
-                .buttonStyle(.borderedProminent).controlSize(.large).tint(Palette.espresso)
+                .buttonStyle(.borderedProminent).controlSize(.large).tint(Palette.accent)
             Button { model.onFinish() } label: { Text("Not now").frame(maxWidth: .infinity) }
                 .buttonStyle(.bordered).controlSize(.large).tint(Palette.accent)
         }
@@ -374,13 +393,13 @@ struct ShareView: View {
     }
 
     private func perk(_ symbol: String, _ text: String) -> some View {
-        Label { Text(text).font(.subheadline) } icon: { Image(systemName: symbol).foregroundStyle(Palette.gold) }
+        Label { Text(text).font(futura(.subheadline)) } icon: { Image(systemName: symbol).foregroundStyle(Palette.gold) }
     }
 
     private func failure(_ message: String) -> some View {
         VStack(alignment: .leading, spacing: 14) {
             Image(systemName: "exclamationmark.circle.fill").font(.system(size: 34)).foregroundStyle(.orange)
-            Text("Couldn't save this").font(.system(.title2, design: .serif).weight(.semibold))
+            Text("Couldn't save this").font(futura(.title2))
             Text(message).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -417,7 +436,7 @@ struct ChecklistRow: View {
                 }
             }
             Text(title)
-                .font(.body.weight(state == .active ? .semibold : .regular))
+                .font(futura(.body))
                 .foregroundStyle(state == .waiting ? Color(.tertiaryLabel) : Color(.label))
                 .padding(.top, 3)
             Spacer(minLength: 0)

@@ -80,17 +80,17 @@ struct EditPlaceView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(spacing: 6) {
                         CategoryTile(category: category, size: 22)
-                        Text(category.label.uppercased()).font(.caption.weight(.bold)).foregroundStyle(category.color).kerning(0.6)
+                        Text(category.label.uppercased()).font(Theme.text(.caption)).foregroundStyle(category.color).kerning(0.6)
                     }
                     Text(it.name).font(Theme.serif(32))
                     let loc = [it.neighborhood, city.isEmpty ? nil : city].compactMap { $0 }.joined(separator: " · ")
-                    if !loc.isEmpty { Text(loc).font(.subheadline).foregroundStyle(Theme.secondary) }
+                    if !loc.isEmpty { Text(loc).font(Theme.text(.subheadline)).foregroundStyle(Theme.secondary) }
                     if let rating = it.rating {
                         Label(String(format: "%.1f", rating) + (it.ratingCount.map { " · \(Fmt.count($0)) reviews" } ?? ""), systemImage: "star.fill")
-                            .font(.subheadline).foregroundStyle(Theme.gold)
+                            .font(Theme.text(.subheadline)).foregroundStyle(Theme.gold)
                     }
                     Label("New to you: from \(editTitle)", systemImage: "sparkles")
-                        .font(.footnote).foregroundStyle(Theme.gold)
+                        .font(Theme.text(.footnote)).foregroundStyle(Theme.gold)
                 }
                 .listRowBackground(Color.clear)
                 .listRowInsets(EdgeInsets(top: 8, leading: 20, bottom: 4, trailing: 20))
@@ -128,10 +128,10 @@ struct EditPlaceView: View {
                             SymbolTile(symbol: "book.fill", color: Theme.indigo)
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(source.name).foregroundStyle(Theme.label)
-                                if let title = source.title { Text(title).font(.caption).foregroundStyle(Theme.secondary).lineLimit(2) }
+                                if let title = source.title { Text(title).font(Theme.text(.caption)).foregroundStyle(Theme.secondary).lineLimit(2) }
                             }
                             Spacer()
-                            if source.url != nil { Image(systemName: "arrow.up.right").font(.footnote).foregroundStyle(Theme.tertiary) }
+                            if source.url != nil { Image(systemName: "arrow.up.right").font(Theme.text(.footnote)).foregroundStyle(Theme.tertiary) }
                         }
                     }
                     .disabled(source.url == nil)

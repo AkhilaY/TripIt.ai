@@ -81,7 +81,7 @@ struct TripView: View {
             if let working {
                 VStack(spacing: 10) {
                     ProgressView()
-                    Text(working).font(.subheadline.weight(.medium))
+                    Text(working).font(Theme.text(.subheadline))
                 }
                 .padding(24)
                 .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
@@ -378,7 +378,7 @@ struct RouteSheet: View {
                             Spacer()
                             if stops.count > 1 {
                                 Button("Remove", role: .destructive) { stops.removeAll { $0.id == stop.id } }
-                                    .font(.footnote).textCase(nil)
+                                    .font(Theme.text(.footnote)).textCase(nil)
                             }
                         }
                     }

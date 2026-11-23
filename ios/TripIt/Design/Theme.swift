@@ -1,57 +1,74 @@
 import SwiftUI
 import UIKit
 
-/// The Travel Edit's look: sand and espresso by day, espresso and cream by night, Cormorant Garamond for display
-/// type and softly coloured category icons. Light, Dark or the phone's setting is chosen in Profile → Appearance.
-/// Same palette as the web app (backend/app/static/styles.css).
+/// The Travel Edit's look: an editorial, fashion-house feel. White pages and near-black ink by day, black and
+/// white by night, Futura for all type (built into iOS), and colour kept for status only (open, needs booking).
+/// Light, Dark or the phone's setting is chosen in Profile → Appearance; new installs start in Light.
 enum Theme {
-    static let accent = dynamic(0x2B2019, 0xEADFCF)  // espresso: buttons and active states
-    static let accentInk = dynamic(0xFBF7F1, 0x17110D)  // text on the accent
-    static let gold = dynamic(0xA07A50, 0xC9A47A)  // highlights: eyebrows, countdowns
-    static let link = dynamic(0x84603C, 0xD3B08A)  // text buttons
-    static let background = dynamic(0xF1EBE2, 0x15100C)
-    static let cell = dynamic(0xFBF8F3, 0x211A14)  // cards
-    static let label = dynamic(0x2B2019, 0xF0E7DA)
-    static let secondary = dynamic(0x7A6A5B, 0xA69684)
-    static let tertiary = dynamic(0xB3A493, 0x6A5C4F)
-    static let fill = translucent(0x2B2019, 0.06, 0xF0E7DA, 0.08)  // quiet buttons and tiles
-    static let border = translucent(0x2B2019, 0.08, 0xF0E7DA, 0.09)  // hairlines around cards
+    static let accent = dynamic(0x19110B, 0xFFFFFF)  // ink: buttons and active states
+    static let accentInk = dynamic(0xFFFFFF, 0x19110B)  // text on the accent
+    static let gold = dynamic(0x6F6A66, 0xA8A29C)  // was gold; now the quiet grey for eyebrows and small notes
+    static let link = dynamic(0x19110B, 0xFFFFFF)  // text buttons
+    static let background = dynamic(0xFFFFFF, 0x000000)
+    static let cell = dynamic(0xF6F5F3, 0x161514)  // panels
+    static let label = dynamic(0x19110B, 0xF5F2EE)
+    static let secondary = dynamic(0x6F6A66, 0xA8A29C)
+    static let tertiary = dynamic(0x9A9590, 0x6B6763)
+    static let fill = translucent(0x19110B, 0.05, 0xFFFFFF, 0.08)  // quiet buttons and tiles
+    static let border = translucent(0x19110B, 0.10, 0xFFFFFF, 0.12)  // hairlines
     static let divider = border
     static let raised = fill
     static let raisedBorder = border
     static let quiet = tertiary
 
     // Status
-    static let danger = dynamic(0xA4473C, 0xD27A6E)
-    static let ok = dynamic(0x5D7B53, 0x93B087)
-    static let warn = dynamic(0xA9762E, 0xD4A15A)
+    static let danger = dynamic(0x9A3B1E, 0xE08A6E)
+    static let ok = dynamic(0x2F6B47, 0x7FB48F)
+    static let warn = dynamic(0x9A6A1E, 0xD4A15A)
     static let open = ok
     static let attention = danger
 
     static let blue = dynamic(0x557189, 0x86A2BA)
-    static let green = dynamic(0x5D7B53, 0x93B087)
-    static let orange = dynamic(0xA9762E, 0xD4A15A)
+    static let green = dynamic(0x2F6B47, 0x7FB48F)
+    static let orange = dynamic(0x9A6A1E, 0xD4A15A)
     static let indigo = dynamic(0x5E5A7E, 0x9C97C0)
     static let teal = dynamic(0x5B827C, 0x86AFA8)
-    static let gray = dynamic(0x8A7F73, 0xA99D90)
-    static let red = dynamic(0xA4473C, 0xD27A6E)
+    static let gray = dynamic(0x6F6A66, 0xA8A29C)
+    static let red = dynamic(0x9A3B1E, 0xE08A6E)
     static let pink = dynamic(0xB2707A, 0xC98C95)
 
-    /// Display type: Cormorant Garamond (bundled), as on the web, falling back to the system serif.
+    /// The app's typeface. Futura ships with iOS (Medium and Bold faces), so nothing is bundled.
+    static let fontName = "Futura-Medium"
+    static let boldFontName = "Futura-Bold"
+
+    /// Display type (titles and headings), now in Futura. The name is kept so existing screens don't change.
+    /// Headings stay at the regular weight, the way fashion houses set them; only `.heavy`/`.black` go bold.
     static func serif(_ size: CGFloat, weight: Font.Weight = .semibold) -> Font {
-        hasCormorant ? Font.custom(family, size: size * 1.12).weight(weight) : Font.system(size: size, weight: weight, design: .serif)
+        let name = (weight == .heavy || weight == .black) ? boldFontName : fontName
+        return Font.custom(name, size: size * 0.96, relativeTo: size >= 28 ? .largeTitle : size >= 20 ? .title2 : .headline)
     }
 
-    private static let family = "Cormorant Garamond"
-    static let hasCormorant = !UIFont.fontNames(forFamilyName: family).isEmpty
-
     static func uiSerif(_ size: CGFloat, weight: UIFont.Weight = .semibold) -> UIFont {
-        if hasCormorant {
-            let descriptor = UIFontDescriptor(fontAttributes: [.family: family, .traits: [UIFontDescriptor.TraitKey.weight: weight]])
-            return UIFont(descriptor: descriptor, size: size * 1.12)
+        UIFont(name: fontName, size: size * 0.96) ?? .systemFont(ofSize: size, weight: weight)
+    }
+
+    /// Body type in Futura at the size of a system text style, growing with the phone's text size.
+    static func text(_ style: Font.TextStyle) -> Font {
+        let size: CGFloat = switch style {
+        case .largeTitle: 34
+        case .title: 28
+        case .title2: 22
+        case .title3: 20
+        case .headline: 17
+        case .body: 17
+        case .callout: 16
+        case .subheadline: 15
+        case .footnote: 13
+        case .caption: 12
+        case .caption2: 11
+        @unknown default: 17
         }
-        let serif = UIFontDescriptor.preferredFontDescriptor(withTextStyle: .body).withDesign(.serif)!
-        return UIFont(descriptor: serif.addingAttributes([.traits: [UIFontDescriptor.TraitKey.weight: weight]]), size: size)
+        return Font.custom(fontName, size: size, relativeTo: style)
     }
 
     static func translucent(_ light: UInt32, _ lightAlpha: CGFloat, _ dark: UInt32, _ darkAlpha: CGFloat) -> Color {
@@ -67,8 +84,8 @@ enum Theme {
         let nav = UINavigationBarAppearance()
         nav.configureWithDefaultBackground()
         nav.backgroundEffect = UIBlurEffect(style: .systemChromeMaterial)
-        nav.largeTitleTextAttributes = [.font: uiSerif(34, weight: .bold), .foregroundColor: UIColor(Theme.label)]
-        nav.titleTextAttributes = [.font: uiSerif(19, weight: .bold), .foregroundColor: UIColor(Theme.label)]
+        nav.largeTitleTextAttributes = [.font: uiSerif(34, weight: .regular), .foregroundColor: UIColor(Theme.label)]
+        nav.titleTextAttributes = [.font: uiSerif(18, weight: .regular), .foregroundColor: UIColor(Theme.label), .kern: 0.4]
         let scrollEdge = UINavigationBarAppearance()
         scrollEdge.configureWithTransparentBackground()
         scrollEdge.largeTitleTextAttributes = nav.largeTitleTextAttributes
@@ -76,7 +93,28 @@ enum Theme {
         UINavigationBar.appearance().standardAppearance = nav
         UINavigationBar.appearance().compactAppearance = nav
         UINavigationBar.appearance().scrollEdgeAppearance = scrollEdge
-        UISegmentedControl.appearance().selectedSegmentTintColor = UIColor(Theme.cell)
+        UISegmentedControl.appearance().selectedSegmentTintColor = UIColor(Theme.background)
+        if let small = UIFont(name: fontName, size: 13) {
+            UISegmentedControl.appearance().setTitleTextAttributes([.font: small], for: .normal)
+        }
+
+        // The tab bar: black, with white for the open tab and grey for the rest (like a fashion house's app).
+        let tab = UITabBarAppearance()
+        tab.configureWithOpaqueBackground()
+        tab.backgroundColor = .black
+        tab.shadowColor = .clear
+        let item = UITabBarItemAppearance()
+        let grey = UIColor(white: 0.58, alpha: 1)
+        let tabFont = UIFont(name: fontName, size: 11) ?? .systemFont(ofSize: 11, weight: .medium)
+        item.normal.iconColor = grey
+        item.normal.titleTextAttributes = [.foregroundColor: grey, .font: tabFont, .kern: 0.4]
+        item.selected.iconColor = .white
+        item.selected.titleTextAttributes = [.foregroundColor: UIColor.white, .font: tabFont, .kern: 0.4]
+        tab.stackedLayoutAppearance = item
+        tab.inlineLayoutAppearance = item
+        tab.compactInlineLayoutAppearance = item
+        UITabBar.appearance().standardAppearance = tab
+        UITabBar.appearance().scrollEdgeAppearance = tab
     }
 }
 
@@ -128,23 +166,8 @@ enum Category: String, CaseIterable, Identifiable {
         }
     }
 
-    /// Soft, warm colours for the category icons (the same as the web app's).
-    var color: Color {
-        switch self {
-        case .food: Theme.dynamic(0xB0644A, 0xC98063)
-        case .cafe: Theme.dynamic(0x8A6A4E, 0xAD8C6E)
-        case .dessert: Theme.dynamic(0xB2707A, 0xC98C95)
-        case .drinks: Theme.dynamic(0x7E5B78, 0xA383A0)
-        case .nightlife: Theme.dynamic(0x4F5878, 0x8590B4)
-        case .attraction: Theme.dynamic(0x557189, 0x86A2BA)
-        case .activity: Theme.dynamic(0x5B827C, 0x86AFA8)
-        case .event: Theme.dynamic(0xA4537C, 0xD08AB0)
-        case .nature: Theme.dynamic(0x6C875B, 0x97B084)
-        case .shopping: Theme.dynamic(0x8E8455, 0xB5AB7C)
-        case .stay: Theme.dynamic(0x6A869C, 0x96B0C4)
-        case .other: Theme.dynamic(0x8A7F73, 0xA99D90)
-        }
-    }
+    /// One ink colour for every category icon: the kind of place is told apart by its symbol, not by colour.
+    var color: Color { Theme.dynamic(0x19110B, 0xF5F2EE) }
 
     /// Places that get a menu (and a Reserve button when the restaurant takes bookings online).
     var hasMenu: Bool { [.food, .cafe, .dessert, .drinks, .nightlife].contains(self) }

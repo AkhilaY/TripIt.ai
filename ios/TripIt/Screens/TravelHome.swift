@@ -82,13 +82,13 @@ struct TravelHome: View {
                 Spacer(minLength: 8)
                 if let weather {
                     VStack(alignment: .trailing, spacing: 1) {
-                        Text("\(Self.temperature(weather.tempMax))°").font(.subheadline.weight(.semibold)).foregroundStyle(Theme.label)
-                        Text(weather.summary).font(.caption2).foregroundStyle(Theme.secondary).lineLimit(1)
+                        Text("\(Self.temperature(weather.tempMax))°").font(Theme.text(.subheadline)).foregroundStyle(Theme.label)
+                        Text(weather.summary).font(Theme.text(.caption2)).foregroundStyle(Theme.secondary).lineLimit(1)
                     }
                 }
             }
             if list.isEmpty {
-                Text("Nothing planned for today yet.").font(.subheadline).foregroundStyle(Theme.secondary).padding(.top, 10)
+                Text("Nothing planned for today yet.").font(Theme.text(.subheadline)).foregroundStyle(Theme.secondary).padding(.top, 10)
             } else {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(Array(list.enumerated()), id: \.element.id) { i, slot in
@@ -107,7 +107,7 @@ struct TravelHome: View {
                         Button { Links.open(next.googleDirectionsURL) } label: { Label("Google Maps", systemImage: "globe") }
                     } label: {
                         Label("Directions", systemImage: "arrow.up.right")
-                            .font(.subheadline.weight(.semibold)).foregroundStyle(Theme.accent)
+                            .font(Theme.text(.subheadline)).foregroundStyle(Theme.accent)
                             .padding(.horizontal, 16).padding(.vertical, 9)
                             .frame(maxWidth: .infinity)
                             .background(Theme.fill, in: Capsule())
@@ -135,7 +135,7 @@ struct TravelHome: View {
         let booked = detail?.bookings.contains { $0.placeId == p.id } ?? false
         return HStack(alignment: .top, spacing: 10) {
             Text(Self.clock(slot.minute))
-                .font(.caption2.weight(.medium).monospacedDigit()).foregroundStyle(Theme.secondary)
+                .font(Theme.text(.caption2).monospacedDigit()).foregroundStyle(Theme.secondary)
                 .frame(width: 50, alignment: .trailing)
                 .padding(.top, 2)
             VStack(spacing: 0) {
@@ -153,10 +153,10 @@ struct TravelHome: View {
                         .strikethrough(p.visited).lineLimit(2)
                     Text([Self.stopLabel(p),
                           walk.map { "\($0) min walk" }].compactMap { $0 }.joined(separator: " · "))
-                        .font(.caption).foregroundStyle(Theme.secondary)
+                        .font(Theme.text(.caption)).foregroundStyle(Theme.secondary)
                     if p.shownNeed != nil, !booked, Category(p.category).hasMenu {
                         Text(p.shownNeed == "required" ? "No table booked yet" : "No table booked · expect a queue")
-                            .font(.caption.weight(.medium)).foregroundStyle(Theme.attention)
+                            .font(Theme.text(.caption)).foregroundStyle(Theme.attention)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -201,19 +201,19 @@ struct TravelHome: View {
     private var gapRow: some View {
         let options = gapCandidates
         return HStack(alignment: .top, spacing: 10) {
-            Text(Self.clock(19 * 60 + 30)).font(.caption2.weight(.medium).monospacedDigit()).foregroundStyle(Theme.secondary)
+            Text(Self.clock(19 * 60 + 30)).font(Theme.text(.caption2).monospacedDigit()).foregroundStyle(Theme.secondary)
                 .frame(width: 50, alignment: .trailing).padding(.top, 2)
             Circle().strokeBorder(Theme.quiet, style: StrokeStyle(lineWidth: 1.5, dash: [2, 2])).frame(width: 9, height: 9).padding(.top, 4)
             VStack(alignment: .leading, spacing: 2) {
-                Text("Dinner isn't planned").font(.subheadline.weight(.semibold)).foregroundStyle(Theme.label)
+                Text("Dinner isn't planned").font(Theme.text(.subheadline)).foregroundStyle(Theme.label)
                 Text("\(Fmt.plural(options.count, "saved place")) \(options.count == 1 ? "is" : "are") close to where you'll be")
-                    .font(.caption).foregroundStyle(Theme.secondary)
+                    .font(Theme.text(.caption)).foregroundStyle(Theme.secondary)
                 Menu {
                     ForEach(options.prefix(8)) { p in
                         Button(p.name) { Task { await addForDinner(p) } }
                     }
                 } label: {
-                    Text("Choose one").font(.caption.weight(.semibold)).foregroundStyle(Theme.link).frame(minHeight: 28)
+                    Text("Choose one").font(Theme.text(.caption)).foregroundStyle(Theme.link).frame(minHeight: 28)
                 }
             }
         }
@@ -242,7 +242,7 @@ struct TravelHome: View {
             .prefix(8)
         if !near.isEmpty {
             SectionHeading(title: "Near you now") {
-                Text("From your \(currentCity) saves").font(.caption).foregroundStyle(Theme.tertiary)
+                Text("From your \(currentCity) saves").font(Theme.text(.caption)).foregroundStyle(Theme.tertiary)
             }
             .padding(.top, 24)
             ScrollView(.horizontal, showsIndicators: false) {
@@ -251,7 +251,7 @@ struct TravelHome: View {
                         NavigationLink(value: Route.place(id: p.id, tripId: nil)) {
                             VStack(alignment: .leading, spacing: 2) {
                                 PhotoBox(place: p, width: 124, height: 88, radius: 12)
-                                Text(p.name).font(.footnote.weight(.semibold)).foregroundStyle(Theme.label).lineLimit(1).padding(.top, 5)
+                                Text(p.name).font(Theme.text(.footnote)).foregroundStyle(Theme.label).lineLimit(1).padding(.top, 5)
                                 HStack(spacing: 0) {
                                     if let st = Hours.status(p.openingHours) {
                                         Text(st.isOpen ? "Open" : "Closed").foregroundStyle(st.isOpen ? Theme.open : Theme.secondary)
@@ -260,7 +260,7 @@ struct TravelHome: View {
                                         Text((Hours.status(p.openingHours) == nil ? "" : " · ") + "\(max(1, Int(d / 80))) min walk").foregroundStyle(Theme.secondary)
                                     }
                                 }
-                                .font(.caption2).lineLimit(1)
+                                .font(Theme.text(.caption2)).lineLimit(1)
                             }
                             .frame(width: 124, alignment: .leading)
                         }
@@ -293,19 +293,19 @@ struct TravelHome: View {
                         Text(stop.city).font(Theme.serif(18)).foregroundStyle(Theme.label)
                         let travel = [stop.travelNote ?? stop.travelMode.map { $0 == "flight" ? "Flight" : $0.capitalized },
                                       stop.travelMinutes.map { "about \(Self.duration($0))" }].compactMap { $0 }
-                        if !travel.isEmpty { Text(travel.joined(separator: " · ")).font(.caption).foregroundStyle(Theme.secondary) }
+                        if !travel.isEmpty { Text(travel.joined(separator: " · ")).font(Theme.text(.caption)).foregroundStyle(Theme.secondary) }
                     }
                     Spacer(minLength: 0)
                 }
                 Divider().overlay(Theme.border).padding(.vertical, 10)
                 Label("\(Fmt.plural(saved.count, "saved place")) · \(inPlan.count) in the plan", systemImage: "bookmark")
-                    .font(.caption).foregroundStyle(Theme.label)
+                    .font(Theme.text(.caption)).foregroundStyle(Theme.label)
                 if !hotel {
                     HStack {
-                        Label("No hotel booked yet", systemImage: "bed.double").font(.caption.weight(.medium)).foregroundStyle(Theme.attention)
+                        Label("No hotel booked yet", systemImage: "bed.double").font(Theme.text(.caption)).foregroundStyle(Theme.attention)
                         Spacer()
                         Button("Add a stay") { router.open("#/trip/\(trip.id)/bookings") }
-                            .font(.caption.weight(.semibold)).foregroundStyle(Theme.link)
+                            .font(Theme.text(.caption)).foregroundStyle(Theme.link)
                     }
                     .padding(.top, 8)
                 }

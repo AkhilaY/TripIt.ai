@@ -89,7 +89,7 @@ struct AddPlaceSheet: View {
                                     VStack(alignment: .leading, spacing: 2) {
                                         Text(result.name).foregroundStyle(Theme.label)
                                         if let address = result.address {
-                                            Text(address).font(.caption).foregroundStyle(Theme.secondary).lineLimit(2)
+                                            Text(address).font(Theme.text(.caption)).foregroundStyle(Theme.secondary).lineLimit(2)
                                         }
                                     }
                                     Spacer()
@@ -144,8 +144,8 @@ struct AddPlaceSheet: View {
         HStack(spacing: 12) {
             SymbolTile(symbol: symbol, color: color, size: 38)
             VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.body.weight(.semibold)).foregroundStyle(Theme.label)
-                Text(subtitle).font(.caption).foregroundStyle(Theme.secondary)
+                Text(title).font(Theme.text(.body)).foregroundStyle(Theme.label)
+                Text(subtitle).font(Theme.text(.caption)).foregroundStyle(Theme.secondary)
             }
         }
     }

@@ -16,10 +16,10 @@ struct TripsSection: View {
                         SymbolTile(symbol: "sun.max.fill", color: Theme.orange, size: 40)
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Today in \(trip.city)").font(Theme.serif(20))
-                            Text("Day \(day) of \(trip.name). Open the day view").font(.subheadline).foregroundStyle(Theme.secondary)
+                            Text("Day \(day) of \(trip.name). Open the day view").font(Theme.text(.subheadline)).foregroundStyle(Theme.secondary)
                         }
                         Spacer()
-                        Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(Theme.tertiary)
+                        Image(systemName: "chevron.right").font(Theme.text(.footnote)).foregroundStyle(Theme.tertiary)
                     }
                 }
                 .buttonStyle(.plain)
@@ -30,12 +30,12 @@ struct TripsSection: View {
                 HStack(spacing: 12) {
                     SymbolTile(symbol: "airplane", color: Theme.gold, size: 40)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Plan a new trip").font(.body.weight(.semibold))
+                        Text("Plan a new trip").font(Theme.text(.body))
                         Text("Pick a city and your saved places. Have it planned for you, or build it yourself.")
-                            .font(.subheadline).foregroundStyle(Theme.secondary)
+                            .font(Theme.text(.subheadline)).foregroundStyle(Theme.secondary)
                     }
                     Spacer()
-                    Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(Theme.tertiary)
+                    Image(systemName: "chevron.right").font(Theme.text(.footnote)).foregroundStyle(Theme.tertiary)
                 }
             }
             .buttonStyle(.plain)
@@ -106,14 +106,14 @@ struct TripCard: View {
             .overlay(alignment: .bottomLeading) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(trip.name).font(Theme.serif(28)).foregroundStyle(.white).lineLimit(2)
-                    Text(meta).font(.subheadline.weight(.medium)).foregroundStyle(.white.opacity(0.85)).lineLimit(1)
+                    Text(meta).font(Theme.text(.subheadline)).foregroundStyle(.white.opacity(0.85)).lineLimit(1)
                 }
                 .padding(18)
             }
             .overlay(alignment: .topLeading) {
                 if trip.dayCount > 0 {
                     Label(Fmt.plural(trip.dayCount, "day"), systemImage: "calendar")
-                        .font(.caption.weight(.semibold)).foregroundStyle(.white)
+                        .font(Theme.text(.caption)).foregroundStyle(.white)
                         .padding(.horizontal, 10).padding(.vertical, 5)
                         .background(.black.opacity(0.35), in: Capsule())
                         .padding(14)

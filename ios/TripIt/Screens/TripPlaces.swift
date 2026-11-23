@@ -41,7 +41,7 @@ struct TripPlaces: View {
                                 VStack(alignment: .leading, spacing: 4) {
                                     PlaceRow(place: place, showDay: true)
                                     if let note = place.suggestionNote {
-                                        Text(note).font(.footnote).italic().foregroundStyle(Theme.secondary)
+                                        Text(note).font(Theme.text(.footnote)).italic().foregroundStyle(Theme.secondary)
                                     }
                                 }
                             }
@@ -107,7 +107,7 @@ struct TripPlaces: View {
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(reel.title).foregroundStyle(Theme.label).lineLimit(2)
                                     Text([reel.creator.map { "@\($0)" }, Fmt.plural(reel.placeCount, "place")].compactMap { $0 }.joined(separator: " · "))
-                                        .font(.caption).foregroundStyle(Theme.secondary)
+                                        .font(Theme.text(.caption)).foregroundStyle(Theme.secondary)
                                 }
                             }
                         }
@@ -126,10 +126,10 @@ struct TripPlaces: View {
                 SymbolTile(symbol: symbol, color: color)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title).foregroundStyle(Theme.label)
-                    Text(subtitle).font(.caption).foregroundStyle(Theme.secondary)
+                    Text(subtitle).font(Theme.text(.caption)).foregroundStyle(Theme.secondary)
                 }
                 Spacer()
-                Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(Theme.tertiary)
+                Image(systemName: "chevron.right").font(Theme.text(.footnote)).foregroundStyle(Theme.tertiary)
             }
         }
     }
@@ -177,7 +177,7 @@ struct EditsRail: View {
                 Spacer()
                 if refreshing { ProgressView().controlSize(.small) }
                 else if trip.places.count >= 3 {
-                    Button("New edits") { Task { await curate() } }.font(.subheadline.weight(.semibold)).textCase(nil)
+                    Button("New edits") { Task { await curate() } }.font(Theme.text(.subheadline)).textCase(nil)
                 }
             }
         }
@@ -233,14 +233,14 @@ struct EditCard: View {
                 .frame(width: 220, height: 140)
                 .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                 if edit.newCount > 0 {
-                    Text("\(edit.newCount) new").font(.caption.weight(.bold)).foregroundStyle(.white)
+                    Text("\(edit.newCount) new").font(Theme.text(.caption)).foregroundStyle(.white)
                         .padding(.horizontal, 8).padding(.vertical, 4)
                         .background(.black.opacity(0.45), in: Capsule())
                         .padding(8)
                 }
             }
             Text(edit.title).font(Theme.serif(18)).foregroundStyle(Theme.label).lineLimit(2)
-            Text(edit.dek).font(.caption).foregroundStyle(Theme.secondary).lineLimit(2)
+            Text(edit.dek).font(Theme.text(.caption)).foregroundStyle(Theme.secondary).lineLimit(2)
         }
         .frame(width: 220, alignment: .leading)
     }

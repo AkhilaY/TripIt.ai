@@ -96,7 +96,7 @@ struct LibraryView: View {
                 Text("Library").font(Theme.serif(32)).foregroundStyle(Theme.label)
                 Spacer()
                 Button { router.push(.map) } label: {
-                    Label("Map", systemImage: "map").font(.footnote.weight(.medium)).foregroundStyle(Theme.label)
+                    Label("Map", systemImage: "map").font(Theme.text(.footnote)).foregroundStyle(Theme.label)
                         .padding(.horizontal, 12).frame(height: 32)
                         .background(Theme.cell, in: Capsule())
                         .overlay(Capsule().strokeBorder(Theme.raisedBorder))
@@ -115,7 +115,7 @@ struct LibraryView: View {
                         .accessibilityLabel("Clear search")
                 }
             }
-            .font(.subheadline)
+            .font(Theme.text(.subheadline))
             .padding(.horizontal, 12).frame(height: 38)
             .background(Theme.cell, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.border))
@@ -177,10 +177,10 @@ struct LibraryView: View {
                                 Text(Fmt.plural(places.count, "place")).foregroundStyle(Theme.secondary)
                                 if open > 0 { Text(" · ").foregroundStyle(Theme.secondary); Text("\(open) open now").foregroundStyle(Theme.open) }
                             }
-                            .font(.footnote)
+                            .font(Theme.text(.footnote))
                         }
                         Spacer()
-                        Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(Theme.label)
+                        Image(systemName: "chevron.right").font(Theme.text(.footnote)).foregroundStyle(Theme.label)
                             .frame(width: 28, height: 28).background(Theme.raised, in: Circle())
                     }
                     if !places.isEmpty { PhotoStrip(places: places).padding(.top, 12) }
@@ -200,7 +200,7 @@ struct LibraryView: View {
         .padding(.top, 28)
         if all.isEmpty {
             Text("Plan a trip from a city you've saved places in, or start one from scratch.")
-                .font(.subheadline).foregroundStyle(Theme.secondary)
+                .font(Theme.text(.subheadline)).foregroundStyle(Theme.secondary)
         }
         ForEach(Array(all.enumerated()), id: \.element.id) { i, trip in
             NavigationLink(value: Route.trip(id: trip.id)) {
@@ -221,13 +221,13 @@ struct LibraryView: View {
                     Button { withAnimation { allCities.toggle() } } label: {
                         HStack(spacing: 4) {
                             Text(allCities ? "Show fewer" : "See all \(groups.count)")
-                            Image(systemName: allCities ? "chevron.up" : "chevron.down").font(.caption2.weight(.bold))
+                            Image(systemName: allCities ? "chevron.up" : "chevron.down").font(Theme.text(.caption2))
                         }
-                        .font(.footnote.weight(.semibold)).foregroundStyle(Theme.link).frame(minHeight: 36)
+                        .font(Theme.text(.footnote)).foregroundStyle(Theme.link).frame(minHeight: 36)
                     }
                     .buttonStyle(.plain)
                 } else {
-                    Text("Sorted for you automatically").font(.caption).foregroundStyle(Theme.tertiary)
+                    Text("Sorted for you automatically").font(Theme.text(.caption)).foregroundStyle(Theme.tertiary)
                 }
             }
             .padding(.top, 28)
@@ -251,7 +251,7 @@ struct LibraryView: View {
         .padding(.top, 20)
         if store.folders.isEmpty {
             Text("Make lists for anything: date night, early risers, best croissants. A place can be on several.")
-                .font(.subheadline).foregroundStyle(Theme.secondary)
+                .font(Theme.text(.subheadline)).foregroundStyle(Theme.secondary)
         }
         ForEach(Array(store.folders.enumerated()), id: \.element.id) { i, folder in
             NavigationLink(value: Route.folder(id: folder.id)) {
@@ -283,7 +283,7 @@ struct VisitPicker: View {
                         Text(option.label).fontWeight(on ? .semibold : .medium)
                         Text("\(option.apply(places).count)").foregroundStyle(on ? Theme.background.opacity(0.8) : Theme.secondary)
                     }
-                    .font(.footnote)
+                    .font(Theme.text(.footnote))
                     .foregroundStyle(on ? Theme.background : Theme.label)
                     .frame(maxWidth: .infinity, minHeight: 30)
                     .background(on ? Theme.label : .clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
@@ -308,7 +308,7 @@ struct PhotoStrip: View {
         HStack(spacing: 8) {
             ForEach(shown) { p in PhotoBox(place: p, width: nil, height: 58, radius: 10) }
             if places.count > 4 {
-                Text("+\(places.count - 3)").font(.subheadline.weight(.semibold)).foregroundStyle(Theme.label)
+                Text("+\(places.count - 3)").font(Theme.text(.subheadline)).foregroundStyle(Theme.label)
                     .frame(maxWidth: .infinity, minHeight: 58)
                     .background(Theme.raised, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             }
@@ -326,7 +326,7 @@ struct TripRouteCard: View {
             Color.clear.frame(height: 96).frame(maxWidth: .infinity)
                 .overlay {
                     RemoteImage(url: trip.coverPhoto?.url(width: 900)) {
-                        ZStack { Theme.raised; Image(systemName: "airplane").font(.title).foregroundStyle(Theme.secondary) }
+                        ZStack { Theme.raised; Image(systemName: "airplane").font(Theme.text(.title)).foregroundStyle(Theme.secondary) }
                     }
                 }
                 .clipped()
@@ -334,10 +334,10 @@ struct TripRouteCard: View {
                 HStack(alignment: .firstTextBaseline) {
                     Text(trip.name).font(Theme.serif(20)).foregroundStyle(Theme.label).lineLimit(1)
                     Spacer()
-                    if let countdown = trip.countdown { Text(countdown).font(.footnote.weight(.semibold)).foregroundStyle(Theme.link) }
+                    if let countdown = trip.countdown { Text(countdown).font(Theme.text(.footnote)).foregroundStyle(Theme.link) }
                 }
                 Text([trip.dateRange ?? "No dates yet", Fmt.plural(trip.placeCount, "place")].joined(separator: " · "))
-                    .font(.footnote).foregroundStyle(Theme.secondary)
+                    .font(Theme.text(.footnote)).foregroundStyle(Theme.secondary)
                 RouteStrip(stops: trip.cities).padding(.top, 8)
             }
             .padding(EdgeInsets(top: 12, leading: 14, bottom: 14, trailing: 14))
@@ -355,7 +355,7 @@ struct RouteStrip: View {
         HStack(spacing: 6) {
             ForEach(Array(stops.enumerated()), id: \.offset) { i, stop in
                 if i > 0 { Rectangle().fill(Theme.raisedBorder).frame(height: 1) }
-                Text(stop).font(.footnote.weight(.medium)).foregroundStyle(Theme.label).lineLimit(1).fixedSize()
+                Text(stop).font(Theme.text(.footnote)).foregroundStyle(Theme.label).lineLimit(1).fixedSize()
             }
             if stops.count == 1 { Spacer() }
         }
@@ -379,10 +379,10 @@ struct TripRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(trip.name).font(Theme.serif(17)).foregroundStyle(Theme.label).lineLimit(1)
                 Text([trip.dateRange, trip.cities.joined(separator: " → "), trip.isShared ? "Shared" : nil].compactMap { $0?.isEmpty == false ? $0 : nil }.joined(separator: " · "))
-                    .font(.footnote).foregroundStyle(Theme.secondary).lineLimit(1)
+                    .font(Theme.text(.footnote)).foregroundStyle(Theme.secondary).lineLimit(1)
             }
             Spacer(minLength: 0)
-            Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(Theme.quiet)
+            Image(systemName: "chevron.right").font(Theme.text(.footnote)).foregroundStyle(Theme.quiet)
         }
         .padding(EdgeInsets(top: 8, leading: 8, bottom: 8, trailing: 12))
         .background(Theme.cell, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
@@ -417,7 +417,7 @@ struct CityTile: View {
                     Text("No trip yet").foregroundStyle(Theme.secondary)
                 }
             }
-            .font(.footnote).lineLimit(1)
+            .font(Theme.text(.footnote)).lineLimit(1)
         }
     }
 }
@@ -437,11 +437,11 @@ struct ListRow: View {
             .frame(width: 40, height: 40)
             .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
             VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.label).lineLimit(1)
-                Text(subtitle).font(.footnote).foregroundStyle(Theme.secondary).lineLimit(1)
+                Text(title).font(Theme.text(.subheadline)).foregroundStyle(Theme.label).lineLimit(1)
+                Text(subtitle).font(Theme.text(.footnote)).foregroundStyle(Theme.secondary).lineLimit(1)
             }
             Spacer(minLength: 0)
-            Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(Theme.quiet)
+            Image(systemName: "chevron.right").font(Theme.text(.footnote)).foregroundStyle(Theme.quiet)
         }
         .padding(.vertical, 10)
         .contentShape(Rectangle())
@@ -534,10 +534,10 @@ struct FolderStrip: View {
                         RoundedRectangle(cornerRadius: 16, style: .continuous)
                             .fill(Theme.fill)
                             .frame(width: 128, height: 128)
-                            .overlay(Image(systemName: "plus").font(.title2.weight(.semibold)).foregroundStyle(Theme.secondary))
-                        Text("New folder").font(.subheadline.weight(.semibold))
+                            .overlay(Image(systemName: "plus").font(Theme.text(.title2)).foregroundStyle(Theme.secondary))
+                        Text("New folder").font(Theme.text(.subheadline))
                         Text(folders.isEmpty ? "e.g. Date night, Brunch" : "Name it anything")
-                            .font(.caption).foregroundStyle(Theme.secondary)
+                            .font(Theme.text(.caption)).foregroundStyle(Theme.secondary)
                     }
                     .frame(width: 128, alignment: .leading)
                 }
@@ -556,8 +556,8 @@ struct FolderCard: View {
             cover
                 .frame(width: 128, height: 128)
                 .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-            Text(folder.name).font(.subheadline.weight(.semibold)).lineLimit(1)
-            Text(Fmt.plural(folder.placeCount, "place")).font(.caption).foregroundStyle(Theme.secondary)
+            Text(folder.name).font(Theme.text(.subheadline)).lineLimit(1)
+            Text(Fmt.plural(folder.placeCount, "place")).font(Theme.text(.caption)).foregroundStyle(Theme.secondary)
         }
         .frame(width: 128, alignment: .leading)
     }
@@ -575,7 +575,7 @@ struct FolderCard: View {
         } else if let first = photos.first {
             RemoteImage(url: first.url(width: 400)) { Theme.fill }
         } else {
-            ZStack { Theme.fill; Image(systemName: "folder.fill").font(.title).foregroundStyle(Theme.gold) }
+            ZStack { Theme.fill; Image(systemName: "folder.fill").font(Theme.text(.title)).foregroundStyle(Theme.gold) }
         }
     }
 }
@@ -590,10 +590,10 @@ struct JobRow: View {
         HStack(spacing: 12) {
             SymbolTile(symbol: Self.symbol(for: job.url), color: job.status == "failed" ? Theme.warn : Theme.indigo)
             VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.subheadline.weight(.semibold)).lineLimit(2)
+                Text(title).font(Theme.text(.subheadline)).lineLimit(2)
                     .foregroundStyle(job.status == "failed" ? Theme.warn : Theme.label)
                 Text(job.url.hasPrefix("upload:") ? "Screenshots" : job.url.replacingOccurrences(of: "https://", with: "").replacingOccurrences(of: "www.", with: ""))
-                    .font(.caption).foregroundStyle(Theme.secondary).lineLimit(1)
+                    .font(Theme.text(.caption)).foregroundStyle(Theme.secondary).lineLimit(1)
             }
             Spacer()
             if job.isActive {

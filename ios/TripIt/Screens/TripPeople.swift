@@ -40,17 +40,17 @@ struct PeopleRow: View {
                         HStack(spacing: -6) {
                             ForEach(people.prefix(4)) { Face(member: $0) }
                         }
-                        Text(names(people)).font(.subheadline).foregroundStyle(Theme.secondary).lineLimit(1)
+                        Text(names(people)).font(Theme.text(.subheadline)).foregroundStyle(Theme.secondary).lineLimit(1)
                     }
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("People on this trip: \(names(people))")
             } else {
-                Label("Plan it together", systemImage: "person.2").font(.subheadline).foregroundStyle(Theme.secondary)
+                Label("Plan it together", systemImage: "person.2").font(Theme.text(.subheadline)).foregroundStyle(Theme.secondary)
             }
             Spacer(minLength: 8)
             Button { Task { await TripInvite.share(trip, store: store) } } label: {
-                Label("Invite", systemImage: "plus").font(.footnote.weight(.semibold)).foregroundStyle(Theme.link)
+                Label("Invite", systemImage: "plus").font(Theme.text(.footnote)).foregroundStyle(Theme.link)
             }
             .buttonStyle(.borderless)
         }
@@ -90,7 +90,7 @@ struct PeopleSheet: View {
                             Face(member: m)
                             VStack(alignment: .leading, spacing: 1) {
                                 Text(m.you ? "\(m.name) (you)" : m.name).foregroundStyle(Theme.label)
-                                Text(m.role == "owner" ? "Made the trip" : "Planning with you").font(.caption).foregroundStyle(Theme.secondary)
+                                Text(m.role == "owner" ? "Made the trip" : "Planning with you").font(Theme.text(.caption)).foregroundStyle(Theme.secondary)
                             }
                         }
                         .swipeActions {

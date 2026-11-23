@@ -6,7 +6,7 @@ import SwiftUI
 struct SignInView: View {
     @Environment(Session.self) private var session
     @Environment(\.colorScheme) private var colorScheme
-    @State private var joining = false
+    @State private var joining: Bool
     @State private var email = ""
     @State private var password = ""
     @State private var name = ""
@@ -17,6 +17,11 @@ struct SignInView: View {
 
     enum Field { case email, password, name }
 
+    /// `joining` opens on "Create account" (Sign Up on the welcome screen) instead of "Sign in".
+    init(joining: Bool = false) {
+        _joining = State(initialValue: joining)
+    }
+
     var body: some View {
         ScrollView {
             VStack(spacing: 22) {
@@ -24,7 +29,7 @@ struct SignInView: View {
                     Image("Wordmark").resizable().scaledToFit().frame(width: 190)
                         .accessibilityLabel("The Travel Edit")
                     Text("Every place you save from TikTok and Instagram, ready for your next trip.")
-                        .font(.subheadline).foregroundStyle(Theme.secondary).multilineTextAlignment(.center)
+                        .font(Theme.text(.subheadline)).foregroundStyle(Theme.secondary).multilineTextAlignment(.center)
                 }
                 .padding(.top, 40)
 
@@ -42,7 +47,7 @@ struct SignInView: View {
 
                 HStack(spacing: 10) {
                     Rectangle().fill(Theme.border).frame(height: 1)
-                    Text("or with email").font(.caption).foregroundStyle(Theme.tertiary).fixedSize()
+                    Text("or with email").font(Theme.text(.caption)).foregroundStyle(Theme.tertiary).fixedSize()
                     Rectangle().fill(Theme.border).frame(height: 1)
                 }
 
@@ -73,7 +78,7 @@ struct SignInView: View {
                 .autocorrectionDisabled()
 
                 if let error {
-                    Text(error).font(.subheadline).foregroundStyle(Theme.danger).multilineTextAlignment(.center)
+                    Text(error).font(Theme.text(.subheadline)).foregroundStyle(Theme.danger).multilineTextAlignment(.center)
                 }
 
                 Button(action: submit) {

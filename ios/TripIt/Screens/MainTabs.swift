@@ -10,47 +10,58 @@ struct MainTabs: View {
     var body: some View {
         TabView(selection: $router.tab) {
             NavigationStack(path: $router.home) { HomeView().withRoutes() }
+                .blackTabBar()
                 .tabItem { Label("Home", systemImage: "house") }
                 .tag(AppTab.home)
             NavigationStack(path: $router.library) { LibraryView().withRoutes() }
+                .blackTabBar()
                 .tabItem { Label("Library", systemImage: "bookmark") }
                 .tag(AppTab.library)
             NavigationStack(path: $router.calendar) { CalendarView(isTab: true).withRoutes() }
+                .blackTabBar()
                 .tabItem { Label("Calendar", systemImage: "calendar") }
                 .tag(AppTab.calendar)
             NavigationStack(path: $router.bookings) { BookingsView().withRoutes() }
+                .blackTabBar()
                 .tabItem { Label("Bookings", systemImage: "suitcase") }
                 .tag(AppTab.bookings)
             if !store.featuresOff.contains("concierge") {
                 NavigationStack(path: $router.concierge) { ConciergeView().withRoutes() }
+                    .blackTabBar()
                     .tabItem { Label("Concierge", systemImage: "sparkles") }
                     .tag(AppTab.concierge)
             }
         }
+        .tint(.white)  // the open tab in the black tab bar; screens set their own ink tint
         .environment(router)
         .modifier(ToastOverlay())
         .sheet(isPresented: $router.showProfile) {
             NavigationStack(path: $router.profilePath) { ProfileView().withRoutes() }
                 .environment(router).environment(store).environment(session)
                 .modifier(ToastOverlay())
+                .tint(Theme.accent)
         }
         .sheet(item: $router.addRequest) { request in
             AddPlaceSheet(request: request)
                 .environment(router).environment(store)
+                .tint(Theme.accent)
         }
         .sheet(item: $router.bookingRequest) { request in
             BookingSheet(request: request)
                 .environment(router).environment(store)
                 .modifier(ToastOverlay())
+                .tint(Theme.accent)
         }
         .sheet(item: Binding(get: { store.reviewJob }, set: { store.reviewJob = $0 })) { job in
             SaveReviewSheet(job: job)
                 .environment(router).environment(store)
                 .modifier(ToastOverlay())
+                .tint(Theme.accent)
         }
         .sheet(item: Binding(get: { store.paywall }, set: { store.paywall = $0 })) { request in
             PaywallView(request: request)
                 .environment(router).environment(store)
+                .tint(Theme.accent)
         }
         .task(id: pendingJoin) {
             guard !pendingJoin.isEmpty else { return }
@@ -100,6 +111,14 @@ struct MainTabs: View {
 }
 
 extension View {
+    /// A tab's screens in ink, under a black tab bar with white icons.
+    func blackTabBar() -> some View {
+        tint(Theme.accent)
+            .toolbarBackground(Color.black, for: .tabBar)
+            .toolbarBackground(.visible, for: .tabBar)
+            .toolbarColorScheme(.dark, for: .tabBar)
+    }
+
     /// Lets this stack push any of the app's screens.
     func withRoutes() -> some View {
         navigationDestination(for: Route.self) { route in

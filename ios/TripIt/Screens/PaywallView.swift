@@ -46,7 +46,7 @@ struct PaywallView: View {
                         Text(plan?.isPlus == true ? "You're on Plus" : "Save every post you love")
                             .font(Theme.serif(32)).foregroundStyle(Theme.label)
                         if let message = request.message, plan?.isPlus != true {
-                            Text(message).font(.body).foregroundStyle(Theme.secondary).fixedSize(horizontal: false, vertical: true)
+                            Text(message).font(Theme.text(.body)).foregroundStyle(Theme.secondary).fixedSize(horizontal: false, vertical: true)
                         }
                     }
                     if let plan, !plan.isPlus, let limit = plan.videoSavesLimit { meter(plan, limit: limit) }
@@ -67,7 +67,7 @@ struct PaywallView: View {
                         Button { comingSoon = true } label: { Text("Upgrade to Plus").frame(maxWidth: .infinity) }
                             .buttonStyle(PrimaryButtonStyle())
                         Button("Not now") { dismiss() }
-                            .font(.subheadline.weight(.semibold)).foregroundStyle(Theme.link)
+                            .font(Theme.text(.subheadline)).foregroundStyle(Theme.link)
                     }
                     .padding(.horizontal, 20).padding(.vertical, 12)
                     .background(.bar)
@@ -89,16 +89,16 @@ struct PaywallView: View {
     private func meter(_ plan: PlanInfo, limit: Int) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text("Free video saves").font(.subheadline.weight(.semibold)).foregroundStyle(Theme.label)
+                Text("Free video saves").font(Theme.text(.subheadline)).foregroundStyle(Theme.label)
                 Spacer()
-                Text("\(min(plan.videoSavesUsed, limit)) of \(limit) used").font(.subheadline).foregroundStyle(Theme.secondary)
+                Text("\(min(plan.videoSavesUsed, limit)) of \(limit) used").font(Theme.text(.subheadline)).foregroundStyle(Theme.secondary)
             }
             HStack(spacing: 5) {
                 ForEach(0..<limit, id: \.self) { i in
                     Capsule().fill(i < plan.videoSavesUsed ? Theme.gold : Theme.fill).frame(height: 6)
                 }
             }
-            Text("Resets \(plan.resetDay).").font(.footnote).foregroundStyle(Theme.secondary)
+            Text("Resets \(plan.resetDay).").font(Theme.text(.footnote)).foregroundStyle(Theme.secondary)
         }
     }
 
@@ -107,9 +107,9 @@ struct PaywallView: View {
             HStack(spacing: 12) {
                 SymbolTile(symbol: JobRow.symbol(for: link), color: Theme.indigo)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Waiting to be saved").font(.subheadline.weight(.semibold)).foregroundStyle(Theme.label)
+                    Text("Waiting to be saved").font(Theme.text(.subheadline)).foregroundStyle(Theme.label)
                     Text(URL(string: link)?.host?.replacingOccurrences(of: "www.", with: "") ?? link)
-                        .font(.footnote).foregroundStyle(Theme.secondary).lineLimit(1)
+                        .font(Theme.text(.footnote)).foregroundStyle(Theme.secondary).lineLimit(1)
                 }
                 Spacer(minLength: 0)
             }
@@ -118,10 +118,10 @@ struct PaywallView: View {
 
     private func perk(_ symbol: String, _ title: String, _ text: String) -> some View {
         HStack(alignment: .top, spacing: 12) {
-            Image(systemName: symbol).font(.body.weight(.semibold)).foregroundStyle(Theme.gold).frame(width: 24)
+            Image(systemName: symbol).font(Theme.text(.body)).foregroundStyle(Theme.gold).frame(width: 24)
             VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.label)
-                Text(text).font(.footnote).foregroundStyle(Theme.secondary).fixedSize(horizontal: false, vertical: true)
+                Text(title).font(Theme.text(.subheadline)).foregroundStyle(Theme.label)
+                Text(text).font(Theme.text(.footnote)).foregroundStyle(Theme.secondary).fixedSize(horizontal: false, vertical: true)
             }
         }
     }

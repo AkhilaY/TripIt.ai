@@ -131,7 +131,7 @@ struct CalendarView: View {
         let items = filtered(result.items)
         let days = byDay(items)
         let tripDays = byDay(result.items.filter { $0.kind == "trip" })
-        Text(weekLine(result.items)).font(.subheadline).foregroundStyle(Theme.secondary)
+        Text(weekLine(result.items)).font(Theme.text(.subheadline)).foregroundStyle(Theme.secondary)
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
                 ForEach(Self.filters) { f in
@@ -155,8 +155,8 @@ struct CalendarView: View {
                             HStack(spacing: 12) {
                                 SymbolTile(symbol: Category.event.symbol, color: Category.event.color)
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text(item.title).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.label)
-                                    if let sub = item.subtitle { Text(sub).font(.footnote).foregroundStyle(Theme.secondary) }
+                                    Text(item.title).font(Theme.text(.subheadline)).foregroundStyle(Theme.label)
+                                    if let sub = item.subtitle { Text(sub).font(Theme.text(.footnote)).foregroundStyle(Theme.secondary) }
                                 }
                                 Spacer(minLength: 0)
                             }
@@ -170,7 +170,7 @@ struct CalendarView: View {
                 }
             }
             .padding(.top, 8)
-            Text("Add a date and they appear on the calendar.").font(.footnote).foregroundStyle(Theme.secondary).padding(.top, 6)
+            Text("Add a date and they appear on the calendar.").font(Theme.text(.footnote)).foregroundStyle(Theme.secondary).padding(.top, 6)
         }
     }
 
@@ -201,10 +201,10 @@ struct CalendarView: View {
         if shown.isEmpty {
             VStack(alignment: .leading, spacing: 8) {
                 Text(selected.map { days[$0] == nil ? "Nothing on \(Fmt.shortDay($0))." : "Nothing else this month." } ?? "Nothing else this month.")
-                    .font(.subheadline).foregroundStyle(Theme.secondary)
+                    .font(Theme.text(.subheadline)).foregroundStyle(Theme.secondary)
                 if let next = filtered(result.items).first(where: { ($0.date ?? "") > end }), let date = next.date {
                     Button("Show what's next") { month = String(date.prefix(7)); selected = date }
-                        .font(.subheadline.weight(.semibold)).foregroundStyle(Theme.link)
+                        .font(Theme.text(.subheadline)).foregroundStyle(Theme.link)
                 }
             }
             .padding(.top, 20)
@@ -286,11 +286,11 @@ private struct AgendaRow: View {
         HStack(spacing: 10) {
             Button(action: onOpen) {
                 HStack(spacing: 10) {
-                    Text(row.when).font(.footnote.weight(.semibold)).foregroundStyle(Theme.secondary).frame(width: 64, alignment: .leading)
+                    Text(row.when).font(Theme.text(.footnote)).foregroundStyle(Theme.secondary).frame(width: 64, alignment: .leading)
                     RoundedRectangle(cornerRadius: 2).fill(CalendarView.color(row.kind).opacity(row.kind == "trip" ? 0.5 : 1)).frame(width: 3, height: 34)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(row.title).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.label).lineLimit(2)
-                        if let sub = row.subtitle { Text(sub).font(.footnote).foregroundStyle(Theme.secondary).lineLimit(2) }
+                        Text(row.title).font(Theme.text(.subheadline)).foregroundStyle(Theme.label).lineLimit(2)
+                        if let sub = row.subtitle { Text(sub).font(Theme.text(.footnote)).foregroundStyle(Theme.secondary).lineLimit(2) }
                     }
                     Spacer(minLength: 0)
                 }
@@ -343,7 +343,7 @@ private struct MonthGrid: View {
                 Text(firstOfMonth.formatted(.dateTime.month(.wide).year())).font(Theme.serif(20)).foregroundStyle(Theme.label)
                 Spacer()
                 if month != String(today.prefix(7)) {
-                    Button("Today") { month = String(today.prefix(7)); selected = nil }.font(.footnote.weight(.semibold))
+                    Button("Today") { month = String(today.prefix(7)); selected = nil }.font(Theme.text(.footnote))
                 }
                 Button { step(1) } label: { Image(systemName: "chevron.right").frame(width: 36, height: 36) }
                     .accessibilityLabel("Next month")
@@ -352,7 +352,7 @@ private struct MonthGrid: View {
             .buttonStyle(.plain)
             HStack(spacing: 0) {
                 ForEach(ordered.indices, id: \.self) { i in
-                    Text(ordered[i]).font(.caption2.weight(.semibold)).foregroundStyle(Theme.tertiary).frame(maxWidth: .infinity, minHeight: 20)
+                    Text(ordered[i]).font(Theme.text(.caption2)).foregroundStyle(Theme.tertiary).frame(maxWidth: .infinity, minHeight: 20)
                 }
             }
             .padding(.top, 6)
@@ -384,7 +384,7 @@ private struct MonthGrid: View {
         return Button { selected = isSelected ? nil : iso } label: {
             VStack(spacing: 3) {
                 Text("\(number)")
-                    .font(.subheadline.weight(iso == today ? .bold : .regular))
+                    .font(Theme.text(.subheadline).weight(iso == today ? .bold : .regular))
                     .foregroundStyle(isSelected ? Theme.accentInk : (iso < today ? Theme.tertiary : Theme.label))
                     .frame(width: 32, height: 32)
                     .background(isSelected ? Theme.accent : Color.clear, in: Circle())
@@ -404,7 +404,7 @@ private struct MonthGrid: View {
     private func legend(_ kind: String, _ label: String) -> some View {
         HStack(spacing: 4) {
             Circle().fill(CalendarView.color(kind)).frame(width: 7, height: 7)
-            Text(label).font(.caption2).foregroundStyle(Theme.secondary)
+            Text(label).font(Theme.text(.caption2)).foregroundStyle(Theme.secondary)
         }
     }
 

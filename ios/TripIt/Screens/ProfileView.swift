@@ -18,7 +18,7 @@ struct ProfileView: View {
     @State private var deleting = false
     @State private var confirmSignOut = false
     @State private var sendingFeedback = false
-    @AppStorage(Appearance.key) private var appearance: Appearance = .system
+    @AppStorage(Appearance.key) private var appearance: Appearance = .light
 
     var body: some View {
         List {
@@ -31,10 +31,10 @@ struct ProfileView: View {
                             .background(Theme.accent, in: Circle())
                         VStack(alignment: .leading, spacing: 2) {
                             Text(me.name.isEmpty ? "Add your name" : me.name).font(Theme.serif(22)).foregroundStyle(Theme.label)
-                            Text(me.email.isEmpty ? "Signed in with Apple" : me.email).font(.subheadline).foregroundStyle(Theme.secondary)
+                            Text(me.email.isEmpty ? "Signed in with Apple" : me.email).font(Theme.text(.subheadline)).foregroundStyle(Theme.secondary)
                         }
                         Spacer()
-                        Image(systemName: "pencil").font(.footnote).foregroundStyle(Theme.tertiary)
+                        Image(systemName: "pencil").font(Theme.text(.footnote)).foregroundStyle(Theme.tertiary)
                     } }
                     .buttonStyle(.plain)
                     .accessibilityHint("Change your name")
@@ -63,7 +63,7 @@ struct ProfileView: View {
             } header: {
                 Text("Appearance")
             } footer: {
-                Text("Light is warm ivory; Dark is espresso. System follows your iPhone's setting.")
+                Text("Light is white with black type; Dark is black with white. System follows your iPhone's setting.")
             }
             Section {
                 Toggle(isOn: Binding(get: { notifications == .authorized }, set: { on in
@@ -171,7 +171,7 @@ struct ProfileView: View {
             SymbolTile(symbol: symbol, color: color)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).foregroundStyle(Theme.label)
-                if let subtitle { Text(subtitle).font(.caption).foregroundStyle(Theme.secondary) }
+                if let subtitle { Text(subtitle).font(Theme.text(.caption)).foregroundStyle(Theme.secondary) }
             }
         }
     }

@@ -18,7 +18,7 @@ struct IntroView: View {
             HStack {
                 Spacer()
                 if page < slides.count - 1 {
-                    Button("Skip", action: onDone).font(.subheadline.weight(.medium)).foregroundStyle(Theme.secondary)
+                    Button("Skip", action: onDone).font(Theme.text(.subheadline)).foregroundStyle(Theme.secondary)
                 }
             }
             .frame(height: 44)
@@ -33,7 +33,7 @@ struct IntroView: View {
                             .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).strokeBorder(Theme.border))
                         VStack(spacing: 10) {
                             Text(slides[i].title).font(Theme.serif(32)).foregroundStyle(Theme.label).multilineTextAlignment(.center)
-                            Text(slides[i].text).font(.body).foregroundStyle(Theme.secondary).multilineTextAlignment(.center)
+                            Text(slides[i].text).font(Theme.text(.body)).foregroundStyle(Theme.secondary).multilineTextAlignment(.center)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                         .padding(.horizontal, 8)
@@ -84,11 +84,11 @@ private struct MiniRow: View {
         HStack(spacing: 12) {
             CategoryTile(category: category, size: 34)
             VStack(alignment: .leading, spacing: 1) {
-                Text(name).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.label)
-                Text(detail).font(.caption).foregroundStyle(Theme.secondary)
+                Text(name).font(Theme.text(.subheadline)).foregroundStyle(Theme.label)
+                Text(detail).font(Theme.text(.caption)).foregroundStyle(Theme.secondary)
             }
             Spacer(minLength: 4)
-            if let trailing { Text(trailing).font(.caption.weight(.semibold)).foregroundStyle(Theme.ok) }
+            if let trailing { Text(trailing).font(Theme.text(.caption)).foregroundStyle(Theme.ok) }
         }
     }
 }
@@ -100,11 +100,11 @@ private struct ReelPicture: View {
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .fill(LinearGradient(colors: [Category.food.color, Category.dessert.color, Category.drinks.color], startPoint: .topLeading, endPoint: .bottomTrailing))
                     .opacity(0.85)
-                Image(systemName: "play.fill").font(.title2).foregroundStyle(.white.opacity(0.9))
-                VStack { Spacer(); Text("@londonfoodie").font(.caption2.weight(.semibold)).foregroundStyle(.white).padding(.bottom, 10) }
+                Image(systemName: "play.fill").font(Theme.text(.title2)).foregroundStyle(.white.opacity(0.9))
+                VStack { Spacer(); Text("@londonfoodie").font(Theme.text(.caption2)).foregroundStyle(.white).padding(.bottom, 10) }
             }
             .frame(width: 96, height: 170)
-            Image(systemName: "arrow.right").font(.headline).foregroundStyle(Theme.gold)
+            Image(systemName: "arrow.right").font(Theme.text(.headline)).foregroundStyle(Theme.gold)
             VStack(alignment: .leading, spacing: 14) {
                 MiniRow(category: .food, name: "Dishoom", detail: "Restaurant · Carnaby", trailing: "Saved")
                 MiniRow(category: .cafe, name: "Monmouth", detail: "Café · Borough", trailing: "Saved")
@@ -125,9 +125,9 @@ private struct CitiesPicture: View {
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
                         .fill(city.2.color.opacity(0.14))
                         .frame(height: 74)
-                        .overlay(Image(systemName: city.2.symbol).font(.title3).foregroundStyle(city.2.color))
+                        .overlay(Image(systemName: city.2.symbol).font(Theme.text(.title3)).foregroundStyle(city.2.color))
                     Text(city.0).font(Theme.serif(18)).foregroundStyle(Theme.label)
-                    Text("\(city.1) places").font(.caption).foregroundStyle(Theme.secondary)
+                    Text("\(city.1) places").font(Theme.text(.caption)).foregroundStyle(Theme.secondary)
                 }
             }
         }
@@ -146,11 +146,11 @@ private struct DayPicture: View {
                 ForEach(stops.indices, id: \.self) { i in
                     let s = stops[i]
                     HStack(alignment: .firstTextBaseline, spacing: 12) {
-                        Text(s.0).font(.caption.weight(.medium).monospacedDigit()).foregroundStyle(Theme.secondary).frame(width: 36, alignment: .trailing)
+                        Text(s.0).font(Theme.text(.caption).monospacedDigit()).foregroundStyle(Theme.secondary).frame(width: 36, alignment: .trailing)
                         Circle().fill(s.0 == "9:30" ? Theme.gold : Theme.cell).overlay(Circle().strokeBorder(Theme.tertiary, lineWidth: 1.5)).frame(width: 9, height: 9)
                         VStack(alignment: .leading, spacing: 0) {
                             Text(s.1).font(Theme.serif(16)).foregroundStyle(Theme.label)
-                            Text(s.2).font(.caption2).foregroundStyle(Theme.secondary)
+                            Text(s.2).font(Theme.text(.caption2)).foregroundStyle(Theme.secondary)
                         }
                     }
                 }
@@ -173,24 +173,24 @@ private struct TogetherPicture: View {
                             .overlay(Circle().strokeBorder(Theme.cell, lineWidth: 2))
                     }
                 }
-                Text("You, Sam and Jo").font(.subheadline).foregroundStyle(Theme.secondary)
+                Text("You, Sam and Jo").font(Theme.text(.subheadline)).foregroundStyle(Theme.secondary)
                 Spacer()
-                Label("Invite", systemImage: "plus").font(.footnote.weight(.semibold)).foregroundStyle(Theme.link)
+                Label("Invite", systemImage: "plus").font(Theme.text(.footnote)).foregroundStyle(Theme.link)
             }
             VStack(spacing: 10) {
                 HStack {
-                    VStack(alignment: .leading, spacing: 2) { Text("LHR").font(Theme.serif(30)); Text("8:05 AM").font(.caption).foregroundStyle(Theme.secondary) }
+                    VStack(alignment: .leading, spacing: 2) { Text("LHR").font(Theme.serif(30)); Text("8:05 AM").font(Theme.text(.caption)).foregroundStyle(Theme.secondary) }
                     Spacer()
                     Image(systemName: "airplane").foregroundStyle(Theme.gold)
                     Spacer()
-                    VStack(alignment: .trailing, spacing: 2) { Text("CDG").font(Theme.serif(30)); Text("10:20 AM").font(.caption).foregroundStyle(Theme.secondary) }
+                    VStack(alignment: .trailing, spacing: 2) { Text("CDG").font(Theme.serif(30)); Text("10:20 AM").font(Theme.text(.caption)).foregroundStyle(Theme.secondary) }
                 }
                 .foregroundStyle(Theme.label)
                 Rectangle().fill(Theme.border).frame(height: 1)
                 HStack {
-                    VStack(alignment: .leading, spacing: 1) { Text("FLIGHT").font(.caption2.weight(.semibold)).foregroundStyle(Theme.secondary); Text("BA 304").font(.subheadline.weight(.semibold)) }
+                    VStack(alignment: .leading, spacing: 1) { Text("FLIGHT").font(Theme.text(.caption2)).foregroundStyle(Theme.secondary); Text("BA 304").font(Theme.text(.subheadline)) }
                     Spacer()
-                    VStack(alignment: .trailing, spacing: 1) { Text("DATE").font(.caption2.weight(.semibold)).foregroundStyle(Theme.secondary); Text("Fri, Nov 13").font(.subheadline.weight(.semibold)) }
+                    VStack(alignment: .trailing, spacing: 1) { Text("DATE").font(Theme.text(.caption2)).foregroundStyle(Theme.secondary); Text("Fri, Nov 13").font(Theme.text(.subheadline)) }
                 }
                 .foregroundStyle(Theme.label)
             }

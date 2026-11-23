@@ -53,7 +53,7 @@ struct SaveReviewSheet: View {
                 VStack(alignment: .leading, spacing: 0) {
                     header
                     if places.isEmpty {
-                        Text("No places were found in this post.").font(.subheadline).foregroundStyle(Theme.secondary).padding(.top, 16)
+                        Text("No places were found in this post.").font(Theme.text(.subheadline)).foregroundStyle(Theme.secondary).padding(.top, 16)
                     }
                     if let trip, !allHome { tripToggle(trip).padding(.top, 16) }
                     ForEach(groups) { group in groupSection(group) }
@@ -71,7 +71,7 @@ struct SaveReviewSheet: View {
                         .disabled(busy)
                     if trip == nil, !allHome, let city = groups.first?.name {
                         Button("Plan a trip to \(city)") { Task { await save(); planTrip(city) } }
-                            .font(.footnote.weight(.semibold)).foregroundStyle(Theme.link)
+                            .font(Theme.text(.footnote)).foregroundStyle(Theme.link)
                     }
                 }
                 .padding(.horizontal, 20).padding(.vertical, 10)
@@ -105,12 +105,12 @@ struct SaveReviewSheet: View {
             Text(title).font(Theme.serif(24)).foregroundStyle(Theme.label)
             HStack(spacing: 6) {
                 if allHome {
-                    Label("Your city", systemImage: "house").font(.caption2.weight(.semibold)).foregroundStyle(Theme.gold)
+                    Label("Your city", systemImage: "house").font(Theme.text(.caption2)).foregroundStyle(Theme.gold)
                         .padding(.horizontal, 7).padding(.vertical, 3).background(Theme.gold.opacity(0.14), in: Capsule())
                 } else if groups.count > 1 {
-                    Text("Sorted by city").font(.caption).foregroundStyle(Theme.secondary)
+                    Text("Sorted by city").font(Theme.text(.caption)).foregroundStyle(Theme.secondary)
                 }
-                if let who = job.reel?.uploader { Text((groups.count > 1 && !allHome ? "· " : "") + "from @\(who)").font(.caption).foregroundStyle(Theme.secondary) }
+                if let who = job.reel?.uploader { Text((groups.count > 1 && !allHome ? "· " : "") + "from @\(who)").font(Theme.text(.caption)).foregroundStyle(Theme.secondary) }
             }
         }
         .padding(.top, 8)
@@ -133,9 +133,9 @@ struct SaveReviewSheet: View {
             HStack(spacing: 12) {
                 TripCover(trip: trip, size: 40)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Add to \(trip.name)").font(.subheadline.weight(.semibold)).foregroundStyle(Theme.label)
+                    Text("Add to \(trip.name)").font(Theme.text(.subheadline)).foregroundStyle(Theme.label)
                     Text([trip.dateRange, trip.cities.joined(separator: " → ")].compactMap { $0 }.joined(separator: " · "))
-                        .font(.caption).foregroundStyle(Theme.secondary).lineLimit(1)
+                        .font(Theme.text(.caption)).foregroundStyle(Theme.secondary).lineLimit(1)
                 }
                 Spacer(minLength: 8)
                 Toggle("Add to \(trip.name)", isOn: $addToTrip).labelsHidden().tint(Theme.gold)
@@ -152,9 +152,9 @@ struct SaveReviewSheet: View {
                 .font(Theme.serif(18)).foregroundStyle(Theme.label)
             Spacer()
             if let route = onRoute, addToTrip, let trip {
-                Text("Stop \(route.0 + 1)" + (dayRange(route.1, trip).map { " · \($0)" } ?? "")).font(.caption).foregroundStyle(Theme.secondary)
+                Text("Stop \(route.0 + 1)" + (dayRange(route.1, trip).map { " · \($0)" } ?? "")).font(Theme.text(.caption)).foregroundStyle(Theme.secondary)
             } else if onRoute == nil, trip != nil, addToTrip {
-                Text(group.name).font(.caption).foregroundStyle(Theme.secondary)
+                Text(group.name).font(Theme.text(.caption)).foregroundStyle(Theme.secondary)
             }
         }
         .padding(.top, 20)
@@ -178,9 +178,9 @@ struct SaveReviewSheet: View {
                     .font(.system(size: 18)).foregroundStyle(fresh ? (ticked ? Theme.gold : Theme.quiet) : Theme.secondary)
                 PlaceThumb(place: p, size: 40)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(p.name).font(.subheadline.weight(.semibold)).foregroundStyle(ticked || !fresh ? Theme.label : Theme.secondary).lineLimit(1)
+                    Text(p.name).font(Theme.text(.subheadline)).foregroundStyle(ticked || !fresh ? Theme.label : Theme.secondary).lineLimit(1)
                     Text(fresh ? subtitle(p) : (p.visited ? "Already saved · You've been here" : "Already saved"))
-                        .font(.caption).foregroundStyle(Theme.secondary).lineLimit(1)
+                        .font(Theme.text(.caption)).foregroundStyle(Theme.secondary).lineLimit(1)
                 }
                 Spacer(minLength: 0)
             }
@@ -196,14 +196,14 @@ struct SaveReviewSheet: View {
         return HStack(spacing: 12) {
             PlaceThumb(place: p, size: 40)
             VStack(alignment: .leading, spacing: 2) {
-                Text(p.name).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.label).lineLimit(1)
-                Text(nearestStopText(p, trip: trip) ?? Category(p.category).label).font(.caption).foregroundStyle(Theme.secondary).lineLimit(1)
+                Text(p.name).font(Theme.text(.subheadline)).foregroundStyle(Theme.label).lineLimit(1)
+                Text(nearestStopText(p, trip: trip) ?? Category(p.category).label).font(Theme.text(.caption)).foregroundStyle(Theme.secondary).lineLimit(1)
             }
             Spacer(minLength: 8)
             Button(on ? "Day trip added" : "Add as day trip") {
                 if on { dayTrips.remove(p.id) } else { dayTrips.insert(p.id) }
             }
-            .font(.caption.weight(.semibold))
+            .font(Theme.text(.caption))
             .foregroundStyle(on ? Theme.background : Theme.label)
             .padding(.horizontal, 10).frame(height: 28)
             .background(on ? Theme.label : Theme.raised, in: Capsule())
@@ -254,8 +254,8 @@ struct SaveReviewSheet: View {
                     Image(systemName: allHome ? "house" : "building.2").foregroundStyle(Theme.label)
                         .frame(width: 34, height: 34).background(Theme.raised, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(fileTitle).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.label)
-                        Text(fileSubtitle).font(.caption).foregroundStyle(Theme.secondary)
+                        Text(fileTitle).font(Theme.text(.subheadline)).foregroundStyle(Theme.label)
+                        Text(fileSubtitle).font(Theme.text(.caption)).foregroundStyle(Theme.secondary)
                     }
                     Spacer(minLength: 0)
                 }
@@ -279,14 +279,14 @@ struct SaveReviewSheet: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 4) {
                 Eyebrow(text: "Also add to", color: Theme.secondary)
-                Text("(optional)").font(.caption2).foregroundStyle(Theme.tertiary)
+                Text("(optional)").font(Theme.text(.caption2)).foregroundStyle(Theme.tertiary)
             }
             FlowChips {
                 ForEach(store.folders) { folder in
                     let on = lists.contains(folder.id)
                     Button { if on { lists.remove(folder.id) } else { lists.insert(folder.id) } } label: {
                         Label(folder.name, systemImage: on ? "checkmark" : "list.bullet")
-                            .font(.caption.weight(.medium))
+                            .font(Theme.text(.caption))
                             .foregroundStyle(on ? Theme.background : Theme.label)
                             .padding(.horizontal, 10).frame(height: 30)
                             .background(on ? Theme.label : Theme.cell, in: Capsule())
@@ -295,7 +295,7 @@ struct SaveReviewSheet: View {
                     .buttonStyle(.plain)
                 }
                 Button { newListName = ""; newList = true } label: {
-                    Label("New list", systemImage: "plus").font(.caption.weight(.medium)).foregroundStyle(Theme.link)
+                    Label("New list", systemImage: "plus").font(Theme.text(.caption)).foregroundStyle(Theme.link)
                         .padding(.horizontal, 10).frame(height: 30)
                         .overlay(Capsule().strokeBorder(Theme.border))
                 }

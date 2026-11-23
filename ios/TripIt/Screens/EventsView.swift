@@ -64,7 +64,7 @@ struct EventsView: View {
             VStack(spacing: 10) {
                 ProgressView()
                 Text("Looking for events").font(Theme.serif(20))
-                Text("Checking what's on near where you're staying.").font(.subheadline).foregroundStyle(Theme.secondary)
+                Text("Checking what's on near where you're staying.").font(Theme.text(.subheadline)).foregroundStyle(Theme.secondary)
             }
             .frame(maxWidth: .infinity).padding(.top, 60)
         }
@@ -80,7 +80,7 @@ struct EventsView: View {
         let shown = all.filter { matches($0, current) }
             .sorted { $0.startAt != $1.startAt ? $0.startAt < $1.startAt : ($0.match && !$1.match) }
         let days = shown.map(\.date).reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }
-        if let trip { Text([trip.name, trip.startDate.map(Fmt.shortDay)].compactMap { $0 }.joined(separator: " · ")).font(.subheadline).foregroundStyle(Theme.secondary).padding(.top, 4) }
+        if let trip { Text([trip.name, trip.startDate.map(Fmt.shortDay)].compactMap { $0 }.joined(separator: " · ")).font(Theme.text(.subheadline)).foregroundStyle(Theme.secondary).padding(.top, 4) }
         if !all.isEmpty {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
@@ -101,8 +101,8 @@ struct EventsView: View {
         }
         VStack(alignment: .leading, spacing: 8) {
             Text("Events and ticket links from Ticketmaster, which sells the tickets. The Travel Edit doesn't sell or hold tickets, and prices and availability can change. Picked for you using your taste profile.")
-                .font(.footnote).foregroundStyle(Theme.secondary)
-            Button("Refresh") { Task { await load(refresh: true) } }.font(.footnote.weight(.semibold)).foregroundStyle(Theme.link)
+                .font(Theme.text(.footnote)).foregroundStyle(Theme.secondary)
+            Button("Refresh") { Task { await load(refresh: true) } }.font(Theme.text(.footnote)).foregroundStyle(Theme.link)
         }
         .padding(.top, 20)
     }
@@ -124,14 +124,14 @@ struct EventsView: View {
                 }
                 Text(e.name).font(Theme.serif(20)).foregroundStyle(Theme.label).fixedSize(horizontal: false, vertical: true)
                 Text([e.time.map(Fmt.clock) ?? "Time to be confirmed", e.venue].compactMap { $0 }.joined(separator: " · "))
-                    .font(.footnote).foregroundStyle(Theme.secondary)
-                if let why = e.why { Text(why).font(.footnote).italic().foregroundStyle(Theme.secondary) }
-                if let price = Self.price(e) { Text(price).font(.footnote).foregroundStyle(Theme.secondary) }
+                    .font(Theme.text(.footnote)).foregroundStyle(Theme.secondary)
+                if let why = e.why { Text(why).font(Theme.text(.footnote)).italic().foregroundStyle(Theme.secondary) }
+                if let price = Self.price(e) { Text(price).font(Theme.text(.footnote)).foregroundStyle(Theme.secondary) }
                 HStack(spacing: 10) {
                     Button("Tickets") { Links.open(URL(string: e.url)) }
                         .buttonStyle(PrimaryButtonStyle(compact: true)).fixedSize()
                     if onTrip {
-                        Label("On your trip", systemImage: "checkmark").font(.footnote.weight(.semibold)).foregroundStyle(Theme.ok)
+                        Label("On your trip", systemImage: "checkmark").font(Theme.text(.footnote)).foregroundStyle(Theme.ok)
                     } else if let day = e.day {
                         Button { Task { await add(e) } } label: {
                             if adding.contains(e.id) { ProgressView() } else { Text("Add to Day \(day)") }

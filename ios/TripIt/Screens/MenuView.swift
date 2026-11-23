@@ -27,7 +27,7 @@ struct MenuView: View {
                     ProgressView().controlSize(.large)
                     Text("Looking for the menu").font(Theme.serif(22))
                     Text("Checking \(place?.website != nil ? "the website" : "what's online") and reading it for you. This can take up to a minute.")
-                        .font(.subheadline).foregroundStyle(Theme.secondary).multilineTextAlignment(.center)
+                        .font(Theme.text(.subheadline)).foregroundStyle(Theme.secondary).multilineTextAlignment(.center)
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 40)
@@ -85,7 +85,7 @@ struct MenuView: View {
         if !menu.trace.isEmpty {
             Section("What we tried") {
                 ForEach(Array(menu.trace.enumerated()), id: \.offset) { _, line in
-                    Text(line).font(.footnote).foregroundStyle(Theme.secondary)
+                    Text(line).font(Theme.text(.footnote)).foregroundStyle(Theme.secondary)
                 }
             }
         }
@@ -101,7 +101,7 @@ struct MenuView: View {
                 editingSite = true
             }
         }
-        .font(.subheadline.weight(.semibold))
+        .font(Theme.text(.subheadline))
         .tint(Theme.link)
     }
 
@@ -113,11 +113,11 @@ struct MenuView: View {
             .filter { !$0.items.isEmpty }
         Section {
             HStack {
-                Text(sourceLine(menu)).font(.footnote).foregroundStyle(Theme.secondary)
+                Text(sourceLine(menu)).font(Theme.text(.footnote)).foregroundStyle(Theme.secondary)
                 Spacer()
-                Button("Refresh") { Task { await find(refresh: true) } }.font(.subheadline.weight(.semibold)).buttonStyle(.borderless)
+                Button("Refresh") { Task { await find(refresh: true) } }.font(Theme.text(.subheadline)).buttonStyle(.borderless)
             }
-            if let notes = menu.notes { Text(notes).font(.subheadline) }
+            if let notes = menu.notes { Text(notes).font(Theme.text(.subheadline)) }
             if !present.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
@@ -134,7 +134,7 @@ struct MenuView: View {
         }
         ForEach(Array(sections.enumerated()), id: \.offset) { _, section in
             Section {
-                if let note = section.note { Text(note).font(.footnote).italic().foregroundStyle(Theme.secondary) }
+                if let note = section.note { Text(note).font(Theme.text(.footnote)).italic().foregroundStyle(Theme.secondary) }
                 ForEach(Array(section.items.enumerated()), id: \.offset) { _, item in
                     MenuItemRow(item: item, labels: Dictionary(uniqueKeysWithValues: Self.diets))
                 }
@@ -220,7 +220,7 @@ private struct MenuItemRow: View {
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
-                Text(item.name).font(.body.weight(.medium))
+                Text(item.name).font(Theme.text(.body))
                 if !item.tags.isEmpty {
                     HStack(spacing: 4) {
                         ForEach(item.tags, id: \.self) { tag in
@@ -229,12 +229,12 @@ private struct MenuItemRow: View {
                     }
                 }
                 if let description = item.description {
-                    Text(description).font(.subheadline).foregroundStyle(Theme.secondary)
+                    Text(description).font(Theme.text(.subheadline)).foregroundStyle(Theme.secondary)
                 }
             }
             Spacer(minLength: 8)
             if let price = item.price {
-                Text(price).font(.body.weight(.semibold)).monospacedDigit()
+                Text(price).font(Theme.text(.body)).monospacedDigit()
             }
         }
         .padding(.vertical, 2)

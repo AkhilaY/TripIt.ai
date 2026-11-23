@@ -220,12 +220,12 @@ struct BookingsView: View {
             }
             .padding(.top, 24)
         } else {
-            Text(nextLine(upcoming.first, today: today)).font(.subheadline).foregroundStyle(Theme.secondary).padding(.top, 2)
+            Text(nextLine(upcoming.first, today: today)).font(Theme.text(.subheadline)).foregroundStyle(Theme.secondary).padding(.top, 2)
             filters(present: present, kindNow: kindNow)
             attention(kind: kindNow, all: all, today: today)
             if upcoming.isEmpty {
                 Text("Nothing coming up\(kindNow != "all" || tripFilter != "all" ? " here" : "").")
-                    .font(.subheadline).foregroundStyle(Theme.secondary).padding(.top, 24)
+                    .font(Theme.text(.subheadline)).foregroundStyle(Theme.secondary).padding(.top, 24)
             } else {
                 byDate(upcoming, today: today)
             }
@@ -234,7 +234,7 @@ struct BookingsView: View {
                 ForEach(undated) { booking in
                     card(booking)
                     Button { router.bookingRequest = Router.BookingRequest(tripId: booking.tripId, booking: booking, title: "Add date and time") } label: {
-                        Label("Add date and time", systemImage: "calendar.badge.plus").font(.footnote.weight(.semibold)).foregroundStyle(Theme.link)
+                        Label("Add date and time", systemImage: "calendar.badge.plus").font(Theme.text(.footnote)).foregroundStyle(Theme.link)
                     }
                     .buttonStyle(.plain).padding(.top, 6)
                 }
@@ -248,7 +248,7 @@ struct BookingsView: View {
                 if showPast { byDate(past, today: today) }
             }
             Text("Bookings stay private: shared trip links never include them.")
-                .font(.footnote).foregroundStyle(Theme.secondary).padding(.top, 20)
+                .font(Theme.text(.footnote)).foregroundStyle(Theme.secondary).padding(.top, 20)
         }
     }
 
@@ -271,8 +271,8 @@ struct BookingsView: View {
                             }
                         } label: {
                             HStack(spacing: 5) {
-                                Text(tripsWith.first { $0.id == tripFilter }?.name ?? "Everything").font(.subheadline.weight(.medium))
-                                Image(systemName: "chevron.down").font(.caption2.weight(.bold))
+                                Text(tripsWith.first { $0.id == tripFilter }?.name ?? "Everything").font(Theme.text(.subheadline))
+                                Image(systemName: "chevron.down").font(Theme.text(.caption2))
                             }
                             .foregroundStyle(Theme.label)
                             .padding(.horizontal, 12).padding(.vertical, 7)
@@ -426,10 +426,10 @@ private struct AttentionCard: View {
             HStack(alignment: .top, spacing: 12) {
                 SymbolTile(symbol: item.symbol, color: item.color)
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(item.title).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.label)
+                    Text(item.title).font(Theme.text(.subheadline)).foregroundStyle(Theme.label)
                         .fixedSize(horizontal: false, vertical: true)
                     if let subtitle = item.subtitle {
-                        Text(subtitle).font(.footnote).foregroundStyle(Theme.secondary)
+                        Text(subtitle).font(Theme.text(.footnote)).foregroundStyle(Theme.secondary)
                     }
                     HStack(spacing: 14) {
                         switch item.action {
@@ -443,7 +443,7 @@ private struct AttentionCard: View {
                             }
                             .buttonStyle(PrimaryButtonStyle(compact: true)).fixedSize()
                             Button("Keep both") { onKeep(item.id) }
-                                .font(.footnote.weight(.semibold)).foregroundStyle(Theme.link)
+                                .font(Theme.text(.footnote)).foregroundStyle(Theme.link)
                         case let .addStay(tripId, city, checkIn, checkOut):
                             Button {
                                 var fields = BookingFields()
@@ -488,7 +488,7 @@ struct BookingCard: View {
                 standard
             }
             if let notes = booking.notes, booking.bookingKind == .flight, booking.origin != nil || booking.destination != nil {
-                Text(notes).font(.footnote).foregroundStyle(Theme.secondary).padding(.top, 8)
+                Text(notes).font(Theme.text(.footnote)).foregroundStyle(Theme.secondary).padding(.top, 8)
             }
             actionRow
         }
@@ -506,7 +506,7 @@ struct BookingCard: View {
                 Spacer(minLength: 8)
                 HStack(spacing: 6) {
                     Rectangle().fill(Theme.border).frame(height: 1)
-                    Image(systemName: "airplane").font(.footnote).foregroundStyle(Theme.blue)
+                    Image(systemName: "airplane").font(Theme.text(.footnote)).foregroundStyle(Theme.blue)
                     Rectangle().fill(Theme.border).frame(height: 1)
                 }
                 .frame(maxWidth: 110)
@@ -534,8 +534,8 @@ struct BookingCard: View {
         VStack(alignment: alignment, spacing: 2) {
             Text(code ?? "—").font(Theme.serif(30, weight: .bold)).foregroundStyle(Theme.label).lineLimit(1).minimumScaleFactor(0.6)
             HStack(spacing: 2) {
-                Text(time.map(Fmt.clock) ?? " ").font(.footnote.weight(.medium)).foregroundStyle(Theme.secondary)
-                if plus > 0 { Text("+\(plus)").font(.caption2.weight(.bold)).foregroundStyle(Theme.warn).baselineOffset(5) }
+                Text(time.map(Fmt.clock) ?? " ").font(Theme.text(.footnote)).foregroundStyle(Theme.secondary)
+                if plus > 0 { Text("+\(plus)").font(Theme.text(.caption2)).foregroundStyle(Theme.warn).baselineOffset(5) }
             }
         }
     }
@@ -543,7 +543,7 @@ struct BookingCard: View {
     private func field(_ label: String, _ value: String, mono: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(label.uppercased()).font(.system(size: 9, weight: .semibold)).kerning(1).foregroundStyle(Theme.tertiary)
-            Text(value).font(mono ? .footnote.monospaced().weight(.semibold) : .footnote.weight(.semibold)).foregroundStyle(Theme.label).lineLimit(1)
+            Text(value).font(mono ? Theme.text(.footnote).monospaced().weight(.semibold) : Theme.text(.footnote)).foregroundStyle(Theme.label).lineLimit(1)
         }
     }
 
@@ -554,18 +554,18 @@ struct BookingCard: View {
             HStack(alignment: .top, spacing: 12) {
                 SymbolTile(symbol: kind.symbol, color: kind.color)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(booking.title).font(.body.weight(.semibold)).foregroundStyle(Theme.label).lineLimit(2)
-                    if !details.sub.isEmpty { Text(details.sub).font(.footnote).foregroundStyle(Theme.secondary) }
+                    Text(booking.title).font(Theme.text(.body)).foregroundStyle(Theme.label).lineLimit(2)
+                    if !details.sub.isEmpty { Text(details.sub).font(Theme.text(.footnote)).foregroundStyle(Theme.secondary) }
                 }
                 Spacer(minLength: 4)
                 Chip(text: kind.label, color: kind.color)
             }
             if !details.meta.isEmpty || booking.confirmation != nil {
                 HStack(alignment: .firstTextBaseline) {
-                    Text(details.meta).font(.footnote).foregroundStyle(Theme.secondary).lineLimit(2)
+                    Text(details.meta).font(Theme.text(.footnote)).foregroundStyle(Theme.secondary).lineLimit(2)
                     Spacer(minLength: 8)
                     if let code = booking.confirmation {
-                        Text(code).font(.footnote.monospaced().weight(.semibold)).foregroundStyle(Theme.label)
+                        Text(code).font(Theme.text(.footnote).monospaced().weight(.semibold)).foregroundStyle(Theme.label)
                     }
                 }
             }
@@ -597,7 +597,7 @@ struct BookingCard: View {
                         Button(action: onLounges) { Label("Lounges at \(origin)", systemImage: "sparkles") }
                     }
                 }
-                .font(.footnote.weight(.semibold))
+                .font(Theme.text(.footnote))
                 .foregroundStyle(Theme.link)
                 .buttonStyle(.plain)
             }
@@ -642,12 +642,12 @@ struct LoungesSheet: View {
                             Section {
                                 ForEach(result.lounges, id: \.self) { lounge in
                                     VStack(alignment: .leading, spacing: 4) {
-                                        Text(lounge.name).font(.body.weight(.semibold))
+                                        Text(lounge.name).font(Theme.text(.body))
                                         Text([lounge.terminal, lounge.location, lounge.hours.map { "Open \($0)" }].compactMap { $0 }.joined(separator: " · ")
                                             .nonEmpty ?? "Terminal not confirmed")
-                                            .font(.footnote).foregroundStyle(Theme.secondary)
+                                            .font(Theme.text(.footnote)).foregroundStyle(Theme.secondary)
                                         Text(lounge.access.isEmpty ? "Access rules not confirmed" : "Access: " + lounge.access.joined(separator: " · "))
-                                            .font(.footnote).foregroundStyle(Theme.secondary)
+                                            .font(Theme.text(.footnote)).foregroundStyle(Theme.secondary)
                                     }
                                     .padding(.vertical, 2)
                                 }

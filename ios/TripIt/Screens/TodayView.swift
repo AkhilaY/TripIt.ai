@@ -64,7 +64,7 @@ struct TodayView: View {
         return ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 Text([Fmt.tripDay(start: trip.startDate, day: day), trip.name, trip.title(of: day)].compactMap { $0 }.joined(separator: " · "))
-                    .font(.subheadline).foregroundStyle(Theme.secondary)
+                    .font(Theme.text(.subheadline)).foregroundStyle(Theme.secondary)
                 if trip.dayCount > 1 { dayPicker(trip, day: day).padding(.top, 12) }
                 booked(trip, day: day)
                 bag(day: day)
@@ -72,7 +72,7 @@ struct TodayView: View {
                 if !list.isEmpty {
                     VStack(alignment: .leading, spacing: 6) {
                         ProgressView(value: Double(done.count) / Double(list.count)).tint(Theme.ok)
-                        Text("\(done.count) of \(Fmt.plural(list.count, "stop")) done").font(.footnote).foregroundStyle(Theme.secondary)
+                        Text("\(done.count) of \(Fmt.plural(list.count, "stop")) done").font(Theme.text(.footnote)).foregroundStyle(Theme.secondary)
                     }
                     .padding(.top, 20)
                     briefing(trip, day: day, isToday: isToday)
@@ -88,7 +88,7 @@ struct TodayView: View {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text("Day complete").font(Theme.serif(22))
                                 Text("You visited all \(Fmt.plural(list.count, "stop")).\(day < trip.dayCount ? " Day \(day + 1) is next." : "")")
-                                    .font(.subheadline).foregroundStyle(Theme.secondary)
+                                    .font(Theme.text(.subheadline)).foregroundStyle(Theme.secondary)
                             }
                         }
                     }
@@ -134,9 +134,9 @@ struct TodayView: View {
                             SymbolTile(symbol: b.bookingKind.symbol, color: b.bookingKind.color)
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(b.title + (b.bookingKind == .flight && b.origin != nil && b.destination != nil ? " \(b.origin!) → \(b.destination!)" : ""))
-                                    .font(.subheadline.weight(.semibold)).foregroundStyle(Theme.label)
+                                    .font(Theme.text(.subheadline)).foregroundStyle(Theme.label)
                                 Text([b.bookingKind.label, b.startTime.map(Fmt.clock), b.confirmation.map { "Ref \($0)" }].compactMap { $0 }.joined(separator: " · "))
-                                    .font(.footnote).foregroundStyle(Theme.secondary)
+                                    .font(Theme.text(.footnote)).foregroundStyle(Theme.secondary)
                             }
                             Spacer(minLength: 0)
                         }
@@ -158,8 +158,8 @@ struct TodayView: View {
             Card(padding: 12) {
                 ForEach(items) { item in
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(item.text).font(.subheadline.weight(.semibold))
-                        if let reason = item.reason { Text(reason).font(.footnote).foregroundStyle(Theme.secondary) }
+                        Text(item.text).font(Theme.text(.subheadline))
+                        if let reason = item.reason { Text(reason).font(Theme.text(.footnote)).foregroundStyle(Theme.secondary) }
                     }
                     .padding(.vertical, 4)
                 }
@@ -182,11 +182,11 @@ struct TodayView: View {
                     Button { router.push(.events(tripId: tripId)) } label: {
                         HStack {
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(e.name).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.label)
-                                Text([e.time.map(Fmt.clock), e.venue].compactMap { $0 }.joined(separator: " · ")).font(.footnote).foregroundStyle(Theme.secondary)
+                                Text(e.name).font(Theme.text(.subheadline)).foregroundStyle(Theme.label)
+                                Text([e.time.map(Fmt.clock), e.venue].compactMap { $0 }.joined(separator: " · ")).font(Theme.text(.footnote)).foregroundStyle(Theme.secondary)
                             }
                             Spacer(minLength: 0)
-                            Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(Theme.quiet)
+                            Image(systemName: "chevron.right").font(Theme.text(.footnote)).foregroundStyle(Theme.quiet)
                         }
                         .padding(12)
                     }
@@ -208,12 +208,12 @@ struct TodayView: View {
                     ForEach(brief.points, id: \.self) { point in
                         HStack(alignment: .top, spacing: 8) {
                             Circle().fill(Theme.gold).frame(width: 5, height: 5).padding(.top, 7)
-                            Text(point).font(.subheadline).foregroundStyle(Theme.secondary).fixedSize(horizontal: false, vertical: true)
+                            Text(point).font(Theme.text(.subheadline)).foregroundStyle(Theme.secondary).fixedSize(horizontal: false, vertical: true)
                         }
                     }
                 }
             } else {
-                HStack(spacing: 10) { ProgressView(); Text("Reading the day…").font(.subheadline).foregroundStyle(Theme.secondary) }
+                HStack(spacing: 10) { ProgressView(); Text("Reading the day…").font(Theme.text(.subheadline)).foregroundStyle(Theme.secondary) }
             }
         }
         .padding(.top, 14)
@@ -239,11 +239,11 @@ struct TodayView: View {
                     PlaceThumb(place: p, size: 64)
                     VStack(alignment: .leading, spacing: 3) {
                         Text(p.name).font(Theme.serif(22)).foregroundStyle(Theme.label).lineLimit(2)
-                        Text([time(trip, p), TravelHome.stopLabel(p)].joined(separator: " · ")).font(.footnote).foregroundStyle(Theme.secondary)
-                        OpenStatusText(hours: p.openingHours).font(.footnote)
+                        Text([time(trip, p), TravelHome.stopLabel(p)].joined(separator: " · ")).font(Theme.text(.footnote)).foregroundStyle(Theme.secondary)
+                        OpenStatusText(hours: p.openingHours).font(Theme.text(.footnote))
                     }
                     Spacer(minLength: 0)
-                    Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(Theme.quiet)
+                    Image(systemName: "chevron.right").font(Theme.text(.footnote)).foregroundStyle(Theme.quiet)
                 }
                 .padding(.top, 8)
             }
@@ -254,7 +254,7 @@ struct TodayView: View {
                     Button { Links.open(p.googleDirectionsURL) } label: { Label("Google Maps", systemImage: "globe") }
                 } label: {
                     Label("Directions", systemImage: "arrow.up.right")
-                        .font(.subheadline.weight(.semibold)).foregroundStyle(Theme.accentInk)
+                        .font(Theme.text(.subheadline)).foregroundStyle(Theme.accentInk)
                         .padding(.horizontal, 16).padding(.vertical, 9)
                         .frame(maxWidth: .infinity)
                         .background(Theme.accent, in: Capsule())
@@ -268,15 +268,15 @@ struct TodayView: View {
 
     private func stopRow(_ trip: TripDetail, _ p: Place, number: Int) -> some View {
         HStack(spacing: 12) {
-            Text("\(number)").font(.caption.weight(.bold)).foregroundStyle(Category(p.category).color)
+            Text("\(number)").font(Theme.text(.caption)).foregroundStyle(Category(p.category).color)
                 .frame(width: 22, height: 22)
                 .background(Category(p.category).color.opacity(0.14), in: Circle())
             NavigationLink(value: Route.place(id: p.id, tripId: tripId)) {
                 HStack(spacing: 12) {
                     PlaceThumb(place: p, size: 44)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(p.name).font(.subheadline.weight(.semibold)).strikethrough(p.visited).foregroundStyle(Theme.label).lineLimit(1)
-                        Text([time(trip, p), Category(p.category).label].joined(separator: " · ")).font(.footnote).foregroundStyle(Theme.secondary)
+                        Text(p.name).font(Theme.text(.subheadline)).strikethrough(p.visited).foregroundStyle(Theme.label).lineLimit(1)
+                        Text([time(trip, p), Category(p.category).label].joined(separator: " · ")).font(Theme.text(.footnote)).foregroundStyle(Theme.secondary)
                     }
                     Spacer(minLength: 0)
                 }
@@ -284,7 +284,7 @@ struct TodayView: View {
             .buttonStyle(.plain)
             if p.visited {
                 Button("Undo") { Task { await store.patch(p, ["visited": false], tripId: tripId) } }
-                    .font(.footnote.weight(.semibold)).foregroundStyle(Theme.link).buttonStyle(.plain)
+                    .font(Theme.text(.footnote)).foregroundStyle(Theme.link).buttonStyle(.plain)
                     .accessibilityLabel("Mark \(p.name) not visited")
             }
         }

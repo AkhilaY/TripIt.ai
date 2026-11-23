@@ -56,9 +56,9 @@ struct EditView: View {
                     Eyebrow(text: "The edit · \(trip?.name ?? store.trips.first { $0.id == tripId }?.name ?? "")")
                     Text(edit.title).font(Theme.serif(30)).foregroundStyle(Theme.label)
                     if !edit.dek.isEmpty {
-                        Text(edit.dek).font(.body).foregroundStyle(Theme.secondary).fixedSize(horizontal: false, vertical: true)
+                        Text(edit.dek).font(Theme.text(.body)).foregroundStyle(Theme.secondary).fixedSize(horizontal: false, vertical: true)
                     }
-                    Text(byline(edit)).font(.footnote).foregroundStyle(Theme.tertiary)
+                    Text(byline(edit)).font(Theme.text(.footnote)).foregroundStyle(Theme.tertiary)
                     keepButton(edit).padding(.top, 6)
                 }
                 .padding(.horizontal, 20)
@@ -90,14 +90,14 @@ struct EditView: View {
         if let folderId = edit.folderId {
             Button { router.push(.folder(id: folderId)) } label: { Label("Saved to your Library", systemImage: "checkmark") }
                 .buttonStyle(PrimaryButtonStyle(tinted: true, compact: true)).fixedSize()
-            Text("Kept as a list, even after the edits refresh.").font(.footnote).foregroundStyle(Theme.secondary)
+            Text("Kept as a list, even after the edits refresh.").font(Theme.text(.footnote)).foregroundStyle(Theme.secondary)
         } else {
             Button { Task { await keep(edit) } } label: {
                 if keeping { ProgressView() } else { Label("Save this edit", systemImage: "bookmark") }
             }
             .buttonStyle(PrimaryButtonStyle(compact: true)).fixedSize()
             .disabled(keeping)
-            Text("Edits refresh daily. Save this one to keep it as a list.").font(.footnote).foregroundStyle(Theme.secondary)
+            Text("Edits refresh daily. Save this one to keep it as a list.").font(Theme.text(.footnote)).foregroundStyle(Theme.secondary)
         }
     }
 
@@ -120,16 +120,16 @@ struct EditView: View {
                         }
                         HStack(spacing: 5) {
                             Text(item.name).font(Theme.serif(21)).foregroundStyle(Theme.label)
-                            if saved?.mustDo == true { Image(systemName: "star.fill").font(.caption).foregroundStyle(Theme.gold) }
+                            if saved?.mustDo == true { Image(systemName: "star.fill").font(Theme.text(.caption)).foregroundStyle(Theme.gold) }
                         }
                         if !item.note.isEmpty {
-                            Text(item.note).font(.subheadline).foregroundStyle(Theme.secondary).fixedSize(horizontal: false, vertical: true)
+                            Text(item.note).font(Theme.text(.subheadline)).foregroundStyle(Theme.secondary).fixedSize(horizontal: false, vertical: true)
                         }
                         if !item.saved, let rating = item.rating {
                             Text(String(format: "★ %.1f", rating) + (item.ratingCount.map { " · \(Fmt.count($0)) reviews" } ?? ""))
-                                .font(.footnote).foregroundStyle(Theme.secondary)
+                                .font(Theme.text(.footnote)).foregroundStyle(Theme.secondary)
                         }
-                        if let saved { OpenStatusText(hours: saved.openingHours).font(.footnote) }
+                        if let saved { OpenStatusText(hours: saved.openingHours).font(Theme.text(.footnote)) }
                     }
                     .padding(14)
                 }
@@ -142,14 +142,14 @@ struct EditView: View {
                 if let source = item.source {
                     if let link = source.url, let url = URL(string: link) {
                         Button { Links.open(url) } label: { Text("via \(source.name)").lineLimit(1) }
-                            .font(.footnote.weight(.semibold)).foregroundStyle(Theme.link)
+                            .font(Theme.text(.footnote)).foregroundStyle(Theme.link)
                     } else {
-                        Text(item.saved ? source.name : "via \(source.name)").font(.footnote).foregroundStyle(Theme.secondary).lineLimit(1)
+                        Text(item.saved ? source.name : "via \(source.name)").font(Theme.text(.footnote)).foregroundStyle(Theme.secondary).lineLimit(1)
                     }
                 }
                 Spacer(minLength: 8)
                 if item.saved {
-                    Label("In your library", systemImage: "checkmark").font(.footnote.weight(.semibold)).foregroundStyle(Theme.ok)
+                    Label("In your library", systemImage: "checkmark").font(Theme.text(.footnote)).foregroundStyle(Theme.ok)
                 } else {
                     Button { Task { await save(item, edit: edit) } } label: {
                         if saving.contains(item.id) { ProgressView().controlSize(.small) } else { Label("Save", systemImage: "bookmark") }

@@ -43,7 +43,7 @@ struct ConciergeView: View {
                             bubble(messages[i], index: i).padding(.top, 12)
                         }
                         if busy {
-                            HStack(spacing: 8) { ProgressView(); Text("Thinking…").font(.subheadline).foregroundStyle(Theme.secondary) }
+                            HStack(spacing: 8) { ProgressView(); Text("Thinking…").font(Theme.text(.subheadline)).foregroundStyle(Theme.secondary) }
                                 .padding(.top, 12)
                         }
                     }
@@ -85,7 +85,7 @@ struct ConciergeView: View {
             }
             .padding(.top, 8)
             Text("Concierge").font(Theme.serif(32)).foregroundStyle(Theme.label).padding(.top, 8)
-            Text("Your personal travel assistant").font(.subheadline).foregroundStyle(Theme.secondary)
+            Text("Your personal travel assistant").font(Theme.text(.subheadline)).foregroundStyle(Theme.secondary)
             if !store.realTrips.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
@@ -115,7 +115,7 @@ struct ConciergeView: View {
             FlowLayout(spacing: 8) {
                 ForEach(Self.prompts, id: \.self) { q in
                     Button { Task { await send(q) } } label: {
-                        Text(q).font(.subheadline).foregroundStyle(Theme.label)
+                        Text(q).font(Theme.text(.subheadline)).foregroundStyle(Theme.label)
                             .padding(.horizontal, 12).padding(.vertical, 8)
                             .background(Theme.cell, in: Capsule())
                             .overlay(Capsule().strokeBorder(Theme.border))
@@ -133,26 +133,26 @@ struct ConciergeView: View {
         if m.role == "user" {
             HStack {
                 Spacer(minLength: 48)
-                Text(m.content).font(.body).foregroundStyle(Theme.accentInk)
+                Text(m.content).font(Theme.text(.body)).foregroundStyle(Theme.accentInk)
                     .padding(.horizontal, 14).padding(.vertical, 10)
                     .background(Theme.accent, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
             }
         } else {
             VStack(alignment: .leading, spacing: 10) {
-                Text(m.error ? "Couldn't answer" : "Concierge").font(.caption.weight(.semibold)).foregroundStyle(m.error ? Theme.warn : Theme.gold)
-                Text(m.content).font(.body).foregroundStyle(Theme.label).fixedSize(horizontal: false, vertical: true)
+                Text(m.error ? "Couldn't answer" : "Concierge").font(Theme.text(.caption)).foregroundStyle(m.error ? Theme.warn : Theme.gold)
+                Text(m.content).font(Theme.text(.body)).foregroundStyle(Theme.label).fixedSize(horizontal: false, vertical: true)
                 let places = m.placeIds.compactMap { id in trip?.places.first { $0.id == id } ?? store.place(id) }
                 ForEach(places) { p in
                     NavigationLink(value: Route.place(id: p.id, tripId: tripId)) {
                         HStack(spacing: 10) {
                             PlaceThumb(place: p, size: 40)
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(p.name).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.label)
+                                Text(p.name).font(Theme.text(.subheadline)).foregroundStyle(Theme.label)
                                 Text([Category(p.category).label, p.neighborhood].compactMap { $0 }.joined(separator: " · "))
-                                    .font(.caption).foregroundStyle(Theme.secondary)
+                                    .font(Theme.text(.caption)).foregroundStyle(Theme.secondary)
                             }
                             Spacer(minLength: 0)
-                            Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(Theme.quiet)
+                            Image(systemName: "chevron.right").font(Theme.text(.caption)).foregroundStyle(Theme.quiet)
                         }
                         .padding(8)
                         .background(Theme.fill, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -172,12 +172,12 @@ struct ConciergeView: View {
         VStack(alignment: .leading, spacing: 6) {
             Eyebrow(text: "Proposed changes", color: Theme.secondary)
             ForEach(m.actions, id: \.self) { a in
-                Label(a.label, systemImage: "arrow.right.circle").font(.subheadline).foregroundStyle(Theme.label)
+                Label(a.label, systemImage: "arrow.right.circle").font(Theme.text(.subheadline)).foregroundStyle(Theme.label)
             }
             if m.applied {
-                Text("Applied to your trip").font(.footnote).foregroundStyle(Theme.ok)
+                Text("Applied to your trip").font(Theme.text(.footnote)).foregroundStyle(Theme.ok)
             } else if m.dismissed {
-                Text("Left as it was").font(.footnote).foregroundStyle(Theme.secondary)
+                Text("Left as it was").font(Theme.text(.footnote)).foregroundStyle(Theme.secondary)
             } else {
                 HStack(spacing: 14) {
                     Button { Task { await apply(index) } } label: {
@@ -189,7 +189,7 @@ struct ConciergeView: View {
                         messages[index].dismissed = true
                         Self.write(tripId, messages)
                     }
-                    .font(.subheadline.weight(.semibold)).foregroundStyle(Theme.link)
+                    .font(Theme.text(.subheadline)).foregroundStyle(Theme.link)
                 }
                 .padding(.top, 4)
             }
@@ -211,7 +211,7 @@ struct ConciergeView: View {
                 .background(Theme.cell, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(Theme.border))
             Button { Task { await send(draft) } } label: {
-                Image(systemName: "arrow.up").font(.body.weight(.semibold)).foregroundStyle(Theme.accentInk)
+                Image(systemName: "arrow.up").font(Theme.text(.body)).foregroundStyle(Theme.accentInk)
                     .frame(width: 40, height: 40)
                     .background(Theme.accent, in: Circle())
             }

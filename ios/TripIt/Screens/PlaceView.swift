@@ -131,13 +131,13 @@ struct PlaceView: View {
             Eyebrow(text: [category.label, p.mustDo ? "Starred" : nil].compactMap { $0 }.joined(separator: " · "), color: Theme.tertiary)
             Text(p.name).font(Theme.serif(28)).foregroundStyle(Theme.label).fixedSize(horizontal: false, vertical: true)
             let loc = [p.neighborhood, p.city.isEmpty ? nil : p.city].compactMap { $0 }.joined(separator: ", ")
-            if !loc.isEmpty { Text(loc).font(.subheadline).foregroundStyle(Theme.secondary) }
+            if !loc.isEmpty { Text(loc).font(Theme.text(.subheadline)).foregroundStyle(Theme.secondary) }
             statusLine(p)
             if let resolved = p.resolvedName, resolved != p.name {
-                Text("On maps as \(resolved)").font(.footnote).foregroundStyle(Theme.secondary)
+                Text("On maps as \(resolved)").font(Theme.text(.footnote)).foregroundStyle(Theme.secondary)
             }
             if p.confidence == "low" {
-                Text("The name was hard to make out in the post; double-check it.").font(.footnote).foregroundStyle(Theme.attention)
+                Text("The name was hard to make out in the post; double-check it.").font(Theme.text(.footnote)).foregroundStyle(Theme.attention)
             }
         }
     }
@@ -156,7 +156,7 @@ struct PlaceView: View {
                 }
                 if let price { Text((status == nil ? "" : "· ") + price).foregroundStyle(Theme.secondary) }
             }
-            .font(.subheadline)
+            .font(Theme.text(.subheadline))
             .padding(.top, 2)
         }
     }
@@ -166,8 +166,8 @@ struct PlaceView: View {
             HStack(spacing: 12) {
                 Image(systemName: "sparkles").foregroundStyle(Theme.link)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Suggested for this trip").font(.subheadline.weight(.semibold))
-                    Text(p.suggestionNote ?? "Suggested for a quiet day").font(.caption).foregroundStyle(Theme.secondary)
+                    Text("Suggested for this trip").font(Theme.text(.subheadline))
+                    Text(p.suggestionNote ?? "Suggested for a quiet day").font(Theme.text(.caption)).foregroundStyle(Theme.secondary)
                 }
                 Spacer()
                 Button("Keep") {
@@ -177,7 +177,7 @@ struct PlaceView: View {
                         store.show("Kept, and added to your Library")
                     }
                 }
-                .font(.subheadline.weight(.semibold)).foregroundStyle(Theme.link)
+                .font(Theme.text(.subheadline)).foregroundStyle(Theme.link)
             }
         }
     }
@@ -194,7 +194,7 @@ struct PlaceView: View {
                     .font(.system(size: 18, weight: .regular))
                     .foregroundStyle(on ? Theme.ok : Theme.tertiary)
                     .contentTransition(.symbolEffect(.replace))
-                Text("Been here").font(.footnote.weight(on ? .semibold : .medium))
+                Text("Been here").font(Theme.text(.footnote).weight(on ? .semibold : .medium))
                     .foregroundStyle(on ? Theme.ok : Theme.label)
             }
             .padding(.leading, 8).padding(.trailing, 14).frame(minHeight: 34)
@@ -223,11 +223,11 @@ struct PlaceView: View {
                     }
                     VStack(alignment: .leading, spacing: 3) {
                         if let reel {
-                            Text(reel.creator.map { "@\($0)" } ?? reel.platform.capitalized).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.label)
-                            Text("From a post · saved \(Self.savedDate(p.createdAt))").font(.caption).foregroundStyle(Theme.secondary)
+                            Text(reel.creator.map { "@\($0)" } ?? reel.platform.capitalized).font(Theme.text(.subheadline)).foregroundStyle(Theme.label)
+                            Text("From a post · saved \(Self.savedDate(p.createdAt))").font(Theme.text(.caption)).foregroundStyle(Theme.secondary)
                         } else {
-                            Text("Saved by you").font(.subheadline.weight(.semibold)).foregroundStyle(Theme.label)
-                            Text("Saved \(Self.savedDate(p.createdAt))").font(.caption).foregroundStyle(Theme.secondary)
+                            Text("Saved by you").font(Theme.text(.subheadline)).foregroundStyle(Theme.label)
+                            Text("Saved \(Self.savedDate(p.createdAt))").font(Theme.text(.caption)).foregroundStyle(Theme.secondary)
                         }
                         if let quote {
                             Text("“\(quote)”").font(Theme.serif(15, weight: .regular)).italic().foregroundStyle(Theme.label)
@@ -235,10 +235,10 @@ struct PlaceView: View {
                         }
                         if let reel {
                             Button("Open the post") { Links.open(URL(string: reel.url)) }
-                                .font(.subheadline.weight(.semibold)).foregroundStyle(Theme.link).frame(minHeight: 36)
+                                .font(Theme.text(.subheadline)).foregroundStyle(Theme.link).frame(minHeight: 36)
                         }
                         if p.mentionCount >= 2 {
-                            Text("In \(p.mentionCount) posts you saved").font(.caption).foregroundStyle(Theme.secondary)
+                            Text("In \(p.mentionCount) posts you saved").font(Theme.text(.caption)).foregroundStyle(Theme.secondary)
                         }
                     }
                     Spacer(minLength: 0)
@@ -247,14 +247,14 @@ struct PlaceView: View {
                     Divider().overlay(Theme.border).padding(.vertical, 12)
                     TextField("Your note", text: $notes, axis: .vertical)
                         .lineLimit(1...10)
-                        .font(.subheadline)
+                        .font(Theme.text(.subheadline))
                         .focused($noteFocused)
                         .onChange(of: notes) { _, _ in scheduleNotesSave(p) }
                 }
             }
             if !editingNote && notes.isEmpty {
                 Button { editingNote = true; noteFocused = true } label: {
-                    Label("Add your own note", systemImage: "square.and.pencil").font(.subheadline.weight(.medium)).foregroundStyle(Theme.label)
+                    Label("Add your own note", systemImage: "square.and.pencil").font(Theme.text(.subheadline)).foregroundStyle(Theme.label)
                 }
                 .frame(minHeight: 36)
             }
@@ -290,13 +290,13 @@ struct PlaceView: View {
                     Button { Links.open(p.googleDirectionsURL) } label: { Label("Google Maps", systemImage: "globe") }
                 } label: {
                     Label("Directions", systemImage: "arrow.triangle.turn.up.right.diamond")
-                        .font(.subheadline.weight(.semibold)).foregroundStyle(Theme.accentInk)
+                        .font(Theme.text(.subheadline)).foregroundStyle(Theme.accentInk)
                         .frame(maxWidth: .infinity, minHeight: 42)
                         .background(Theme.accent, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 }
             }
             if let need = needText(p) {
-                Label(need, systemImage: "info.circle").font(.footnote).foregroundStyle(p.shownNeed == "required" ? Theme.attention : Theme.secondary)
+                Label(need, systemImage: "info.circle").font(Theme.text(.footnote)).foregroundStyle(p.shownNeed == "required" ? Theme.attention : Theme.secondary)
             }
         }
     }
@@ -374,9 +374,9 @@ struct PlaceView: View {
                     DatePicker("Date", selection: Binding(get: { date }, set: { new in
                         Task { await store.patch(p, ["event_date": Fmt.iso(new)]) }
                     }), displayedComponents: .date)
-                    if let end = p.eventEndDate { Text("Runs until \(Fmt.shortDay(end)).").font(.footnote).foregroundStyle(Theme.secondary) }
+                    if let end = p.eventEndDate { Text("Runs until \(Fmt.shortDay(end)).").font(Theme.text(.footnote)).foregroundStyle(Theme.secondary) }
                     Button("Clear date", role: .destructive) { Task { await store.patch(p, ["clear_event_date": true]) } }
-                        .font(.subheadline).padding(.top, 8)
+                        .font(Theme.text(.subheadline)).padding(.top, 8)
                 } else {
                     Button { Task { await store.patch(p, ["event_date": Fmt.iso(Date())]) } } label: {
                         infoRow("calendar.badge.plus", "Add the date", "So it shows on your calendar")
@@ -397,7 +397,7 @@ struct PlaceView: View {
                 sectionTitle("On your trip")
                 Spacer()
                 Button(trip.name) { router.push(.trip(id: trip.id)) }
-                    .font(.subheadline.weight(.semibold)).foregroundStyle(Theme.link).lineLimit(1)
+                    .font(Theme.text(.subheadline)).foregroundStyle(Theme.link).lineLimit(1)
             }
             Card {
                 if trip.dayCount > 0 {
@@ -427,7 +427,7 @@ struct PlaceView: View {
                         DatePicker("Exact time", selection: Binding(get: { date }, set: { new in
                             Task { await store.patch(p, ["start_time": hhmm(new)], tripId: trip.id) }
                         }), displayedComponents: .hourAndMinute)
-                        .font(.subheadline)
+                        .font(Theme.text(.subheadline))
                         .padding(.horizontal, 14).padding(.bottom, 8)
                     }
                     Divider().overlay(Theme.border).padding(.leading, 48)
@@ -458,9 +458,9 @@ struct PlaceView: View {
             Text(title).foregroundStyle(Theme.secondary)
             Spacer(minLength: 8)
             Text(value).fontWeight(.medium).foregroundStyle(attention ? Theme.attention : Theme.label).lineLimit(1)
-            if chevron { Image(systemName: "chevron.up.chevron.down").font(.caption).foregroundStyle(Theme.quiet) }
+            if chevron { Image(systemName: "chevron.up.chevron.down").font(Theme.text(.caption)).foregroundStyle(Theme.quiet) }
         }
-        .font(.subheadline)
+        .font(Theme.text(.subheadline))
         .padding(.horizontal, 14).frame(minHeight: 44)
         .contentShape(Rectangle())
     }
@@ -474,11 +474,11 @@ struct PlaceView: View {
                 HStack(spacing: 12) {
                     Image(systemName: "mappin.and.ellipse").foregroundStyle(Theme.attention)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Not on the map yet").font(.subheadline.weight(.semibold)).foregroundStyle(Theme.label)
-                        Text("Search for it to add the pin").font(.caption).foregroundStyle(Theme.secondary)
+                        Text("Not on the map yet").font(Theme.text(.subheadline)).foregroundStyle(Theme.label)
+                        Text("Search for it to add the pin").font(Theme.text(.caption)).foregroundStyle(Theme.secondary)
                     }
                     Spacer()
-                    Image(systemName: "chevron.right").font(.footnote).foregroundStyle(Theme.quiet)
+                    Image(systemName: "chevron.right").font(Theme.text(.footnote)).foregroundStyle(Theme.quiet)
                 }
             }
         }
@@ -506,12 +506,12 @@ struct PlaceView: View {
                         HStack(alignment: .top, spacing: 12) {
                             Image(systemName: "clock").frame(width: 22).foregroundStyle(Theme.secondary)
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(todayHours(hours)).font(.subheadline.weight(.medium)).foregroundStyle(Theme.label)
+                                Text(todayHours(hours)).font(Theme.text(.subheadline)).foregroundStyle(Theme.label)
                                 Text("From \(hours.source == "google" ? "Google" : "OpenStreetMap") · hours change, check before you go")
-                                    .font(.caption).foregroundStyle(Theme.secondary)
+                                    .font(Theme.text(.caption)).foregroundStyle(Theme.secondary)
                             }
                             Spacer(minLength: 8)
-                            Text(allHours ? "Less" : "All hours").font(.footnote.weight(.semibold)).foregroundStyle(Theme.link)
+                            Text(allHours ? "Less" : "All hours").font(Theme.text(.footnote)).foregroundStyle(Theme.link)
                         }
                         .padding(14)
                         .contentShape(Rectangle())
@@ -522,7 +522,7 @@ struct PlaceView: View {
                         VStack(alignment: .leading, spacing: 4) {
                             ForEach(Array(hours.text.enumerated()), id: \.offset) { i, line in
                                 Text(line)
-                                    .font(.footnote.weight(hours.weekly != nil && i == today ? .semibold : .regular))
+                                    .font(Theme.text(.footnote).weight(hours.weekly != nil && i == today ? .semibold : .regular))
                                     .foregroundStyle(hours.weekly != nil && i == today ? Theme.label : Theme.secondary)
                             }
                         }
@@ -619,7 +619,7 @@ struct PlaceView: View {
                     } label: {
                         HStack(spacing: 4) {
                             Text(category.label).fontWeight(.medium)
-                            Image(systemName: "chevron.up.chevron.down").font(.caption)
+                            Image(systemName: "chevron.up.chevron.down").font(Theme.text(.caption))
                         }
                         .foregroundStyle(Theme.label)
                     }
@@ -649,7 +649,7 @@ struct PlaceView: View {
             Spacer(minLength: 12)
             value()
         }
-        .font(.subheadline)
+        .font(Theme.text(.subheadline))
         .padding(.horizontal, 14).frame(minHeight: 42)
     }
 
@@ -657,8 +657,8 @@ struct PlaceView: View {
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: symbol).frame(width: 22).foregroundStyle(Theme.secondary)
             VStack(alignment: .leading, spacing: 2) {
-                Text(text).font(.subheadline).foregroundStyle(quiet ? Theme.secondary : Theme.label).fixedSize(horizontal: false, vertical: true)
-                if let sub { Text(sub).font(.caption).foregroundStyle(Theme.secondary) }
+                Text(text).font(Theme.text(.subheadline)).foregroundStyle(quiet ? Theme.secondary : Theme.label).fixedSize(horizontal: false, vertical: true)
+                if let sub { Text(sub).font(Theme.text(.caption)).foregroundStyle(Theme.secondary) }
             }
             Spacer(minLength: 0)
         }
@@ -752,7 +752,7 @@ private struct Hero: View {
                             .clipped()
                             .overlay(alignment: .bottomLeading) {
                                 if let credit = photo.attribution ?? (photo.source == "reel" ? "From the post" : nil) {
-                                    Text(credit).font(.caption2).foregroundStyle(.white.opacity(0.9))
+                                    Text(credit).font(Theme.text(.caption2)).foregroundStyle(.white.opacity(0.9))
                                         .lineLimit(1).truncationMode(.middle)
                                         .frame(maxWidth: 150, alignment: .leading)
                                         .padding(.horizontal, 8).padding(.vertical, 4)

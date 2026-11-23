@@ -44,7 +44,7 @@ struct PackingView: View {
                     ProgressView().controlSize(.large)
                     Text("Packing for \(trip?.city ?? "your trip")").font(Theme.serif(22))
                     Text("Looking at your days, the weather and your taste. This can take up to a minute.")
-                        .font(.subheadline).foregroundStyle(Theme.secondary).multilineTextAlignment(.center)
+                        .font(Theme.text(.subheadline)).foregroundStyle(Theme.secondary).multilineTextAlignment(.center)
                 }
                 .frame(maxWidth: .infinity).padding(.vertical, 40)
                 .listRowBackground(Color.clear)
@@ -107,10 +107,10 @@ struct PackingView: View {
             SymbolTile(symbol: symbol, color: color)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).foregroundStyle(Theme.label)
-                Text(subtitle).font(.footnote).foregroundStyle(Theme.secondary)
+                Text(subtitle).font(Theme.text(.footnote)).foregroundStyle(Theme.secondary)
             }
             Spacer(minLength: 0)
-            Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(Theme.quiet)
+            Image(systemName: "chevron.right").font(Theme.text(.footnote)).foregroundStyle(Theme.quiet)
         }
     }
 
@@ -121,7 +121,7 @@ struct PackingView: View {
         Section {
             HStack {
                 Label(byline(list), systemImage: list.generatedBy == "claude" ? "sparkles" : "checklist")
-                    .font(.footnote).foregroundStyle(Theme.secondary)
+                    .font(Theme.text(.footnote)).foregroundStyle(Theme.secondary)
                 Spacer()
                 Menu {
                     Button { sheet = .importList } label: { Label("Import a list", systemImage: "doc.on.doc") }
@@ -131,18 +131,18 @@ struct PackingView: View {
                     Button { Task { await make(["carry_on_only": !list.carryOnOnly]) } } label: {
                         Label(list.carryOnOnly ? "Checked bag too" : "Carry-on only", systemImage: "suitcase.rolling")
                     }
-                } label: { Image(systemName: "ellipsis.circle").font(.body) }
+                } label: { Image(systemName: "ellipsis.circle").font(Theme.text(.body)) }
                     .accessibilityLabel("List options")
             }
             if list.carryOnOnly {
-                Label("Carry-on only", systemImage: "suitcase.rolling").font(.footnote.weight(.semibold)).foregroundStyle(Theme.teal)
+                Label("Carry-on only", systemImage: "suitcase.rolling").font(Theme.text(.footnote)).foregroundStyle(Theme.teal)
             }
             if let notes = list.notes, !notes.isEmpty {
-                Text(notes).font(.subheadline).foregroundStyle(Theme.label)
+                Text(notes).font(Theme.text(.subheadline)).foregroundStyle(Theme.label)
             }
             VStack(alignment: .leading, spacing: 6) {
                 ProgressView(value: list.items.isEmpty ? 0 : Double(packed) / Double(list.items.count)).tint(Theme.ok)
-                Text("\(packed) of \(list.items.count) packed").font(.footnote).foregroundStyle(Theme.secondary)
+                Text("\(packed) of \(list.items.count) packed").font(Theme.text(.footnote)).foregroundStyle(Theme.secondary)
             }
         }
         if !list.weather.isEmpty { weather(list.weather) }
@@ -180,9 +180,9 @@ struct PackingView: View {
                 HStack(spacing: 10) {
                     ForEach(days, id: \.day) { w in
                         VStack(alignment: .leading, spacing: 3) {
-                            Text(Fmt.shortDay(w.date)).font(.caption.weight(.semibold)).foregroundStyle(Theme.secondary)
-                            Text("\(TravelHome.temperature(w.tempMax))° / \(TravelHome.temperature(w.tempMin))°").font(.subheadline.weight(.semibold))
-                            Text(w.summary + (w.rainChance.map { " · \($0)%" } ?? "")).font(.caption).foregroundStyle(Theme.secondary).lineLimit(1)
+                            Text(Fmt.shortDay(w.date)).font(Theme.text(.caption)).foregroundStyle(Theme.secondary)
+                            Text("\(TravelHome.temperature(w.tempMax))° / \(TravelHome.temperature(w.tempMin))°").font(Theme.text(.subheadline))
+                            Text(w.summary + (w.rainChance.map { " · \($0)%" } ?? "")).font(Theme.text(.caption)).foregroundStyle(Theme.secondary).lineLimit(1)
                         }
                         .padding(10)
                         .frame(minWidth: 110, alignment: .leading)
@@ -204,7 +204,7 @@ struct PackingView: View {
         HStack(alignment: .top, spacing: 12) {
             Button { Haptics.tap(); Task { await change(item, ["packed": !item.packed]) } } label: {
                 Image(systemName: item.packed ? "checkmark.circle.fill" : "circle")
-                    .font(.title3).foregroundStyle(item.packed ? Theme.ok : Theme.tertiary)
+                    .font(Theme.text(.title3)).foregroundStyle(item.packed ? Theme.ok : Theme.tertiary)
             }
             .buttonStyle(.plain)
             .accessibilityLabel(item.packed ? "Packed: \(item.text)" : "Not packed: \(item.text)")
@@ -212,11 +212,11 @@ struct PackingView: View {
                 Text(item.text).strikethrough(item.packed).foregroundStyle(item.unused ? Theme.secondary : Theme.label)
                 if item.reason != nil || !item.days.isEmpty {
                     HStack(spacing: 6) {
-                        if let reason = item.reason { Text(reason).font(.footnote).foregroundStyle(Theme.secondary) }
+                        if let reason = item.reason { Text(reason).font(Theme.text(.footnote)).foregroundStyle(Theme.secondary) }
                         if !item.days.isEmpty { Chip(text: Self.dayList(item.days)) }
                     }
                 }
-                if item.unused { Text("Didn't use it last time").font(.caption).foregroundStyle(Theme.tertiary) }
+                if item.unused { Text("Didn't use it last time").font(Theme.text(.caption)).foregroundStyle(Theme.tertiary) }
             }
             Spacer(minLength: 4)
             Button { acting = item } label: { Image(systemName: "ellipsis").foregroundStyle(Theme.secondary).frame(width: 28, height: 28) }

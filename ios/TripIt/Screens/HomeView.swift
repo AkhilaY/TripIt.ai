@@ -104,10 +104,10 @@ struct HomeView: View {
                 Text("Your \(home.city) weekend").font(Theme.serif(22)).foregroundStyle(Theme.label).padding(.top, 6)
                 if picks.isEmpty {
                     Text("Save places around \(home.city) and we'll pick a couple for the weekend from the ones you haven't been to.")
-                        .font(.subheadline).foregroundStyle(Theme.secondary).padding(.top, 4)
+                        .font(Theme.text(.subheadline)).foregroundStyle(Theme.secondary).padding(.top, 4)
                 } else {
                     Text("Picked from places you've saved but haven't been to yet")
-                        .font(.footnote).foregroundStyle(Theme.secondary).padding(.top, 4)
+                        .font(Theme.text(.footnote)).foregroundStyle(Theme.secondary).padding(.top, 4)
                     VStack(spacing: 10) {
                         ForEach(picks, id: \.place.id) { pick in
                             NavigationLink(value: Route.place(id: pick.place.id, tripId: nil)) {
@@ -115,7 +115,7 @@ struct HomeView: View {
                                     PlaceThumb(place: pick.place, size: 46)
                                     VStack(alignment: .leading, spacing: 2) {
                                         Eyebrow(text: pick.slot, color: Theme.tertiary)
-                                        Text(pick.place.name).font(.body.weight(.semibold)).foregroundStyle(Theme.label).lineLimit(1)
+                                        Text(pick.place.name).font(Theme.text(.body)).foregroundStyle(Theme.label).lineLimit(1)
                                         meta(pick.place)
                                     }
                                     Spacer(minLength: 0)
@@ -140,7 +140,7 @@ struct HomeView: View {
                 Eyebrow(text: "Your city")
                 Text("Where's home?").font(Theme.serif(22)).foregroundStyle(Theme.label).padding(.top, 6)
                 Text("Set your home city and places you save there are kept as Around your city, with weekend picks and what's open now.")
-                    .font(.subheadline).foregroundStyle(Theme.secondary).padding(.top, 4)
+                    .font(Theme.text(.subheadline)).foregroundStyle(Theme.secondary).padding(.top, 4)
                 Button("Set home city") { homeCity = ""; settingHome = true }
                     .buttonStyle(PrimaryButtonStyle(tinted: true)).padding(.top, 16)
             }
@@ -158,7 +158,7 @@ struct HomeView: View {
                 Text(p.bookingKind == "tickets" ? "Tickets needed" : "Book ahead").fontWeight(.semibold).foregroundStyle(Theme.attention)
             }
         }
-        .font(.footnote).lineLimit(1)
+        .font(Theme.text(.footnote)).lineLimit(1)
     }
 
     /// Puts the picks in a "This weekend" list and opens it.
@@ -184,12 +184,12 @@ struct HomeView: View {
                         NavigationLink(value: Route.place(id: p.id, tripId: nil)) {
                             VStack(alignment: .leading, spacing: 3) {
                                 PhotoBox(place: p, width: 136, height: 96, radius: 12)
-                                Text(p.name).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.label).lineLimit(1).padding(.top, 6)
+                                Text(p.name).font(Theme.text(.subheadline)).foregroundStyle(Theme.label).lineLimit(1).padding(.top, 6)
                                 HStack(spacing: 0) {
                                     OpenStatusText(hours: p.openingHours)
                                     if let d = p.distance(from: location.current) { Text(" · " + Fmt.distance(d)).foregroundStyle(Theme.secondary) }
                                 }
-                                .font(.footnote).lineLimit(1)
+                                .font(Theme.text(.footnote)).lineLimit(1)
                             }
                             .frame(width: 136, alignment: .leading)
                         }
@@ -227,7 +227,7 @@ struct HomeView: View {
                             if let countdown = trip.countdown { Eyebrow(text: countdown) }
                             Text(trip.name).font(Theme.serif(18)).foregroundStyle(Theme.label).lineLimit(1)
                             Text([trip.cities.joined(separator: " → "), trip.dateRange].compactMap { $0 }.joined(separator: " · "))
-                                .font(.footnote).foregroundStyle(Theme.secondary).lineLimit(1)
+                                .font(Theme.text(.footnote)).foregroundStyle(Theme.secondary).lineLimit(1)
                         }
                         Spacer(minLength: 0)
                     }
@@ -236,9 +236,9 @@ struct HomeView: View {
                         HStack(spacing: 10) {
                             Image(systemName: "bell").foregroundStyle(Theme.attention)
                             Text("\(need.name) still needs \(need.bookingKind == "tickets" ? "tickets" : "a table")")
-                                .font(.subheadline).foregroundStyle(Theme.label).lineLimit(1)
+                                .font(Theme.text(.subheadline)).foregroundStyle(Theme.label).lineLimit(1)
                             Spacer()
-                            Text("Book").font(.subheadline.weight(.semibold)).foregroundStyle(Theme.link)
+                            Text("Book").font(Theme.text(.subheadline)).foregroundStyle(Theme.link)
                         }
                     }
                 }
@@ -269,8 +269,8 @@ struct HomeView: View {
                         HStack(spacing: 14) {
                             PlaceThumb(place: p, size: 40)
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(p.name).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.label).lineLimit(1)
-                                Text(store.filing(p)).font(.footnote).foregroundStyle(Theme.secondary).lineLimit(1)
+                                Text(p.name).font(Theme.text(.subheadline)).foregroundStyle(Theme.label).lineLimit(1)
+                                Text(store.filing(p)).font(Theme.text(.footnote)).foregroundStyle(Theme.secondary).lineLimit(1)
                             }
                             Spacer(minLength: 0)
                         }
@@ -331,7 +331,7 @@ struct PhotoBox: View {
                 RemoteImage(url: place.photos.first?.url(width: 600)) {
                     ZStack {
                         Theme.raised
-                        Image(systemName: Category(place.category).symbol).font(.title2).foregroundStyle(Theme.secondary)
+                        Image(systemName: Category(place.category).symbol).font(Theme.text(.title2)).foregroundStyle(Theme.secondary)
                     }
                 }
             }

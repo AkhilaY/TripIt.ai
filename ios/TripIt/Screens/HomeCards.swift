@@ -20,8 +20,8 @@ struct ImportProgressCard: View {
                 SymbolTile(symbol: JobRow.symbol(for: job.url), color: Theme.indigo)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(job.reel?.title ?? (job.url.hasPrefix("upload:") ? "Your screenshots" : "A saved post"))
-                        .font(.subheadline.weight(.semibold)).foregroundStyle(Theme.label).lineLimit(1)
-                    Text(Self.steps[step] + "…").font(.footnote).foregroundStyle(Theme.secondary)
+                        .font(Theme.text(.subheadline)).foregroundStyle(Theme.label).lineLimit(1)
+                    Text(Self.steps[step] + "…").font(Theme.text(.footnote)).foregroundStyle(Theme.secondary)
                         .contentTransition(.opacity)
                 }
                 Spacer(minLength: 0)
@@ -91,10 +91,10 @@ struct NextUpCard: View {
                         SymbolTile(symbol: item.symbol, color: item.color, size: 40)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(item.title).font(Theme.serif(20)).foregroundStyle(Theme.label).lineLimit(2)
-                            if !item.subtitle.isEmpty { Text(item.subtitle).font(.footnote).foregroundStyle(Theme.secondary) }
+                            if !item.subtitle.isEmpty { Text(item.subtitle).font(Theme.text(.footnote)).foregroundStyle(Theme.secondary) }
                         }
                         Spacer(minLength: 0)
-                        Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(Theme.quiet)
+                        Image(systemName: "chevron.right").font(Theme.text(.footnote)).foregroundStyle(Theme.quiet)
                     }
                     .padding(.top, 8)
                 }
@@ -139,9 +139,9 @@ struct GetStartedCard: View {
 
     private func step(_ n: String, _ text: String) -> some View {
         HStack(alignment: .top, spacing: 10) {
-            Text(n).font(.caption.weight(.bold)).foregroundStyle(Theme.accentInk)
+            Text(n).font(Theme.text(.caption)).foregroundStyle(Theme.accentInk)
                 .frame(width: 22, height: 22).background(Theme.accent, in: Circle())
-            Text(text).font(.subheadline).foregroundStyle(Theme.label).fixedSize(horizontal: false, vertical: true)
+            Text(text).font(Theme.text(.subheadline)).foregroundStyle(Theme.label).fixedSize(horizontal: false, vertical: true)
         }
     }
 }

@@ -69,18 +69,18 @@ struct TasteView: View {
                 VStack(alignment: .leading, spacing: 14) {
                     Eyebrow(text: "\(step + 1) of \(Self.questions.count)")
                     Text(q.text).font(Theme.serif(30)).foregroundStyle(Theme.label)
-                    Text(q.single ? "Choose one" : "Choose as many as you like").font(.subheadline).foregroundStyle(Theme.secondary)
+                    Text(q.single ? "Choose one" : "Choose as many as you like").font(Theme.text(.subheadline)).foregroundStyle(Theme.secondary)
                     VStack(spacing: 10) {
                         ForEach(q.options) { option in
                             let on = isChosen(q, option.value)
                             Button { toggle(q, option.value) } label: {
                                 HStack {
                                     VStack(alignment: .leading, spacing: 2) {
-                                        Text(option.label).font(.body.weight(.semibold))
-                                        if let hint = option.hint { Text(hint).font(.footnote).opacity(0.75) }
+                                        Text(option.label).font(Theme.text(.body))
+                                        if let hint = option.hint { Text(hint).font(Theme.text(.footnote)).opacity(0.75) }
                                     }
                                     Spacer()
-                                    if on { Image(systemName: "checkmark").font(.footnote.weight(.bold)) }
+                                    if on { Image(systemName: "checkmark").font(Theme.text(.footnote)) }
                                 }
                                 .foregroundStyle(on ? Theme.accentInk : Theme.label)
                                 .padding(14)
@@ -196,7 +196,7 @@ struct PeopleAdminView: View {
             if let temp {
                 Section {
                     HStack {
-                        Text(temp.password).font(.title3.monospaced().weight(.semibold)).textSelection(.enabled)
+                        Text(temp.password).font(Theme.text(.title3).monospaced().weight(.semibold)).textSelection(.enabled)
                         Spacer()
                         Button("Copy") { UIPasteboard.general.string = temp.password; store.show("Copied") }
                     }
@@ -209,11 +209,11 @@ struct PeopleAdminView: View {
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(u.email.isEmpty ? (u.name.isEmpty ? "Signed in with Apple" : u.name) : u.email)
-                            Text(u.isAdmin ? "Owner" : "Joined \(Fmt.shortDay(u.createdAt))").font(.footnote).foregroundStyle(Theme.secondary)
+                            Text(u.isAdmin ? "Owner" : "Joined \(Fmt.shortDay(u.createdAt))").font(Theme.text(.footnote)).foregroundStyle(Theme.secondary)
                         }
                         Spacer()
                         if !u.isAdmin, !u.email.isEmpty, !u.email.hasSuffix("@users.traveledit.invalid") {
-                            Button("Reset password") { resetting = u }.font(.footnote.weight(.semibold))
+                            Button("Reset password") { resetting = u }.font(Theme.text(.footnote))
                         }
                     }
                 }
@@ -303,10 +303,10 @@ struct UsageView: View {
                 let share = budget > 0 ? min(1, r.monthCost / budget) : 0
                 Section {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("\(Self.money(r.monthCost)) of \(budget > 0 ? Self.money(budget) : "no budget")").font(.headline)
+                        Text("\(Self.money(r.monthCost)) of \(budget > 0 ? Self.money(budget) : "no budget")").font(Theme.text(.headline))
                         Text(r.paused ? "Budget used up: AI is paused until next month"
                              : budget > 0 ? "\(Int(share * 100))% of this month's budget" : "No monthly budget set")
-                            .font(.footnote).foregroundStyle(r.paused ? Theme.danger : Theme.secondary)
+                            .font(Theme.text(.footnote)).foregroundStyle(r.paused ? Theme.danger : Theme.secondary)
                         if budget > 0 { ProgressView(value: share).tint(r.paused || share >= 0.8 ? Theme.danger : Theme.ok) }
                     }
                     LabeledContent("Today", value: Self.money(r.todayCost))

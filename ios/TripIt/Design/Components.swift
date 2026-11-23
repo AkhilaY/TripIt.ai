@@ -75,7 +75,7 @@ struct SymbolTile: View {
         RoundedRectangle(cornerRadius: size * 0.28, style: .continuous)
             .fill(color.opacity(0.14))
             .frame(width: size, height: size)
-            .overlay(Image(systemName: symbol).font(.system(size: size * 0.44, weight: .semibold)).foregroundStyle(color))
+            .overlay(Image(systemName: symbol).font(.system(size: size * 0.44, weight: .light)).foregroundStyle(color))
     }
 }
 
@@ -110,21 +110,21 @@ struct PlaceRow: View {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 5) {
                     Text(place.name)
-                        .font(.body.weight(.semibold))
+                        .font(Theme.text(.body))
                         .strikethrough(place.visited)
                         .lineLimit(1)
                     if place.mustDo {
-                        Image(systemName: "star.fill").font(.caption).foregroundStyle(Theme.gold)
+                        Image(systemName: "star.fill").font(Theme.text(.caption)).foregroundStyle(Theme.gold)
                     }
                     if !place.isLocated {
                         Circle().fill(Theme.warn).frame(width: 6, height: 6).accessibilityLabel("Not on the map yet")
                     }
                 }
-                Text(subtitle).font(.subheadline).foregroundStyle(Theme.secondary).lineLimit(1)
+                Text(subtitle).font(Theme.text(.subheadline)).foregroundStyle(Theme.secondary).lineLimit(1)
                 chips
                 if !place.recommendedItems.isEmpty {
                     Text("Try: " + place.recommendedItems.joined(separator: ", "))
-                        .font(.footnote).foregroundStyle(Theme.secondary).lineLimit(1)
+                        .font(Theme.text(.footnote)).foregroundStyle(Theme.secondary).lineLimit(1)
                 }
             }
             Spacer(minLength: 0)
@@ -184,7 +184,7 @@ struct Chip: View {
     var body: some View {
         HStack(spacing: 3) {
             if let symbol { Image(systemName: symbol).font(.system(size: 9, weight: .bold)) }
-            Text(text).font(.caption.weight(.semibold)).lineLimit(1)
+            Text(text).font(Theme.text(.caption)).lineLimit(1)
         }
         .foregroundStyle(color)
         .padding(.horizontal, 6).padding(.vertical, 2)
@@ -205,13 +205,13 @@ struct FilterChip: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 5) {
-                if let emoji { Text(emoji).font(.subheadline) }
+                if let emoji { Text(emoji).font(Theme.text(.subheadline)) }
                 if let symbol {
-                    Image(systemName: symbol).font(.caption.weight(.bold))
+                    Image(systemName: symbol).font(Theme.text(.caption))
                         .foregroundStyle(isOn ? Theme.accentInk : tint ?? Theme.label)
                 }
-                Text(label).font(.subheadline.weight(.medium))
-                if let count { Text("\(count)").font(.caption.weight(.semibold)).opacity(0.6) }
+                Text(label).font(Theme.text(.subheadline))
+                if let count { Text("\(count)").font(Theme.text(.caption)).opacity(0.6) }
             }
             .padding(.horizontal, 12).padding(.vertical, 7)
             .foregroundStyle(isOn ? Theme.accentInk : Theme.label)
@@ -225,18 +225,20 @@ struct FilterChip: View {
 
 // MARK: - Buttons, empty states, toasts
 
-/// The one main action on a screen (an espresso pill), or with `tinted` a quiet one. `compact` is for buttons
-/// inside a card.
+/// The one main action on a screen (a black pill), or with `tinted` a quiet outlined one. `compact` is for
+/// buttons inside a card.
 struct PrimaryButtonStyle: ButtonStyle {
     var tinted = false
     var compact = false
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(compact ? .subheadline.weight(.semibold) : .body.weight(.semibold))
-            .padding(.horizontal, compact ? 16 : 20).padding(.vertical, compact ? 9 : 13)
+            .font(compact ? Theme.text(.subheadline) : Theme.text(.body))
+            .kerning(0.5)
+            .padding(.horizontal, compact ? 16 : 20).padding(.vertical, compact ? 10 : 16)
             .frame(maxWidth: .infinity)
             .foregroundStyle(tinted ? Theme.accent : Theme.accentInk)
-            .background(tinted ? Theme.fill : Theme.accent, in: Capsule())
+            .background(tinted ? Color.clear : Theme.accent, in: Capsule())
+            .overlay(Capsule().strokeBorder(Theme.accent, lineWidth: tinted ? 1 : 0))
             .opacity(configuration.isPressed ? 0.75 : 1)
     }
 }
@@ -249,7 +251,7 @@ struct QuietTileLabel: View {
     var body: some View {
         VStack(spacing: 4) {
             Image(systemName: symbol).font(.system(size: 15, weight: .regular))
-            Text(title).font(.caption2.weight(.medium)).lineLimit(1).minimumScaleFactor(0.8)
+            Text(title).font(Theme.text(.caption2)).lineLimit(1).minimumScaleFactor(0.8)
         }
         .foregroundStyle(Theme.label)
         .frame(maxWidth: .infinity, minHeight: 50)
@@ -258,12 +260,12 @@ struct QuietTileLabel: View {
     }
 }
 
-/// Small caps above a heading ("THIS WEEKEND · 24–25 OCT").
+/// A quiet grey line above a heading ("This weekend · 24–25 Oct"), in sentence case like an editorial caption.
 struct Eyebrow: View {
     let text: String
     var color: Color = Theme.gold
     var body: some View {
-        Text(text.uppercased()).font(.system(size: 10, weight: .semibold)).kerning(1.4).foregroundStyle(color)
+        Text(text).font(Theme.text(.footnote)).kerning(0.3).foregroundStyle(color)
     }
 }
 
@@ -295,8 +297,8 @@ struct AccentTextButton: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 5) {
-                if let symbol { Image(systemName: symbol).font(.footnote.weight(.semibold)) }
-                Text(title).font(.footnote.weight(.semibold))
+                if let symbol { Image(systemName: symbol).font(Theme.text(.footnote)) }
+                Text(title).font(Theme.text(.footnote))
             }
             .foregroundStyle(Theme.link)
             .frame(minHeight: 36)
@@ -316,7 +318,7 @@ struct EmptyState<Actions: View>: View {
         VStack(spacing: 12) {
             SymbolTile(symbol: symbol, color: color, size: 56)
             Text(title).font(Theme.serif(24))
-            Text(text).font(.subheadline).foregroundStyle(Theme.secondary).multilineTextAlignment(.center)
+            Text(text).font(Theme.text(.subheadline)).foregroundStyle(Theme.secondary).multilineTextAlignment(.center)
             actions()
         }
         .padding(.horizontal, 28).padding(.vertical, 36)
@@ -338,13 +340,13 @@ struct ToastView: View {
         HStack(spacing: 8) {
             Image(systemName: toast.isError ? "exclamationmark.circle.fill" : "checkmark.circle.fill")
                 .foregroundStyle(toast.isError ? Theme.warn : Theme.ok)
-            Text(toast.text).font(.subheadline.weight(.medium)).multilineTextAlignment(.leading)
+            Text(toast.text).font(Theme.text(.subheadline)).multilineTextAlignment(.leading)
             if let label = toast.actionLabel, let action = toast.action {
                 Button(label) {
                     action()
                     withAnimation { store.toast = nil }
                 }
-                .font(.subheadline.weight(.bold)).foregroundStyle(Theme.link)
+                .font(Theme.text(.subheadline)).foregroundStyle(Theme.link)
                 .padding(.leading, 4)
             }
         }
@@ -399,9 +401,9 @@ struct RoundIconButton: View {
         Button(action: action) {
             Image(systemName: symbol).font(.system(size: 14, weight: .regular))
                 .foregroundStyle(Theme.label)
-                .frame(width: 34, height: 34)
-                .background(Theme.cell, in: Circle())
-                .overlay(Circle().strokeBorder(Theme.border))
+                .frame(width: 36, height: 36)
+                .background(Theme.background, in: Circle())
+                .shadow(color: .black.opacity(0.08), radius: 8, y: 3)
                 .frame(width: 40, height: 40)
                 .contentShape(Rectangle())
         }

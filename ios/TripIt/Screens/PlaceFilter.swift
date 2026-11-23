@@ -153,7 +153,7 @@ struct PlaceFilterBar: View {
             }
         } label: {
             Label(sort.label, systemImage: "arrow.up.arrow.down")
-                .font(.subheadline.weight(.medium))
+                .font(Theme.text(.subheadline))
                 .padding(.horizontal, 12).padding(.vertical, 7)
                 .background(Theme.cell, in: Capsule())
                 .overlay(Capsule().strokeBorder(Theme.fill, lineWidth: 1))
@@ -223,8 +223,8 @@ private struct FilterChipLabel: View {
     let isOn: Bool
     var body: some View {
         HStack(spacing: 4) {
-            Text(text).font(.subheadline.weight(.medium))
-            Image(systemName: "chevron.down").font(.caption2.weight(.bold))
+            Text(text).font(Theme.text(.subheadline))
+            Image(systemName: "chevron.down").font(Theme.text(.caption2))
         }
         .padding(.horizontal, 12).padding(.vertical, 7)
         .foregroundStyle(isOn ? Theme.accentInk : Theme.label)

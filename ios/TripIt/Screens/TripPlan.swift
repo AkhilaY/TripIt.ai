@@ -38,7 +38,7 @@ struct TripPlan: View {
             Section {
                 HStack {
                     Label(plannedBy, systemImage: trip.plannedBy == "claude" ? "sparkles" : "calendar")
-                        .font(.subheadline).foregroundStyle(Theme.secondary)
+                        .font(Theme.text(.subheadline)).foregroundStyle(Theme.secondary)
                     Spacer()
                     Picker("Travel", selection: $travelMode) {
                         Image(systemName: "figure.walk").tag("walk")
@@ -50,7 +50,7 @@ struct TripPlan: View {
                     .frame(width: 168)
                 }
                 if let notes = trip.planNotes {
-                    Text(notes).font(.subheadline).foregroundStyle(Theme.label)
+                    Text(notes).font(Theme.text(.subheadline)).foregroundStyle(Theme.label)
                 }
                 if !trip.route.isEmpty { TripRouteStrip(stops: trip.route) { sheet = .route } }
             }
@@ -79,7 +79,7 @@ struct TripPlan: View {
                         Spacer()
                         if editMode?.wrappedValue.isEditing != true {
                             Button { Task { await fitThemIn() } } label: { Label("Fit them in", systemImage: "wand.and.rays") }
-                                .font(.footnote.weight(.semibold)).foregroundStyle(Theme.link).textCase(nil)
+                                .font(Theme.text(.footnote)).foregroundStyle(Theme.link).textCase(nil)
                         }
                     }
                 } footer: {
@@ -126,7 +126,7 @@ struct TripPlan: View {
                             Text(booking.title).foregroundStyle(Theme.label)
                             Text([booking.startAt.flatMap(timePart).map(Fmt.clock), booking.origin, booking.destination]
                                 .compactMap { $0 }.joined(separator: " · "))
-                                .font(.caption).foregroundStyle(Theme.secondary)
+                                .font(Theme.text(.caption)).foregroundStyle(Theme.secondary)
                         }
                     }
                 }
@@ -164,11 +164,11 @@ struct TripPlan: View {
                     StopHeading(stop: stop, start: trip.startDate).padding(.bottom, 10)
                 }
                 if let date = Fmt.tripDay(start: trip.startDate, day: day) {
-                    Text(date.uppercased()).font(.caption.weight(.bold)).foregroundStyle(Theme.gold)
+                    Text(date.uppercased()).font(Theme.text(.caption)).foregroundStyle(Theme.gold)
                 }
                 Text("Day \(day)").font(Theme.serif(24)).foregroundStyle(Theme.label)
                 if let title = trip.title(of: day) {
-                    Text(title).font(.subheadline).foregroundStyle(Theme.secondary)
+                    Text(title).font(Theme.text(.subheadline)).foregroundStyle(Theme.secondary)
                 }
             }
             .textCase(nil)
@@ -259,7 +259,7 @@ struct TripPlan: View {
                 Links.open(c.url)
             } label: {
                 HStack(spacing: 6) {
-                    Image(systemName: modeSymbol).font(.caption)
+                    Image(systemName: modeSymbol).font(Theme.text(.caption))
                     if let time {
                         Text("\(time.estimated ? "≈ " : "")\(Fmt.duration(time.durationS)) · \(Fmt.distance(Double(time.distanceM)))")
                     } else {
@@ -267,7 +267,7 @@ struct TripPlan: View {
                     }
                     Text("to \(to.name)").lineLimit(1)
                 }
-                .font(.caption)
+                .font(Theme.text(.caption))
                 .foregroundStyle(Theme.secondary)
                 .padding(.leading, 40)
             }
@@ -313,20 +313,20 @@ struct StopRow: View {
         let category = Category(place.category)
         HStack(spacing: 12) {
             Text("\(number)")
-                .font(.caption.weight(.bold)).foregroundStyle(.white)
+                .font(Theme.text(.caption)).foregroundStyle(.white)
                 .frame(width: 24, height: 24)
                 .background(category.color, in: Circle())
             PlaceThumb(place: place, size: 52)
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 4) {
-                    Text(place.name).font(.body.weight(.semibold)).strikethrough(place.visited).lineLimit(1)
-                    if place.mustDo { Image(systemName: "star.fill").font(.caption).foregroundStyle(Theme.gold) }
+                    Text(place.name).font(Theme.text(.body)).strikethrough(place.visited).lineLimit(1)
+                    if place.mustDo { Image(systemName: "star.fill").font(Theme.text(.caption)).foregroundStyle(Theme.gold) }
                 }
                 Text([place.startTime.map(Fmt.clock) ?? place.timeOfDay?.capitalized, category.label, place.neighborhood]
                     .compactMap { $0 }.joined(separator: " · "))
-                    .font(.subheadline).foregroundStyle(Theme.secondary).lineLimit(1)
+                    .font(Theme.text(.subheadline)).foregroundStyle(Theme.secondary).lineLimit(1)
                 if let note = place.dayNote {
-                    Text(note).font(.footnote).italic().foregroundStyle(Theme.secondary).lineLimit(2)
+                    Text(note).font(Theme.text(.footnote)).italic().foregroundStyle(Theme.secondary).lineLimit(2)
                 }
             }
         }
@@ -349,7 +349,7 @@ struct TripRouteStrip: View {
                             HStack(spacing: 4) {
                                 Rectangle().fill(Theme.tertiary.opacity(0.6)).frame(width: 14, height: 1)
                                 Image(systemName: stop.travelSymbol).font(.system(size: 10, weight: .semibold))
-                                if let minutes = stop.travelMinutes, minutes > 0 { Text(TravelHome.duration(minutes)).font(.caption2) }
+                                if let minutes = stop.travelMinutes, minutes > 0 { Text(TravelHome.duration(minutes)).font(Theme.text(.caption2)) }
                                 Rectangle().fill(Theme.tertiary.opacity(0.6)).frame(width: 14, height: 1)
                             }
                             .foregroundStyle(Theme.secondary)
@@ -357,7 +357,7 @@ struct TripRouteStrip: View {
                         VStack(alignment: .leading, spacing: 1) {
                             Text(stop.city).font(Theme.serif(17)).foregroundStyle(Theme.label)
                             Text(Fmt.plural(stop.days, "day"))
-                                .font(.caption2).foregroundStyle(Theme.secondary)
+                                .font(Theme.text(.caption2)).foregroundStyle(Theme.secondary)
                         }
                     }
                 }
@@ -378,7 +378,7 @@ struct StopHeading: View {
         HStack(alignment: .firstTextBaseline) {
             Text(stop.city).font(Theme.serif(28)).foregroundStyle(Theme.label)
             Spacer()
-            Text(dates).font(.caption.weight(.semibold)).foregroundStyle(Theme.secondary)
+            Text(dates).font(Theme.text(.caption)).foregroundStyle(Theme.secondary)
         }
         .padding(.top, 10)
         .overlay(alignment: .top) { Rectangle().fill(Theme.border).frame(height: 1) }
@@ -403,14 +403,14 @@ struct TravelDayRow: View {
         HStack(spacing: 12) {
             SymbolTile(symbol: stop.travelSymbol, color: Theme.blue)
             VStack(alignment: .leading, spacing: 2) {
-                Text("Travel day · \(stop.travelLabel.lowercased()) to \(stop.city)").font(.subheadline.weight(.semibold)).foregroundStyle(Theme.label)
+                Text("Travel day · \(stop.travelLabel.lowercased()) to \(stop.city)").font(Theme.text(.subheadline)).foregroundStyle(Theme.label)
                 Text([from.map { "From \($0)" }, stop.travelMinutes.map { "about \(TravelHome.duration($0))" }, stop.travelNote]
                     .compactMap { $0 }.joined(separator: " · "))
-                    .font(.caption).foregroundStyle(Theme.secondary).lineLimit(2)
+                    .font(Theme.text(.caption)).foregroundStyle(Theme.secondary).lineLimit(2)
             }
             Spacer(minLength: 4)
             Button(action: onTicket) {
-                Text(ticket == nil ? "Add ticket" : "Ticket").font(.footnote.weight(.semibold)).foregroundStyle(ticket == nil ? Theme.link : Theme.ok)
+                Text(ticket == nil ? "Add ticket" : "Ticket").font(Theme.text(.footnote)).foregroundStyle(ticket == nil ? Theme.link : Theme.ok)
             }
             .buttonStyle(.borderless)
         }
@@ -424,12 +424,12 @@ struct ClosureLine: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            Image(systemName: "exclamationmark.circle").font(.caption)
-            Text(closure.message).font(.caption.weight(.medium))
+            Image(systemName: "exclamationmark.circle").font(Theme.text(.caption))
+            Text(closure.message).font(Theme.text(.caption))
             Spacer(minLength: 4)
             if let day = closure.moveToDay {
                 Button { onMove(day) } label: {
-                    Text("Move it to \(closure.moveToLabel ?? "Day \(day)")").font(.caption.weight(.semibold)).foregroundStyle(Theme.link)
+                    Text("Move it to \(closure.moveToLabel ?? "Day \(day)")").font(Theme.text(.caption)).foregroundStyle(Theme.link)
                 }
                 .buttonStyle(.borderless)
             }

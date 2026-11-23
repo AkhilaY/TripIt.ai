@@ -51,4 +51,4 @@ jobs:
       - name: Re-run the downloads
         run: |
           B64=$(base64 -w0 .github/diagnose/saves_check.py)
-          flyctl ssh console --app "$APP" -C "sh -c 'echo $B64 | base64 -d > /tmp/saves_check.py && cd /app && timeout 3600 python /tmp/saves_check.py $COUNT'" 2>&1
+          flyctl ssh console --app "$APP" -C "sh -c 'echo $B64 | base64 -d > /tmp/saves_check.py && cd /app && timeout 3600 python /tmp/saves_check.py $COUNT 2>/dev/null'" 2>&1

@@ -70,6 +70,11 @@ def embed_check(url: str) -> str:
 
 
 def main() -> None:
+    # yt-dlp and the app's own logs name posts in their errors; this log is public, so they're silenced.
+    import logging
+    import os
+    logging.disable(logging.CRITICAL)
+    sys.stderr = open(os.devnull, "w")
     settings = get_settings()
     db = sqlite3.connect(f"file:{settings.database_path}?mode=ro", uri=True)
     db.row_factory = sqlite3.Row

@@ -11,7 +11,6 @@ struct HomeView: View {
     @State private var settingHome = false
     @State private var homeCity = ""
     @State private var tripEdits: [HomeEdit] = []
-    @State private var headerShowing = true  // the photo is behind the status bar, so its text goes white
     @State private var pull: CGFloat = 0  // how far the page is pulled down past the top; the scenery stretches with it
 
     var body: some View {
@@ -28,10 +27,8 @@ struct HomeView: View {
             .ignoresSafeArea(edges: .top)
         }
         .background(Theme.background.ignoresSafeArea())
-        // A clear but "visible" bar lets its colour scheme set the status bar: white over the scenery, dark below it.
-        .toolbarBackground(Color.clear, for: .navigationBar)
-        .toolbarBackground(.visible, for: .navigationBar)
-        .toolbarColorScheme(headerShowing ? .dark : .light, for: .navigationBar)
+        // No bar on Home: the date sits just under the clock, and the profile button isn't behind an empty bar.
+        .toolbar(.hidden, for: .navigationBar)
         .refreshable { await store.refresh() }
         .task(id: store.upcomingTrips.first?.id) {
             guard let trip = store.upcomingTrips.first else { tripEdits = []; return }
@@ -108,12 +105,11 @@ struct HomeView: View {
                     .padding(.top, 6)
                     .accessibilityHidden(true)
             }
-            .padding(.horizontal, 20).padding(.top, top + 6).padding(.bottom, 26)
+            .padding(.horizontal, 20).padding(.top, top + 2).padding(.bottom, 26)
         }
-        .frame(height: 330 + top + pull)
+        .frame(height: 360 + top + pull)
         .clipShape(UnevenRoundedRectangle(bottomLeadingRadius: 28, bottomTrailingRadius: 28, style: .continuous))
         .padding(.top, -pull)  // grows upward into the pull, so nothing white shows above it
-        .onGeometryChange(for: Bool.self) { $0.frame(in: .global).maxY > top + 30 } action: { headerShowing = $0 }
     }
 
     /// Drawn places for the header: your next trip's cities and home first, then others, a new order each day.

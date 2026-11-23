@@ -16,11 +16,21 @@ actor ImageLoader {
         config.httpMaximumConnectionsPerHost = 6
         return URLSession(configuration: config)
     }()
-    private let cache = NSCache<NSURL, UIImage>()
+    /// Photos already decoded this run. Views read it while drawing, so a photo seen before shows at once instead
+    /// of flashing its placeholder and fading in again (NSCache is safe to read from any thread).
+    private static let memory: NSCache<NSURL, UIImage> = {
+        let cache = NSCache<NSURL, UIImage>()
+        cache.totalCostLimit = 120 << 20
+        return cache
+    }()
     private var running: [URL: Task<UIImage?, Never>] = [:]
 
+    static func cached(_ url: URL?) -> UIImage? {
+        url.flatMap { memory.object(forKey: $0 as NSURL) }
+    }
+
     func image(_ url: URL) async -> UIImage? {
-        if let hit = cache.object(forKey: url as NSURL) { return hit }
+        if let hit = Self.cached(url) { return hit }
         if let task = running[url] { return await task.value }
         let task = Task<UIImage?, Never> {
             guard let (data, response) = try? await Self.session.data(from: url),
@@ -31,18 +41,29 @@ actor ImageLoader {
         running[url] = task
         let image = await task.value
         running[url] = nil
-        if let image { cache.setObject(image, forKey: url as NSURL) }
+        if let image {
+            let bytes = Int(image.size.width * image.size.height * image.scale * image.scale * 4)
+            Self.memory.setObject(image, forKey: url as NSURL, cost: bytes)
+        }
         return image
     }
 }
 
+/// A photo that arrived over the network, and the address it came from.
+private struct LoadedPhoto {
+    let key: [URL]
+    let image: UIImage
+}
+
 /// A photo from TripIt (fills its frame; shows the placeholder until it loads or if it can't).
+/// One already on the phone shows straight away; only a fresh download fades in.
 struct RemoteImage<Placeholder: View>: View {
     let url: URL?
     @ViewBuilder var placeholder: () -> Placeholder
-    @State private var image: UIImage?
+    @State private var loaded: LoadedPhoto?
 
     var body: some View {
+        let image = ImageLoader.cached(url) ?? (url != nil && loaded?.key == [url!] ? loaded?.image : nil)
         ZStack {
             placeholder()
             if let image {
@@ -50,9 +71,9 @@ struct RemoteImage<Placeholder: View>: View {
             }
         }
         .task(id: url) {
-            image = nil
-            guard let url, let found = await ImageLoader.shared.image(url) else { return }
-            withAnimation(.easeOut(duration: 0.35)) { image = found }  // photos fade in over the stand-in
+            guard let url, ImageLoader.cached(url) == nil,
+                  let found = await ImageLoader.shared.image(url) else { return }
+            withAnimation(.easeOut(duration: 0.35)) { loaded = LoadedPhoto(key: [url], image: found) }
         }
     }
 }
@@ -61,9 +82,10 @@ struct RemoteImage<Placeholder: View>: View {
 struct ChainImage<Placeholder: View>: View {
     let urls: [URL]
     @ViewBuilder var placeholder: () -> Placeholder
-    @State private var image: UIImage?
+    @State private var loaded: LoadedPhoto?
 
     var body: some View {
+        let image = urls.lazy.compactMap { ImageLoader.cached($0) }.first ?? (loaded?.key == urls ? loaded?.image : nil)
         ZStack {
             placeholder()
             if let image {
@@ -71,10 +93,10 @@ struct ChainImage<Placeholder: View>: View {
             }
         }
         .task(id: urls) {
-            image = nil
+            guard !urls.contains(where: { ImageLoader.cached($0) != nil }) else { return }
             for url in urls {
                 if let found = await ImageLoader.shared.image(url) {
-                    withAnimation(.easeOut(duration: 0.35)) { image = found }
+                    withAnimation(.easeOut(duration: 0.35)) { loaded = LoadedPhoto(key: urls, image: found) }
                     return
                 }
             }

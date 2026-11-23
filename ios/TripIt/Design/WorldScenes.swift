@@ -223,10 +223,17 @@ enum WorldScenes {
             }
         }
         // Tram 28
+        p.stroke("M0 368 L390 356", 0x3A2A22, width: 0.8)
+        p.stroke("M165 398 L178 362", 0x3A2A22, width: 1.2)
+        p.fill(Path(roundedRect: CGRect(x: 118, y: 396, width: 94, height: 6), cornerRadius: 3), 0xE8E2D0)
         p.fill(Path(roundedRect: CGRect(x: 120, y: 400, width: 90, height: 34), cornerRadius: 6), 0xF2C230)
-        p.rect(126, 406, 78, 12, 0xFFF2C0)
-        p.rect(110, 434, 110, 4, 0x3A2A22)
-        p.stroke("M165 400 L175 380 L60 360", 0x3A2A22, width: 1)
+        var pane: CGFloat = 126
+        while pane < 204 { p.rect(pane, 406, 11, 12, 0xFFF2C0); pane += 13 }
+        p.rect(120, 420, 90, 2, 0xC9302C)
+        p.rect(188, 422, 10, 12, 0x8A6A2A)
+        p.rect(110, 434, 110, 3, 0x3A2A22)
+        p.disc(140, 436, 4, 0x2A2220)
+        p.disc(190, 436, 4, 0x2A2220)
         p.grain()
     }
 
@@ -281,9 +288,11 @@ enum WorldScenes {
             p.fill("M\(x - 8) \(x == 195 ? 130 : 180) Q\(x) \(x == 195 ? 112 : 166) \(x + 8) \(x == 195 ? 130 : 180) Z", 0xF6D3C0)
         }
         p.rect(0, 400, Painter.W, 60, 0x8A5A4A)
-        p.fill(Path(roundedRect: CGRect(x: 20, y: 404, width: 40, height: 18), cornerRadius: 4), 0x2F6B8A)
-        p.disc(28, 424, 4, 0x1A1A1A)
-        p.disc(52, 424, 4, 0x1A1A1A)
+        p.rect(0, 400, Painter.W, 2, 0x6E4438)
+        for x: CGFloat in [10, 334, 362] {
+            p.fill("M\(x) 400 L\(x) 372 Q\(x + 9) 360 \(x + 18) 372 L\(x + 18) 400 Z", 0xD98470)
+            p.fill("M\(x + 4) 400 L\(x + 4) 376 Q\(x + 9) 368 \(x + 14) 376 L\(x + 14) 400 Z", 0x7A3A30)
+        }
         p.birds(9, 120, 70, spread: 160, 0x5A3A3A, seed: "pigeons")
         p.grain()
     }
@@ -339,9 +348,16 @@ enum WorldScenes {
         p.fill("M300 240 L370 330 L330 330 Z", 0xA8724A)
         p.fill("M10 330 L50 285 L90 330 Z", 0xB88252)
         p.fill("M0 460 L0 330 Q200 316 390 334 L390 460 Z", 0xE0B07A)
-        // A camel and its rider
-        p.fill("M90 400 Q100 380 116 386 Q124 374 134 384 Q144 380 148 372 L154 374 L150 392 L148 412 L144 412 L142 396 L104 398 L102 412 L98 412 Z", 0x3A2A22)
-        p.fill("M122 372 L128 360 L132 374 Z", 0x3A2A22)
+        p.fill("M0 460 L0 380 Q110 352 230 374 Q320 390 390 366 L390 460 Z", 0xD49E68)
+        p.stroke("M0 380 Q110 352 230 374 Q320 390 390 366", 0xF2CC96, width: 1)
+        // Date palms at the edge of the plateau
+        for (x, h) in [(CGFloat(28), CGFloat(70)), (52, 54), (356, 62)] {
+            let top = 340 - h
+            p.stroke("M\(x) 340 Q\(x + 4) \(top + h / 2) \(x + 1) \(top)", 0x5A4030, width: 2.4)
+            for (dx, dy) in [(-16.0, 8.0), (-12.0, -6.0), (0.0, -10.0), (12.0, -6.0), (16.0, 8.0)] {
+                p.stroke("M\(x + 1) \(top) Q\(x + 1 + CGFloat(dx) / 2) \(top + CGFloat(dy) - 6) \(x + 1 + CGFloat(dx)) \(top + CGFloat(dy))", 0x4A5A3A, width: 2)
+            }
+        }
         p.grain()
     }
 
@@ -435,16 +451,41 @@ enum WorldScenes {
             q.rect(248, 70, 2, 22, 0x3A3E48)
             q.disc(249, 156, 11, 0xF6E6B8)
             q.stroke("M249 156 L249 149 M249 156 L254 158", 0x3A3E48, width: 1.2)
+            // The Eye on the far bank: a spoked wheel with its pods, held up by an A-frame
+            let cx: CGFloat = 328, cy: CGFloat = 220, r: CGFloat = 58
+            q.rect(276, 300, 114, 10, 0x3A3E48)
+            q.stroke("M\(cx) \(cy) L\(cx - 26) 302 M\(cx) \(cy) L\(cx + 22) 302", 0x3A3E48, width: 3)
+            var spokes = Path()
+            for i in 0..<16 {
+                let a = Double(i) * .pi / 8
+                spokes.move(to: CGPoint(x: cx, y: cy))
+                spokes.addLine(to: CGPoint(x: cx + r * CGFloat(cos(a)), y: cy + r * CGFloat(sin(a))))
+            }
+            q.ctx.stroke(spokes, with: .color(Painter.color(0x3A3E48, 0.55)), lineWidth: 0.6)
+            for radius in [r, r - 5] {
+                q.ctx.stroke(Path(ellipseIn: CGRect(x: cx - radius, y: cy - radius, width: radius * 2, height: radius * 2)), with: .color(Painter.color(0x3A3E48, 0.9)), lineWidth: 1.4)
+            }
+            for i in 0..<32 {
+                let a = Double(i) * .pi / 16
+                let px = cx + (r + 3) * CGFloat(cos(a)), py = cy + (r + 3) * CGFloat(sin(a))
+                q.fill(Path(roundedRect: CGRect(x: px - 2.6, y: py - 1.8, width: 5.2, height: 3.6), cornerRadius: 1.6), 0x3A3E48)
+            }
+            q.disc(cx, cy, 4, 0x3A3E48)
         }
         westminster(p)
         p.water(310, top: 0x5E6670, bottom: 0x252A33, seed: "thames", shimmer: 0xFFD58A, glints: 70)
         p.reflect(310, opacity: 0.25, westminster)
-        // The Eye, and a red bus on the bridge
-        p.ctx.stroke(Path(ellipseIn: CGRect(x: 296, y: 206, width: 88, height: 88)), with: .color(Painter.color(0x3A3E48, 0.8)), lineWidth: 1.5)
-        p.rect(0, 350, Painter.W, 6, 0x3A3E48)
-        p.fill(Path(roundedRect: CGRect(x: 120, y: 326, width: 44, height: 24), cornerRadius: 3), 0xC8342C)
-        p.rect(124, 330, 36, 5, 0xFFE0B0, 0.8)
-        p.rect(124, 340, 36, 5, 0xFFE0B0, 0.8)
+        // Westminster Bridge: a low deck on stone arches, with its lamps lit
+        p.rect(0, 352, Painter.W, 7, 0x3A3E48)
+        p.rect(0, 349, Painter.W, 1.5, 0x3A3E48)
+        var arch: CGFloat = -20
+        while arch < Painter.W {
+            p.fill("M\(arch) 359 L\(arch + 60) 359 L\(arch + 60) 380 Q\(arch + 30) 362 \(arch) 380 Z", 0x3A3E48)
+            p.rect(arch + 26, 336, 1.5, 14, 0x3A3E48)
+            p.disc(arch + 26.75, 335, 2.2, 0xFFD58A)
+            p.glow(arch + 26.75, 335, 10, 0xFFD58A, 0.35)
+            arch += 60
+        }
         p.grain()
     }
 
@@ -751,7 +792,10 @@ enum WorldScenes {
                 x += 22
             }
         }
-        p.fill("M330 420 Q338 400 350 404 L356 396 L360 404 Q366 410 362 430 L358 430 L356 418 L340 418 L338 430 L334 430 Z", 0xF2E8D8)
+        for row in 0..<6 {
+            let y = 336 + CGFloat(row) * 18
+            p.stroke("M\(318 + CGFloat(row) * 4) \(y) Q360 \(y - 4) 390 \(y - 2)", 0x8A9A6A, width: 1.4)
+        }
         p.birds(3, 120, 120, spread: 120, 0x3A4A4A, seed: "condor")
         p.grain()
     }

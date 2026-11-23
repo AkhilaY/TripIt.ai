@@ -275,46 +275,47 @@ struct WorldSceneCanvas: View {
     }
 }
 
-/// A scene as a picture: drawn once per size, then kept, so scrolling and crossfades cost nothing.
+/// A scene as a picture, filling its frame. Each scene is drawn once at its own proportions and kept, then shown
+/// straight away wherever it's needed: no blank frame, no fade, and nothing redrawn as the header stretches.
 struct WorldSceneImage: View {
     let scene: WorldScene
     var body: some View {
-        GeometryReader { geo in
-            SceneImageContent(scene: scene, size: geo.size)
-        }
-        .accessibilityHidden(true)
-    }
-}
-
-private struct SceneImageContent: View {
-    let scene: WorldScene
-    let size: CGSize
-    @State private var image: UIImage?
-
-    var body: some View {
-        ZStack {
-            Color(hex: scene.base)
-            if let image { Image(uiImage: image).resizable().transition(.opacity) }
-        }
-        .task(id: "\(scene.id)-\(Int(size.width))x\(Int(size.height))") {
-            guard size.width > 1, size.height > 1 else { return }
-            let drawn = SceneCache.image(scene, size: size)
-            withAnimation(.easeOut(duration: 0.2)) { image = drawn }
-        }
+        Color(hex: scene.base)
+            .overlay {
+                if let image = SceneCache.image(scene) {
+                    Image(uiImage: image).resizable().scaledToFill()
+                }
+            }
+            .clipped()
+            .accessibilityHidden(true)
     }
 }
 
 @MainActor
 enum SceneCache {
-    private static let cache = NSCache<NSString, UIImage>()
+    private static let cache: NSCache<NSString, UIImage> = {
+        let cache = NSCache<NSString, UIImage>()
+        cache.totalCostLimit = 120 << 20
+        return cache
+    }()
 
-    static func image(_ scene: WorldScene, size: CGSize) -> UIImage? {
-        let key = "\(scene.id)-\(Int(size.width))x\(Int(size.height))" as NSString
+    /// The scene drawn at its design size (a little wider than a phone), sharp at the screen's scale.
+    static func image(_ scene: WorldScene) -> UIImage? {
+        let key = scene.id as NSString
         if let hit = cache.object(forKey: key) { return hit }
-        let renderer = ImageRenderer(content: WorldSceneCanvas(scene: scene).frame(width: size.width, height: size.height))
+        let renderer = ImageRenderer(content: WorldSceneCanvas(scene: scene).frame(width: Painter.W * 1.12, height: Painter.H * 1.12))
         renderer.scale = UIScreen.main.scale
         guard let image = renderer.uiImage else { return nil }
-        cache.setObject(image, forKey: key)
+        let bytes = Int(image.size.width * image.size.height * image.scale * image.scale * 4)
+        cache.setObject(image, forKey: key, cost: bytes)
         return image
+    }
+
+    /// Draws these ahead of time, a little at a time, so a crossfade never waits on one.
+    static func prepare(_ scenes: [WorldScene]) async {
+        for scene in scenes {
+            _ = image(scene)
+            try? await Task.sleep(for: .milliseconds(60))
+        }
     }
 }

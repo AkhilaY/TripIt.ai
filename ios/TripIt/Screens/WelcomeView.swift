@@ -99,7 +99,7 @@ struct WelcomeScenery<Content: View>: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var start = Date()
 
-    private let period = 6.0  // seconds on each scene
+    private let period = 9.0  // seconds on each scene
     private let fade = 1.4  // crossfade between scenes
 
     var body: some View {
@@ -115,9 +115,9 @@ struct WelcomeScenery<Content: View>: View {
             ZStack {
                 GeometryReader { geo in
                     ZStack {
-                        if elapsed >= period && local < fade {
-                            scene(previous, age: local + period, size: geo.size)
-                        }
+                        // The outgoing scene stays in place underneath, so the crossfade never inserts a view mid-fade.
+                        scene(previous, age: local + period, size: geo.size)
+                            .opacity(elapsed >= period && local < fade ? 1 : 0)
                         scene(current, age: local, size: geo.size)
                             .opacity(elapsed >= period ? min(1, local / fade) : 1)
                         LinearGradient(gradient: gradient, startPoint: .top, endPoint: .bottom)
@@ -128,6 +128,7 @@ struct WelcomeScenery<Content: View>: View {
                 content(current, textOpacity)
             }
         }
+        .task(id: world.map(\.id)) { await SceneCache.prepare(world) }
     }
 
     /// One scene, zooming in slowly (a little over 1.1× across its time on screen).

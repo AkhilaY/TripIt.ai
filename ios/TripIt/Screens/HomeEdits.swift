@@ -50,7 +50,10 @@ enum HomeEdits {
         }
 
         // The city most of your saves are in stands in for home until you set one.
-        let city = home ?? Dictionary(grouping: notBeen.filter { !$0.city.isEmpty }, by: \.city).max { $0.value.count < $1.value.count }?.key
+        // Dictionaries come back in a different order each time they're built, so everything below is sorted:
+        // the same saves always give the same edits in the same order, and a refresh doesn't reshuffle the cards.
+        let city = home ?? Dictionary(grouping: notBeen.filter { !$0.city.isEmpty }, by: \.city)
+            .max { ($0.value.count, $1.key) < ($1.value.count, $0.key) }?.key
         if let city {
             let here = notBeen.filter { PlaceFilter.normalize($0.city) == PlaceFilter.normalize(city) }
             add("coffee-\(city)", city, "Coffee in \(city)", "The cafés you've saved and haven't tried yet.",
@@ -60,7 +63,7 @@ enum HomeEdits {
             add("sweet-\(city)", city, "Something sweet", "Bakeries and dessert places you saved in \(city).",
                 here.filter { Category($0.category) == .dessert })
             let food = here.filter { Category($0.category) == .food }
-            for (cuisine, places) in Dictionary(grouping: food.filter { $0.cuisine != nil }, by: { $0.cuisine! }) {
+            for (cuisine, places) in Dictionary(grouping: food.filter { $0.cuisine != nil }, by: { $0.cuisine! }).sorted(by: { $0.key < $1.key }) {
                 guard let c = Cuisine(rawValue: cuisine) else { continue }
                 add("cuisine-\(cuisine)-\(city)", city, "\(c.label) in \(city)", "Every \(c.label.lowercased()) place you've saved here.", places)
             }
@@ -74,7 +77,7 @@ enum HomeEdits {
         // Cities you've saved a lot in but haven't planned a trip to yet.
         let planned = Set(trips.flatMap { [$0.city] + ($0.stops ?? []).map(\.city) }.map(PlaceFilter.normalize))
         let elsewhere = Dictionary(grouping: notBeen.filter { !$0.city.isEmpty && $0.city != city }, by: \.city)
-        for (other, places) in elsewhere where places.count >= 5 && !planned.contains(PlaceFilter.normalize(other)) {
+        for (other, places) in elsewhere.sorted(by: { $0.key < $1.key }) where places.count >= 5 && !planned.contains(PlaceFilter.normalize(other)) {
             add("wish-\(other)", other, "One day in \(other)", "Your saves there, ready for when you go.", places, min: 5)
         }
 
@@ -89,7 +92,8 @@ enum HomeEdits {
             let ids = open.map(\.id)
             picks.insert(HomeEdit(id: "open-now", caption: "Right now · \(Fmt.plural(open.count, "place"))", title: "Open now near you",
                                   note: "Saved places that are open as you read this, the closest first.", placeIds: ids,
-                                  cover: open.first { !$0.photos.isEmpty }?.photos.first, city: open.first?.city ?? ""), at: 0)
+                                  cover: open.filter { !$0.photos.isEmpty }.min { $0.id < $1.id }?.photos.first,  // not the nearest: it changes as you move
+                                  city: open.first?.city ?? ""), at: 0)
         }
         return picks
     }

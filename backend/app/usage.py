@@ -38,7 +38,7 @@ LIMITS = {
 # Estimated Google Maps Platform list prices per call (per route element for travel times), before the free
 # monthly allowance, for the fields this app asks for.
 GOOGLE_PRICES = {
-    "locate": 0.035, "search": 0.032, "nearby": 0.035, "details": 0.020, "menu_photos": 0.032,
+    "locate": 0.035, "search_ids": 0.0, "search": 0.032, "nearby": 0.035, "details": 0.020, "menu_photos": 0.032,
     "photo": 0.007, "routes": 0.005,
 }
 # $ per million tokens: input, output, cache read, cache write (5-minute). Models not listed use the settings' prices.

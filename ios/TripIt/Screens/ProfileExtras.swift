@@ -289,7 +289,7 @@ struct UsageView: View {
         "lounges": "Lounges", "booking_needs": "Booking checks", "events": "What's on", "briefing": "Daily briefings", "other": "Other",
     ]
     static let googleLabels = [
-        "locate": "Place lookups", "search": "Place search", "nearby": "Discover nearby", "details": "Place details",
+        "locate": "Place lookups", "search_ids": "Place lookups (free ID search)", "search": "Place search", "nearby": "Discover nearby", "details": "Place details",
         "menu_photos": "Menu photo search", "photo": "Photos", "routes": "Travel times (per route)",
     ]
 

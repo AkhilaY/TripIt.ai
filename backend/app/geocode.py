@@ -148,6 +148,8 @@ class GooglePlacesGeocoder:
     FIELDS = ("places.displayName,places.formattedAddress,places.location,places.googleMapsUri,"
               "places.regularOpeningHours,places.photos,places.rating,places.userRatingCount,"
               "places.websiteUri,places.internationalPhoneNumber")
+    # Asking for the ID alone puts a search in Google's free "IDs only" tier.
+    ID_FIELDS = "places.id"
     # Search results only need enough to pick one; details() then fetches the rest for the chosen place.
     SEARCH_FIELDS = "places.id,places.displayName,places.formattedAddress,places.location,places.types"
     DETAIL_FIELDS = ("id,displayName,formattedAddress,location,googleMapsUri,regularOpeningHours,photos,types,"
@@ -163,12 +165,15 @@ class GooglePlacesGeocoder:
             self.meter(kind)
 
     async def locate(self, name, neighborhood, city, country, query=None) -> Optional[GeoMatch]:
+        """Finds the place in two steps: a search asking only for Google's ID (Google doesn't charge for that
+        kind of search), then the place's details. One search asking for everything bills at Google's most
+        expensive search tier, so this costs less per place."""
         text = query or ", ".join(p for p in (name, neighborhood, city, country) if p)
-        self._count("locate")
+        self._count("search_ids")
         try:
             response = await self.client.post(
                 self.URL,
-                headers={"X-Goog-Api-Key": self.api_key, "X-Goog-FieldMask": self.FIELDS},
+                headers={"X-Goog-Api-Key": self.api_key, "X-Goog-FieldMask": self.ID_FIELDS},
                 json={"textQuery": text, "pageSize": 1},
             )
             response.raise_for_status()
@@ -176,27 +181,17 @@ class GooglePlacesGeocoder:
             log.warning("Google Places lookup failed for %r: %s", text, e)
             return None
         places = response.json().get("places") or []
-        if not places:
+        if not places or not places[0].get("id"):
             return None
-        p = places[0]
-        loc = p.get("location") or {}
-        if "latitude" not in loc:
+        match = await self.details(f"google:{places[0]['id']}")
+        if match is None:
             return None
-        return GeoMatch(
-            name=(p.get("displayName") or {}).get("text") or name,
-            latitude=loc["latitude"],
-            longitude=loc["longitude"],
-            address=p.get("formattedAddress"),
-            maps_url=p.get("googleMapsUri"),
-            hours=from_google(p.get("regularOpeningHours")),
-            rating=p.get("rating"), rating_count=p.get("userRatingCount"),
-            website=clean_website(p.get("websiteUri")), phone=clean_phone(p.get("internationalPhoneNumber")),
-            photos=[
-                {"source": "google", "ref": photo["name"],
-                 "attribution": ", ".join(a.get("displayName", "") for a in photo.get("authorAttributions", [])) or None}
-                for photo in (p.get("photos") or [])[:4] if photo.get("name")
-            ],
-        )
+        match.name = match.name or name
+        # The post's own category and city stay as they were; only where it is and its details come from Google.
+        match.category = None
+        match.city = None
+        match.country = None
+        return match
 
     NEARBY_URL = "https://places.googleapis.com/v1/places:searchNearby"
     NEARBY_FIELDS = ("places.id,places.displayName,places.formattedAddress,places.location,places.rating,places.userRatingCount,"

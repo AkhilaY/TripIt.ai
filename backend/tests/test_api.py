@@ -540,22 +540,34 @@ def test_output_schemas_are_accepted_by_sdk():
         assert schema["additionalProperties"] is False
 
 
-async def test_google_geocoder_parses_response():
+def google_places(place: dict, seen: "list | None" = None):
+    """A stand-in for Google Places: the ID-only search finds "p1", and its details are `place`."""
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.headers["X-Goog-Api-Key"] == "k"
-        assert "places.location" in request.headers["X-Goog-FieldMask"]
-        return httpx.Response(200, json={"places": [{
-            "displayName": {"text": "Joe's Pizza"}, "formattedAddress": "7 Carmine St, New York",
-            "location": {"latitude": 40.73, "longitude": -74.0}, "googleMapsUri": "https://maps.google.com/?cid=1",
-            "rating": 4.5, "userRatingCount": 18000, "websiteUri": "https://www.joespizzanyc.com/",
-            "internationalPhoneNumber": "+1 212-366-1182",
-        }]})
+        if seen is not None:
+            seen.append((request.url.path, request.headers["X-Goog-FieldMask"]))
+        if request.url.path.endswith(":searchText"):
+            return httpx.Response(200, json={"places": [{"id": "p1"}]})
+        return httpx.Response(200, json={"id": "p1", **place})
+    return handler
 
+
+async def test_google_geocoder_parses_response():
+    seen = []
+    handler = google_places({
+        "displayName": {"text": "Joe's Pizza"}, "formattedAddress": "7 Carmine St, New York",
+        "location": {"latitude": 40.73, "longitude": -74.0}, "googleMapsUri": "https://maps.google.com/?cid=1",
+        "rating": 4.5, "userRatingCount": 18000, "websiteUri": "https://www.joespizzanyc.com/",
+        "internationalPhoneNumber": "+1 212-366-1182", "types": ["restaurant"],
+    }, seen)
     geo = GooglePlacesGeocoder("k", client=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
     match = await geo.locate("Joe's Pizza", "Greenwich Village", "New York", "USA")
     assert match.latitude == 40.73 and match.maps_url.startswith("https://maps.google.com")
     assert match.rating == 4.5 and match.rating_count == 18000
     assert match.website == "https://www.joespizzanyc.com/" and match.phone == "+1 212-366-1182"
+    # The search asks for the ID only (Google's free tier); details come from the place itself.
+    assert seen[0] == ("/v1/places:searchText", "places.id") and seen[1][0] == "/v1/places/p1"
+    assert match.place_id == "google:p1" and match.category is None and match.city is None
 
 
 async def test_nominatim_geocoder_skips_far_results():
@@ -862,12 +874,10 @@ def test_photo_merge_order_and_caps():
 
 
 async def test_google_photos_and_wikidata_image():
-    def google(request):
-        return httpx.Response(200, json={"places": [{
-            "displayName": {"text": "The Met"}, "location": {"latitude": 40.779, "longitude": -73.963},
-            "photos": [{"name": "places/abc/photos/p1", "authorAttributions": [{"displayName": "Ana P."}]}],
-        }]})
-
+    google = google_places({
+        "displayName": {"text": "The Met"}, "location": {"latitude": 40.779, "longitude": -73.963},
+        "photos": [{"name": "places/abc/photos/p1", "authorAttributions": [{"displayName": "Ana P."}]}],
+    })
     geo = GooglePlacesGeocoder("k", client=httpx.AsyncClient(transport=httpx.MockTransport(google)))
     m = await geo.locate("The Met", None, "New York", "USA")
     assert m.photos == [{"source": "google", "ref": "places/abc/photos/p1", "attribution": "Ana P."}]
@@ -3175,7 +3185,7 @@ async def test_google_calls_are_counted():
     geocoder.meter = calls.append
     await geocoder.search("Lucali")
     await geocoder.locate("Lucali", None, "New York", "USA")
-    assert calls == ["search", "locate"]
+    assert calls == ["search", "search_ids"]  # nothing found, so no details call
 
 
 # ---------- Trip routes (several stops) ----------

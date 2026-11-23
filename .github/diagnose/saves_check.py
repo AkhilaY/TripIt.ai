@@ -75,7 +75,8 @@ def main() -> None:
     db.row_factory = sqlite3.Row
     rows = db.execute(
         "SELECT url, MAX(created_at) AS last, "
-        "SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed, COUNT(*) AS tries "
+        "SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed, COUNT(*) AS tries, "
+        "(SELECT message FROM jobs j2 WHERE j2.url = jobs.url ORDER BY created_at DESC LIMIT 1) AS said "
         "FROM jobs WHERE url NOT LIKE 'upload:%' GROUP BY url ORDER BY last DESC LIMIT ?", (LIMIT,)
     ).fetchall()
     print(f"Checking {len(rows)} links shared most recently (each up to {PER_LINK}s)\n", flush=True)
@@ -91,6 +92,8 @@ def main() -> None:
             pool = ThreadPoolExecutor(max_workers=1)  # leave the stuck one behind
         took = time.monotonic() - start
         before = "failed before" if row["failed"] == row["tries"] else ("failed once" if row["failed"] else "worked before")
+        if row["failed"] and row["said"]:
+            before += ": " + re.sub(r"https?://\S+", "<link>", row["said"])[:90]
         results.append((platform_for(url), shape(url), outcome, why))
         extra = ""
         if platform_for(url) == "instagram":

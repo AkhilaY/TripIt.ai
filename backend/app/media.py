@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse
 
-from . import tiktok
+from . import instagram, tiktok
 from .config import Settings
 from .models import ReelMetadata
 
@@ -87,12 +87,20 @@ def download_reel(url: str, workdir: Path, settings: Settings) -> DownloadedReel
             info = ydl.extract_info(url, download=True)
         except yt_dlp.utils.DownloadError as e:
             log.warning("Media download failed, retrying for metadata only: %s", e)
+            if platform == "instagram" and _no_video(str(e)):
+                post = _instagram_photo_post(url, workdir)
+                if post:
+                    return post
             try:
                 info = ydl.extract_info(url, download=False)
             except yt_dlp.utils.DownloadError as e2:
                 log.warning("Metadata fetch failed too: %s", e2)
                 if platform == "tiktok" and "Unsupported URL" in str(e2):
                     return _tiktok_photo_post(url, workdir, settings)
+                if platform == "instagram":
+                    post = _instagram_photo_post(url, workdir)
+                    if post:
+                        return post
                 raise DownloadFailed(clean_error(str(e2))) from e2
             return DownloadedReel(metadata=_metadata(info, url, platform))
 
@@ -112,6 +120,21 @@ def _tiktok_photo_post(url: str, workdir: Path, settings: Settings) -> Downloade
     if not got or not (got[1] or got[0].caption):
         raise DownloadFailed("TikTok held back this photo post")
     metadata, slides = got
+    return DownloadedReel(metadata=metadata, image_paths=slides)
+
+
+def _no_video(message: str) -> bool:
+    low = message.lower()
+    return "no video" in low or "no video formats" in low
+
+
+def _instagram_photo_post(url: str, workdir: Path) -> Optional[DownloadedReel]:
+    """A picture or carousel post, read from Instagram's embed page (yt-dlp only knows videos)."""
+    got = instagram.download_photo_post(url, workdir)
+    if not got:
+        return None
+    metadata, slides = got
+    log.info("Instagram photo post: %d slides", len(slides))
     return DownloadedReel(metadata=metadata, image_paths=slides)
 
 

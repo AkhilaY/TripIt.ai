@@ -90,6 +90,8 @@ def main() -> None:
     for s, counts in sorted(by_shape.items()):
         total = sum(counts.values())
         print(f"  {s:28} {counts['ok']}/{total} full, {counts['caption']} caption only, {counts['failed']} failed")
+    full = sum(1 for _, _, outcome, _ in results if outcome not in ("FAILED", "caption only"))
+    print(f"\n  All: {full}/{len(results)} opened fully")
     reasons = collections.Counter(why for _, _, outcome, why in results if outcome != "video" and why)
     if reasons:
         print("\nWhy")

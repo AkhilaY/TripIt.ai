@@ -276,3 +276,41 @@ def test_edit_cover_prefers_a_saved_places_photo_over_an_expiring_google_link():
     assert curator._pick_cover({"ref": "places/a"}, items) == saved  # Claude's Google pick loses to a saved photo
     assert curator._pick_cover(None, items[:1]) == pick  # nothing saved: the pick is all there is
     assert curator._pick_cover(None, []) is None
+
+
+def test_instagram_photo_post_embed_is_read():
+    import json as _json
+    from app import instagram
+
+    assert instagram.shortcode("https://www.instagram.com/p/ABC123/?img_index=1") == "ABC123"
+    assert instagram.shortcode("https://instagram.com/reel/XYZ/") == "XYZ"
+    media = {"owner": {"username": "eats.nyc"},
+             "edge_media_to_caption": {"edges": [{"node": {"text": "3 cafés: Sey, Devoción, Abraço"}}]},
+             "edge_sidecar_to_children": {"edges": [
+                 {"node": {"is_video": False, "display_url": "https://cdn/1.jpg"}},
+                 {"node": {"is_video": True, "display_url": "https://cdn/v.jpg"}},
+                 {"node": {"is_video": False, "display_url": "https://cdn/2.jpg"}}]}}
+    page = 'x "contextJSON":' + _json.dumps(_json.dumps({"gql_data": {"shortcode_media": media}})) + ', y'
+    assert instagram.parse_embed(page) == (["https://cdn/1.jpg", "https://cdn/2.jpg"], "3 cafés: Sey, Devoción, Abraço", "eats.nyc")
+
+    # The plain embed page: the first picture and the caption.
+    plain = ('<img class="EmbeddedMediaImage" alt="" src="https://cdn/a.jpg?x=1&amp;y=2">'
+             '<div class="Caption"><a class="CaptionUsername" href="#">eats.nyc</a><br/>Sey Coffee &amp; more'
+             '<div class="CaptionComments"></div></div><span class="UsernameText">eats.nyc</span>')
+    assert instagram.parse_embed(plain) == (["https://cdn/a.jpg?x=1&y=2"], "Sey Coffee & more", "eats.nyc")
+
+
+def test_instagram_photo_post_downloads_slides(tmp_path):
+    import httpx
+    from app import instagram
+
+    page = '<img class="EmbeddedMediaImage" src="https://cdn/a.jpg"><div class="Caption">Pizza at Lucali<div class="CaptionComments">'
+
+    def handler(request):
+        if "embed" in request.url.path:
+            return httpx.Response(200, text=page)
+        return httpx.Response(200, content=b"\xff\xd8jpeg", headers={"content-type": "image/jpeg"})
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        meta, slides = instagram.download_photo_post("https://www.instagram.com/p/ABC/", tmp_path, client)
+    assert meta.caption == "Pizza at Lucali" and len(slides) == 1 and slides[0].read_bytes().startswith(b"\xff\xd8")

@@ -1,0 +1,38 @@
+name: Compare models for reading posts
+
+# Runs recent real saves through several models (and frame counts) on the server and compares the places found
+# and the cost, before changing which model reads posts. Prints only counts and costs. Costs real money
+# (about $0.10-0.20 per post across all arms). Run it from the Actions tab.
+on:
+  workflow_dispatch:
+    inputs:
+      count:
+        description: How many recent posts
+        default: "20"
+      arms:
+        description: model:frames to compare, the first is the baseline
+        default: "claude-opus-5-5:24 claude-opus-5-5:12 claude-sonnet-5-5:12 claude-haiku-5-5:12"
+
+jobs:
+  fly:
+    name: Compare on the server
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      APP: ${{ vars.FLY_APP_NAME }}
+      COUNT: ${{ github.event.inputs.count }}
+      ARMS: ${{ github.event.inputs.arms }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install flyctl
+        run: |
+          curl -fsSL https://fly.io/install.sh | sh
+          echo "$HOME/.fly/bin" >> "$GITHUB_PATH"
+      - name: Wake the server
+        run: curl -fsS -m 60 "https://$APP.fly.dev/health" || true
+      - name: Compare
+        run: |
+          case "$COUNT $ARMS" in *[!a-z0-9.:\ -]*) echo "Unexpected characters in the inputs"; exit 1;; esac
+          B64=$(base64 -w0 .github/diagnose/model_check.py)
+          flyctl ssh console --app "$APP" -C "sh -c 'echo $B64 | base64 -d > /tmp/model_check.py && cd /app && timeout 5000 python /tmp/model_check.py $COUNT $ARMS 2>/dev/null'" 2>&1

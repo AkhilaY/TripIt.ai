@@ -9,6 +9,7 @@ from typing import Optional
 
 from .config import Settings
 from .jobs import JobStore
+from .usage import CURRENT_JOB
 from .library import Library
 from .llm import ClaudeError, ClaudeService
 from .tiktok import fetch_cover
@@ -61,6 +62,7 @@ class Pipeline:
 
     async def run(self, job_id: str, url: str, shared_text: Optional[str]) -> None:
         async with self._semaphore:
+            token = CURRENT_JOB.set(job_id)
             try:
                 await self._run(job_id, url, shared_text)
             except (ClaudeError, JobFailed) as e:
@@ -68,6 +70,8 @@ class Pipeline:
             except Exception:
                 log.exception("Job %s failed", job_id)
                 self.store.update(job_id, status=JobStatus.failed, message="Something went wrong processing this reel")
+            finally:
+                CURRENT_JOB.reset(token)
         if self.on_finished:
             try:
                 await self.on_finished(self.store.get(job_id))

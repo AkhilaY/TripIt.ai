@@ -299,7 +299,7 @@ MIGRATIONS = {
     "users": [("apple_sub", "TEXT"), ("apple_token", "TEXT"), ("plan", "TEXT NOT NULL DEFAULT 'free'"),
               ("plus_expires_at", "TEXT"), ("appstore_account_token", "TEXT"), ("appstore_original_tx", "TEXT")],
     "reels": [("user_id", "TEXT")],
-    "jobs": [("user_id", "TEXT")],
+    "jobs": [("user_id", "TEXT"), ("ai_cost", "REAL NOT NULL DEFAULT 0"), ("google_cost", "REAL NOT NULL DEFAULT 0")],
     "push_subscriptions": [("user_id", "TEXT")],
 }
 
@@ -1015,6 +1015,20 @@ class Database:
             "cost_usd = cost_usd + excluded.cost_usd",
             (day, user_id, feature, calls, input_tokens, output_tokens, cache_read, cache_write, searches, cost),
         )
+
+    def add_job_cost(self, job_id: str, ai: float = 0.0, google: float = 0.0) -> None:
+        self._exec("UPDATE jobs SET ai_cost = ai_cost + ?, google_cost = google_cost + ? WHERE id = ?", (ai, google, job_id))
+
+    def save_costs(self, since_day: str) -> list[dict]:
+        """What finished saves cost on average since then, video links and screenshots apart (Google at list price)."""
+        rows = self._rows(
+            "SELECT CASE WHEN url LIKE 'upload:%' THEN 'screenshots' ELSE 'video' END AS kind, COUNT(*) AS saves, "
+            "AVG(ai_cost) AS ai, AVG(google_cost) AS google, SUM(ai_cost + google_cost) AS total "
+            "FROM jobs WHERE status = 'done' AND created_at >= ? AND (ai_cost > 0 OR google_cost > 0) GROUP BY kind",
+            (since_day,),
+        )
+        return [{"kind": r["kind"], "saves": r["saves"], "ai": round(r["ai"] or 0, 4), "google": round(r["google"] or 0, 4),
+                 "total": round(r["total"] or 0, 2)} for r in rows]
 
     def usage_cost(self, since_day: str, user_id: Optional[str] = None) -> float:
         """AI spend from since_day on (everyone's, or one person's); Google Maps calls aren't included."""

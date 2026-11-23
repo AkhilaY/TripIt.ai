@@ -183,7 +183,8 @@ class ClaudeService:
         text_parts.append("Extract every place recommended in this post.")
         content.append({"type": "text", "text": "\n\n".join(text_parts)})
 
-        return await self._parse(EXTRACT_SYSTEM, content, ExtractionResult, feature="import")
+        return await self._parse(EXTRACT_SYSTEM, content, ExtractionResult, feature="import",
+                                 model=self.settings.import_model or None, effort=self.settings.import_effort or None)
 
     async def plan_itinerary(self, request: PlanRequest) -> PlanResult:
         payload = {
@@ -325,24 +326,26 @@ class ClaudeService:
         if self.usage is not None:
             self.usage.check(feature)  # raises when a budget or today's limit is used up
 
-    def _record(self, feature: str, response) -> None:
+    def _record(self, feature: str, response, model: Optional[str] = None) -> None:
         if self.usage is not None:
-            self.usage.record(feature, getattr(response, "usage", None))
+            self.usage.record(feature, getattr(response, "usage", None), getattr(response, "model", None) or model)
 
     async def _parse(self, system: str, content: list[dict], output_type: type[T], effort: Optional[str] = None,
-                     messages: Optional[list[dict]] = None, feature: str = "other") -> T:
+                     messages: Optional[list[dict]] = None, feature: str = "other", model: Optional[str] = None) -> T:
         self._check(feature)
+        model = model or self.settings.claude_model
+        # Haiku has no server-side fallback for refusals; the others fall back to a model that can answer.
+        fallback = {} if "haiku" in model else {"betas": [FALLBACK_BETA], "fallbacks": "default"}
         try:
             response = await self.client.beta.messages.parse(
-                model=self.settings.claude_model,
+                model=model,
                 max_tokens=16000,
                 system=system,
                 messages=messages or [{"role": "user", "content": content}],
                 thinking={"type": "adaptive"},
                 output_config={"effort": effort or self.settings.claude_effort},
                 output_format=output_type,
-                betas=[FALLBACK_BETA],
-                fallbacks="default",
+                **fallback,
             )
         except anthropic.RateLimitError as e:
             raise ClaudeError("We're a little busy right now. Try again in a minute.") from e
@@ -355,7 +358,7 @@ class ClaudeService:
             log.error("Claude client error: %s", e)
             raise ClaudeError("This isn't available right now.") from e
 
-        self._record(feature, response)
+        self._record(feature, response, model)
         if response.stop_reason == "refusal":
             raise ClaudeError("We couldn't read this post.")
         if response.stop_reason == "max_tokens" or response.parsed_output is None:

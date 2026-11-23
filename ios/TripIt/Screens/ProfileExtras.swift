@@ -252,6 +252,7 @@ private struct UsageReport: Codable {
     struct Feature: Codable, Hashable { var feature: String; var calls: Int; var cost: Double; var inputTokens: Int; var outputTokens: Int; var searches: Int }
     struct Person: Codable, Hashable { var userId: String?; var email: String; var calls: Int; var costMonth: Double; var costToday: Double }
     struct Google: Codable, Hashable { var kind: String; var calls: Int; var cost: Double }
+    struct PerSave: Codable, Hashable { var kind: String; var saves: Int; var ai: Double; var google: Double; var total: Double }
 
     var month: String
     var monthCost: Double
@@ -265,6 +266,7 @@ private struct UsageReport: Codable {
     var people: [Person]
     var google: [Google]
     var googleCost: Double
+    var perSave: [PerSave]?
 
     /// A budget or limit. The decoder turns snake_case keys into camelCase, dictionary keys included, so both are tried.
     func value(_ key: String) -> Double? {
@@ -290,6 +292,11 @@ struct UsageView: View {
         "locate": "Place lookups", "search": "Place search", "nearby": "Discover nearby", "details": "Place details",
         "menu_photos": "Menu photo search", "photo": "Photos", "routes": "Travel times (per route)",
     ]
+
+    /// "$0.12", or "0.4¢" for less than a cent.
+    static func cents(_ n: Double) -> String {
+        n < 0.01 && n > 0 ? String(format: "%.1f¢", n * 100) : String(format: "$%.2f", n)
+    }
 
     static func money(_ n: Double?) -> String {
         guard let n else { return "no budget" }
@@ -317,6 +324,22 @@ struct UsageView: View {
                     Text("AI spend in \(Self.monthName(r.month))")
                 } footer: {
                     Text("Estimated from Claude's token counts. Your own use counts toward the budget, but per-person limits don't apply to you.")
+                }
+                if let perSave = r.perSave, !perSave.isEmpty {
+                    Section {
+                        ForEach(perSave, id: \.self) { p in
+                            LabeledContent {
+                                Text(Self.money(p.ai + p.google)).font(Theme.text(.headline))
+                            } label: {
+                                Text(p.kind == "video" ? "Video save" : "Screenshot save")
+                                Text("AI \(Self.cents(p.ai)) + Google \(Self.cents(p.google)) · \(p.saves) saves, \(Self.money(p.total)) in all")
+                            }
+                        }
+                    } header: {
+                        Text("Cost per save, last 30 days")
+                    } footer: {
+                        Text("Average for saves that finished. Google at list price, before its free monthly allowance.")
+                    }
                 }
                 Section("By day") {
                     ForEach(r.days, id: \.self) { d in LabeledContent(Fmt.shortDay(d.day), value: "\(Self.money(d.cost)) · \(d.calls) calls") }

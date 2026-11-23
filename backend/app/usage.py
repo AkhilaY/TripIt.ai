@@ -15,7 +15,12 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 from .config import Settings
+from contextvars import ContextVar
+
 from .db import CURRENT_USER, Database
+
+# The import being worked on, so its AI and Google costs add up to a cost per save.
+CURRENT_JOB: ContextVar[Optional[str]] = ContextVar("current_job", default=None)
 from .llm import ClaudeError
 
 log = logging.getLogger(__name__)
@@ -35,6 +40,12 @@ LIMITS = {
 GOOGLE_PRICES = {
     "locate": 0.035, "search": 0.032, "nearby": 0.035, "details": 0.020, "menu_photos": 0.032,
     "photo": 0.007, "routes": 0.005,
+}
+# $ per million tokens: input, output, cache read, cache write (5-minute). Models not listed use the settings' prices.
+MODEL_PRICES = {
+    "claude-opus-5-5": (4.0, 20.0, 0.20, 5.0),
+    "claude-sonnet-5-5": (2.0, 10.0, 0.10, 2.5),
+    "claude-haiku-5-5": (0.10, 0.50, 0.01, 0.125),
 }
 ALERT_LEVELS = (50, 80, 100)
 
@@ -109,7 +120,7 @@ class Usage:
 
     # ---------- Recording ----------
 
-    def price(self, usage: Any) -> tuple[dict[str, int], float]:
+    def price(self, usage: Any, model: Optional[str] = None) -> tuple[dict[str, int], float]:
         s = self.settings
         tokens = {
             "input_tokens": getattr(usage, "input_tokens", 0) or 0,
@@ -118,16 +129,20 @@ class Usage:
             "cache_write": getattr(usage, "cache_creation_input_tokens", 0) or 0,
             "searches": getattr(getattr(usage, "server_tool_use", None), "web_search_requests", 0) or 0,
         }
-        cost = (tokens["input_tokens"] * s.price_input_mtok + tokens["output_tokens"] * s.price_output_mtok
-                + tokens["cache_read"] * s.price_cache_read_mtok + tokens["cache_write"] * s.price_cache_write_mtok) / 1e6
+        p_in, p_out, p_read, p_write = MODEL_PRICES.get(model or "", (
+            s.price_input_mtok, s.price_output_mtok, s.price_cache_read_mtok, s.price_cache_write_mtok))
+        cost = (tokens["input_tokens"] * p_in + tokens["output_tokens"] * p_out
+                + tokens["cache_read"] * p_read + tokens["cache_write"] * p_write) / 1e6
         cost += tokens["searches"] * s.price_web_search_k / 1000
         return tokens, cost
 
-    def record(self, feature: str, usage: Any) -> None:
-        """Adds one Claude response (its .usage) to today's totals."""
+    def record(self, feature: str, usage: Any, model: Optional[str] = None) -> None:
+        """Adds one Claude response (its .usage) to today's totals, priced for the model that answered."""
         try:
-            tokens, cost = self.price(usage)
+            tokens, cost = self.price(usage, model)
             self.db.add_usage(_now().date().isoformat(), CURRENT_USER.get() or "", feature, cost=cost, **tokens)
+            if CURRENT_JOB.get():
+                self.db.add_job_cost(CURRENT_JOB.get(), ai=cost)
             self._alert()
         except Exception:
             log.exception("Couldn't record AI usage")
@@ -136,6 +151,8 @@ class Usage:
         try:
             self.db.add_usage(_now().date().isoformat(), CURRENT_USER.get() or "", f"google:{kind}", calls=count,
                               cost=GOOGLE_PRICES.get(kind, 0.0) * count)
+            if CURRENT_JOB.get():
+                self.db.add_job_cost(CURRENT_JOB.get(), google=GOOGLE_PRICES.get(kind, 0.0) * count)
         except Exception:
             log.exception("Couldn't record Google usage")
 
@@ -208,4 +225,5 @@ class Usage:
             "people": sorted(people.values(), key=lambda p: p["cost_month"], reverse=True),
             "google": sorted(kinds.values(), key=lambda k: k["cost"], reverse=True),
             "google_cost": round(sum(k["cost"] for k in kinds.values()), 4),
+            "per_save": self.db.save_costs((now.date() - timedelta(days=days - 1)).isoformat()),
         }

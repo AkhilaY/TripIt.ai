@@ -3526,3 +3526,20 @@ def test_privacy_terms_and_support_pages_are_public(client):
         assert "Send feedback" in r.text
     assert "auto-renewing" in client.get("/terms").text
     assert "Anthropic" in client.get("/privacy").text
+
+
+def test_usage_report_gives_cost_per_save(client):
+    from app.usage import CURRENT_JOB
+
+    job = import_reel(client)
+    usage = app.state.claude.usage
+    token = CURRENT_JOB.set(job["id"])
+    try:
+        usage.record("extract", SimpleNamespace(input_tokens=20_000, output_tokens=2_000))
+        usage.record_google("locate", 4)
+    finally:
+        CURRENT_JOB.reset(token)
+    r = client.get("/v1/admin/usage", headers=signup(client, "a@x.com", "secret"))
+    assert r.status_code == 200, r.text
+    video = next(r for r in r.json()["per_save"] if r["kind"] == "video")
+    assert video["saves"] == 1 and video["ai"] == pytest.approx(0.12) and video["google"] == pytest.approx(0.14)

@@ -13,6 +13,10 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     claude_model: str = "claude-opus-5-5"
     claude_effort: str = "medium"
+    # Reading posts for places (the most frequent call): its own model and effort, so it can run on a cheaper
+    # model than planning. Empty uses claude_model and claude_effort.
+    import_model: str = ""
+    import_effort: str = ""
     # Edits mix your saved places with ones recommended by travel and food publications, found with Claude's
     # web search (about $10 per 1,000 searches, a few per refresh; edits refresh at most once a day per trip).
     edits_web: bool = True

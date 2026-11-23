@@ -35,8 +35,20 @@ jobs:
           echo "$HOME/.fly/bin" >> "$GITHUB_PATH"
       - name: Wake the server
         run: curl -fsS -m 60 "https://$APP.fly.dev/health" || true
-      - name: Compare
+      - name: Start the comparison on the server (in the background, so a dropped connection doesn't stop it)
         run: |
           case "$COUNT $ARMS" in *[!a-z0-9.:\ -]*) echo "Unexpected characters in the inputs"; exit 1;; esac
           B64=$(base64 -w0 .github/diagnose/model_check.py)
-          flyctl ssh console --app "$APP" -C "sh -c 'echo $B64 | base64 -d > /tmp/model_check.py && cd /app && timeout 5000 python /tmp/model_check.py $COUNT $ARMS 2>/dev/null'" 2>&1
+          flyctl ssh console --app "$APP" -C "sh -c 'echo $B64 | base64 -d > /tmp/model_check.py && rm -f /tmp/model_check.log && cd /app && (setsid nohup python /tmp/model_check.py $COUNT $ARMS > /tmp/model_check.log 2>/dev/null &) && echo started'"
+      - name: Follow it until it finishes
+        run: |
+          shown=0
+          for i in $(seq 1 160); do
+            sleep 30
+            out=$(flyctl ssh console --app "$APP" -C "sh -c 'cat /tmp/model_check.log; echo; pgrep -f model_check.py >/dev/null && echo __RUNNING__ || echo __DONE__'" 2>/dev/null || true)
+            body=$(printf '%s\n' "$out" | grep -v '__RUNNING__\|__DONE__' | grep -v '^\[download\]')
+            total=$(printf '%s\n' "$body" | wc -l)
+            if [ "$total" -gt "$shown" ]; then printf '%s\n' "$body" | tail -n +$((shown + 1)); shown=$total; fi
+            case "$out" in *__DONE__*) exit 0;; esac
+          done
+          echo "Still running after 80 minutes; see /tmp/model_check.log on the server"

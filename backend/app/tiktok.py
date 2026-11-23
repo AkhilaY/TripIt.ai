@@ -51,18 +51,43 @@ def is_photo_post(url: str) -> bool:
     return bool(match and match.group(1) == "photo")
 
 
+# Short links sometimes send a server to TikTok's home page instead of the post; asking again (as another browser)
+# usually gets the real redirect.
+RESOLVE_AGENTS = (BROWSER_UA, "Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 "
+                  "(KHTML, like Gecko) Version/18.5 Mobile/15E148 Safari/604.1", BROWSER_UA)
+RESOLVE_PAUSE = 0.8
+
+
 def resolve(url: str) -> str:
     """Expands tiktok.com/t/… and vm.tiktok.com/… to the full post URL. Only follows redirects within TikTok."""
     if not is_short_link(url):
         return url
+    for attempt, agent in enumerate(RESOLVE_AGENTS):
+        if attempt:
+            time.sleep(RESOLVE_PAUSE)
+        current = _follow(url, agent)
+        if current is None:
+            return url
+        if ITEM_RE.search(urlparse(current).path):
+            break
+        log.info("TikTok sent %s to %s instead of the post (try %d)", url, current, attempt + 1)
+    else:
+        return url  # never reached the post; yt-dlp and oEmbed get the short link as it is
+    # Drop tracking parameters (?_r=1&_t=…).
+    parsed = urlparse(current)
+    return f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
+
+
+def _follow(url: str, agent: str) -> Optional[str]:
+    """Where a short link's redirects lead (within TikTok), or None if TikTok couldn't be reached."""
     current = url
-    with httpx.Client(timeout=15, headers={"User-Agent": BROWSER_UA}) as client:
+    with httpx.Client(timeout=15, headers={"User-Agent": agent}) as client:
         for _ in range(5):
             try:
                 response = client.get(current, follow_redirects=False)
             except httpx.HTTPError as e:
                 log.info("Couldn't expand %s: %s", url, e)
-                return url
+                return None
             location = response.headers.get("location")
             if response.status_code not in (301, 302, 303, 307, 308) or not location:
                 break
@@ -72,9 +97,7 @@ def resolve(url: str) -> str:
             current = nxt
             if not is_short_link(current):
                 break
-    # Drop tracking parameters (?_r=1&_t=…).
-    parsed = urlparse(current)
-    return f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
+    return current
 
 
 def cookies_for_tiktok(cookie_file: Optional[str]) -> dict[str, str]:

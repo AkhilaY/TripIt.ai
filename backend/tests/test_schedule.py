@@ -234,3 +234,29 @@ def test_cuisine_from_name_summary_and_dishes():
     assert cuisine_of("food", "Via Carota", "West Village trattoria", ["cacio e pepe"]) == "italian"
     assert cuisine_of("food", "Somewhere", "A lovely spot") is None
     assert cuisine_of("cafe", "Pizza Cafe", "coffee") is None  # only restaurants get a cuisine
+
+
+def test_tiktok_short_link_retries_when_sent_to_home_page(monkeypatch):
+    import httpx
+    from app import tiktok
+    answers = iter([("https://www.tiktok.com/?_r=1", 302),
+                    ("https://www.tiktok.com/@someone/photo/7695188109977226518?_r=1&_t=x", 301)])
+
+    def handler(request):
+        location, status = next(answers)
+        return httpx.Response(status, headers={"location": location})
+
+    real = httpx.Client
+    monkeypatch.setattr(tiktok.httpx, "Client", lambda **kw: real(transport=httpx.MockTransport(handler), **kw))
+    monkeypatch.setattr(tiktok, "RESOLVE_PAUSE", 0)
+    assert tiktok.resolve("https://www.tiktok.com/t/ZPNrrb5w7/") == "https://www.tiktok.com/@someone/photo/7695188109977226518"
+
+
+def test_tiktok_short_link_kept_when_it_never_reaches_the_post(monkeypatch):
+    import httpx
+    from app import tiktok
+    real = httpx.Client
+    handler = lambda request: httpx.Response(302, headers={"location": "https://www.tiktok.com/?_r=1"})
+    monkeypatch.setattr(tiktok.httpx, "Client", lambda **kw: real(transport=httpx.MockTransport(handler), **kw))
+    monkeypatch.setattr(tiktok, "RESOLVE_PAUSE", 0)
+    assert tiktok.resolve("https://www.tiktok.com/t/ZPNrrb5w7/") == "https://www.tiktok.com/t/ZPNrrb5w7/"

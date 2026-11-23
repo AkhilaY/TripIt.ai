@@ -4,7 +4,7 @@ Run on the server from /app: python model_check.py [how many posts] [arm ...], a
 claude-opus-5-5:24 claude-haiku-5-5:12. The first arm is the baseline. For each post it downloads once, then asks
 each arm for the places and prints how many it found, how many of the baseline's it also found, and what it cost.
 Only counts and costs are printed, never links or place names (this repository's logs are public). Nothing is saved.
-Costs real money: roughly the posts times each arm's cost per save.
+Costs real money: roughly the posts times each arm's cost per save (about $5 for 20 posts and the default arms).
 """
 import asyncio
 import logging

@@ -12,6 +12,10 @@ on:
       arms:
         description: model:frames to compare, the first is the baseline
         default: "claude-opus-5-5:24 claude-opus-5-5:12 claude-sonnet-5-5:12 claude-haiku-5-5:12"
+  # Also when the comparison script changes (GitHub only lets a workflow be started by hand once it has run).
+  push:
+    paths:
+      - ".github/diagnose/model_check.py"
 
 jobs:
   fly:
@@ -21,8 +25,8 @@ jobs:
     env:
       FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
       APP: ${{ vars.FLY_APP_NAME }}
-      COUNT: ${{ github.event.inputs.count }}
-      ARMS: ${{ github.event.inputs.arms }}
+      COUNT: ${{ github.event.inputs.count || '20' }}
+      ARMS: ${{ github.event.inputs.arms || 'claude-opus-5-5:24 claude-opus-5-5:12 claude-sonnet-5-5:12 claude-haiku-5-5:12' }}
     steps:
       - uses: actions/checkout@v4
       - name: Install flyctl

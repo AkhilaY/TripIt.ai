@@ -114,6 +114,7 @@ from .menus import MENU_CATEGORIES, MenuService, SafeFetcher
 from .needs import NeedsService
 from .packing import PackingService
 from .photos import PhotoStore, fetch_bytes as fetch_photo_bytes
+from .appstore import AppStoreError, account_token, plus_until, verify_jws
 from .plans import PLANS, PlanOut, out_of_saves, plan_for, upgrade_message
 from .packing import parse_lines
 from .apple import AppleError, AppleSignIn
@@ -126,6 +127,7 @@ from .usage import BudgetExceeded, Usage
 from .weather import Weather
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+log = logging.getLogger("tripit")
 mimetypes.add_type("application/manifest+json", ".webmanifest")
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -494,6 +496,64 @@ class NameChange(BaseModel):
 async def my_plan(request: Request) -> PlanOut:
     """Your plan and how many of this month's free video saves you've used."""
     return _plan(request, _me(request))
+
+
+class AppStorePurchase(BaseModel):
+    signed_transaction: str = Field(max_length=20000)
+
+
+def _bundle_ids() -> list[str]:
+    settings = get_settings()
+    return [c.strip() for c in (settings.apple_client_ids or settings.apns_topic).split(",") if c.strip()]
+
+
+@app.post("/v1/me/plan/appstore", response_model=PlanOut, dependencies=[Auth])
+async def appstore_purchase(body: AppStorePurchase, request: Request) -> PlanOut:
+    """A Plus purchase or restore from the app: the signed transaction StoreKit gave it. Apple's signature is
+    checked, and the subscription must have been bought by this account."""
+    user = _me(request)
+    try:
+        tx = verify_jws(body.signed_transaction)
+        until = plus_until(tx, _bundle_ids())
+    except AppStoreError as e:
+        raise HTTPException(status_code=422, detail=f"Couldn't confirm this purchase with the App Store ({e}).")
+    token = account_token(user.id)
+    if tx.get("appAccountToken") and tx["appAccountToken"].lower() != token:
+        raise HTTPException(status_code=409, detail="This subscription belongs to another Travel Edit account. "
+                                                    "Sign in to that account to use it.")
+    db = _db(request)
+    db.set_appstore_subscription(user.id, token, str(tx.get("originalTransactionId") or "") or None, until)
+    log.info("App Store %s for %s: Plus until %s", tx.get("productId"), user.id, until)
+    return _plan(request, user)
+
+
+class AppStoreNotification(BaseModel):
+    signedPayload: str = Field(max_length=100000)
+
+
+@app.post("/v1/appstore/notifications", status_code=200)
+async def appstore_notification(body: AppStoreNotification, request: Request) -> dict:
+    """App Store Server Notifications (version 2): renewals, expiries, refunds and so on. Set this URL in App
+    Store Connect (App Information > App Store Server Notifications) for both production and sandbox."""
+    try:
+        note = verify_jws(body.signedPayload)
+        signed = (note.get("data") or {}).get("signedTransactionInfo")
+        if not signed:
+            return {"ok": True}  # e.g. a TEST notification
+        tx = verify_jws(signed)
+        until = plus_until(tx, _bundle_ids())
+    except AppStoreError as e:
+        log.warning("Ignored an App Store notification: %s", e)
+        raise HTTPException(status_code=400, detail=str(e))
+    db = _db(request)
+    original = str(tx.get("originalTransactionId") or "") or None
+    user_id = db.user_for_appstore((tx.get("appAccountToken") or "").lower() or None, original)
+    if user_id is None:
+        log.warning("App Store %s for an unknown account", note.get("notificationType"))
+        return {"ok": True}
+    db.set_appstore_subscription(user_id, account_token(user_id), original, until)
+    log.info("App Store %s/%s for %s: Plus until %s", note.get("notificationType"), note.get("subtype"), user_id, until)
+    return {"ok": True}
 
 
 @app.patch("/v1/me", response_model=MeOut, dependencies=[Auth])
@@ -2060,6 +2120,21 @@ async def service_worker() -> Response:
 async def share_target() -> FileResponse:
     """Android's share sheet opens /share?url=…&text=… (Web Share Target); the web app handles it."""
     return FileResponse(STATIC_DIR / "index.html")
+
+
+@app.get("/privacy", response_class=HTMLResponse, include_in_schema=False)
+@app.get("/terms", response_class=HTMLResponse, include_in_schema=False)
+@app.get("/support", response_class=HTMLResponse, include_in_schema=False)
+async def legal_page(request: Request) -> HTMLResponse:
+    """The privacy policy, terms of use and support page (linked from the app and from the App Store listing)."""
+    settings = get_settings()
+    name = request.url.path.strip("/")
+    page = (STATIC_DIR / "legal" / f"{name}.html").read_text()
+    email = html.escape(settings.support_email.strip())
+    contact = (f'Email us at <a href="mailto:{email}">{email}</a>, or use Send feedback in the app (Profile).' if email
+               else "Use Send feedback in the app (Profile).")
+    page = page.replace("{{contact}}", contact).replace("{{updated}}", html.escape(settings.legal_updated))
+    return HTMLResponse(page, headers={"Cache-Control": "public, max-age=3600"})
 
 
 app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="web")

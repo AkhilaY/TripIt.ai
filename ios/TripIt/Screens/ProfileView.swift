@@ -111,6 +111,17 @@ struct ProfileView: View {
                     row("rectangle.portrait.and.arrow.right", Theme.danger, "Sign out", nil)
                 }
             }
+            Section("About") {
+                Link(destination: AppConfig.baseURL.appendingPathComponent("support")) {
+                    row("questionmark.circle.fill", Theme.blue, "Help & support", nil)
+                }
+                Link(destination: AppConfig.baseURL.appendingPathComponent("privacy")) {
+                    row("hand.raised.fill", Theme.gray, "Privacy Policy", nil)
+                }
+                Link(destination: AppConfig.baseURL.appendingPathComponent("terms")) {
+                    row("doc.text.fill", Theme.gray, "Terms of Use", nil)
+                }
+            }
             Section {
                 Button("Delete account", role: .destructive) { deleting = true }
             } footer: {
@@ -162,7 +173,7 @@ struct ProfileView: View {
     }
 
     private func planLine(_ plan: PlanInfo) -> String {
-        guard let left = plan.savesLeft else { return "Unlimited video saves" }
+        guard let left = plan.savesLeft else { return plan.renewsDay.map { "Unlimited video saves · Renews \($0)" } ?? "Unlimited video saves" }
         return (left == 1 ? "1 video save left" : "\(left) video saves left") + " this month · Upgrade to Plus"
     }
 

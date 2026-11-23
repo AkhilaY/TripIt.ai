@@ -3424,3 +3424,105 @@ def test_google_photos_are_fetched_once_then_served_from_disk(client):
     client.get(url + "&w=1500")  # a bigger size is fetched once
     assert len(calls) == 2
     app.state.photo_client = None
+
+
+# ---------- App Store purchases ----------
+
+def _fake_apple_chain():
+    """A root, intermediate and leaf shaped like Apple's (the marker extensions included), for signing test JWS."""
+    from cryptography import x509 as cx
+    from cryptography.hazmat.primitives import hashes as ch
+    from cryptography.hazmat.primitives.asymmetric import ec as cec
+    from cryptography.x509.oid import NameOID
+
+    def cert(name, key, issuer_name, issuer_key, oid=None):
+        b = (cx.CertificateBuilder().subject_name(cx.Name([cx.NameAttribute(NameOID.COMMON_NAME, name)]))
+             .issuer_name(cx.Name([cx.NameAttribute(NameOID.COMMON_NAME, issuer_name)]))
+             .public_key(key.public_key()).serial_number(cx.random_serial_number())
+             .not_valid_before(datetime(2020, 1, 1)).not_valid_after(datetime(2040, 1, 1)))
+        if oid:
+            b = b.add_extension(cx.UnrecognizedExtension(cx.ObjectIdentifier(oid), b"\x05\x00"), critical=False)
+        return b.sign(issuer_key, ch.SHA256())
+
+    root_key, mid_key, leaf_key = (cec.generate_private_key(cec.SECP256R1()) for _ in range(3))
+    root = cert("Root", root_key, "Root", root_key)
+    mid = cert("Mid", mid_key, "Root", root_key, "1.2.840.113635.100.6.2.1")
+    leaf = cert("Leaf", leaf_key, "Mid", mid_key, "1.2.840.113635.100.6.11.1")
+    return leaf_key, [leaf, mid, root]
+
+
+def _jws(payload, leaf_key, chain):
+    import base64
+    import hashlib
+    from cryptography.hazmat.primitives import hashes as ch
+    from cryptography.hazmat.primitives.asymmetric import ec as cec
+    from cryptography.hazmat.primitives.asymmetric.utils import decode_dss_signature
+    from cryptography.hazmat.primitives.serialization import Encoding
+
+    def b64(raw):
+        return base64.urlsafe_b64encode(raw).rstrip(b"=").decode()
+
+    header = {"alg": "ES256", "x5c": [base64.b64encode(c.public_bytes(Encoding.DER)).decode() for c in chain]}
+    signing = f"{b64(json.dumps(header).encode())}.{b64(json.dumps(payload).encode())}"
+    r, s = decode_dss_signature(leaf_key.sign(signing.encode(), cec.ECDSA(ch.SHA256())))
+    return signing + "." + b64(r.to_bytes(32, "big") + s.to_bytes(32, "big")), hashlib.sha256(chain[2].public_bytes(Encoding.DER)).hexdigest()
+
+
+def test_appstore_purchase_gives_plus_until_it_expires(client, monkeypatch):
+    import functools
+    from app import appstore, main as main_module
+
+    owner = signup(client, "a@x.com", "secret")
+    b = signup(client, "b@x.com", client.post("/v1/admin/invites", json={}, headers=owner).json()["code"])
+    plan = client.get("/v1/me/plan", headers=b).json()
+    token = plan["account_token"]
+    assert plan["plan"] == "free" and plan["products"] == ["plus.monthly", "plus.yearly"] and len(token) == 36
+
+    key, chain = _fake_apple_chain()
+    later = int((datetime.now(timezone.utc) + timedelta(days=30)).timestamp() * 1000)
+    tx = {"productId": "plus.monthly", "originalTransactionId": "1000", "expiresDate": later, "appAccountToken": token}
+    signed, root_hash = _jws(tx, key, chain)
+
+    # A chain that doesn't end at Apple's root is refused.
+    assert client.post("/v1/me/plan/appstore", json={"signed_transaction": signed}, headers=b).status_code == 422
+    monkeypatch.setattr(main_module, "verify_jws", functools.partial(appstore.verify_jws, root_sha256=root_hash))
+
+    # Tampering with the payload breaks the signature.
+    head, _, sig = signed.split(".")
+    import base64
+    forged = base64.urlsafe_b64encode(json.dumps({**tx, "productId": "plus.yearly"}).encode()).rstrip(b"=").decode()
+    assert client.post("/v1/me/plan/appstore", json={"signed_transaction": f"{head}.{forged}.{sig}"}, headers=b).status_code == 422
+
+    r = client.post("/v1/me/plan/appstore", json={"signed_transaction": signed}, headers=b)
+    assert r.status_code == 200, r.text
+    assert r.json()["plan"] == "plus" and r.json()["video_saves_limit"] is None and r.json()["plus_until"]
+
+    # Someone else can't use b's subscription.
+    c = signup(client, "c@x.com", client.post("/v1/admin/invites", json={}, headers=owner).json()["code"])
+    assert client.post("/v1/me/plan/appstore", json={"signed_transaction": signed}, headers=c).status_code == 409
+
+    # Apple says it was refunded: back to free.
+    refunded, _ = _jws({**tx, "revocationDate": later - 1}, key, chain)
+    note, _ = _jws({"notificationType": "REFUND", "data": {"signedTransactionInfo": refunded}}, key, chain)
+    assert client.post("/v1/appstore/notifications", json={"signedPayload": note}).status_code == 200
+    assert client.get("/v1/me/plan", headers=b).json()["plan"] == "free"
+
+    # A renewal (found by its first transaction even without the token) brings Plus back.
+    renewed, _ = _jws({k: v for k, v in tx.items() if k != "appAccountToken"}, key, chain)
+    note, _ = _jws({"notificationType": "DID_RENEW", "data": {"signedTransactionInfo": renewed}}, key, chain)
+    assert client.post("/v1/appstore/notifications", json={"signedPayload": note}).status_code == 200
+    assert client.get("/v1/me/plan", headers=b).json()["plan"] == "plus"
+
+    # Once the paid-up date passes, the plan is free again without anything from Apple.
+    app.state.db.set_appstore_subscription(client.get("/v1/me", headers=b).json()["id"], token, "1000",
+                                           (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat())
+    assert client.get("/v1/me/plan", headers=b).json()["plan"] == "free"
+
+
+def test_privacy_terms_and_support_pages_are_public(client):
+    for path in ("/privacy", "/terms", "/support"):
+        r = client.get(path)
+        assert r.status_code == 200 and "<h1>" in r.text and "{{" not in r.text, path
+        assert "Send feedback" in r.text
+    assert "auto-renewing" in client.get("/terms").text
+    assert "Anthropic" in client.get("/privacy").text

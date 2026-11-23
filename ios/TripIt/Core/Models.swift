@@ -310,8 +310,14 @@ struct PlanInfo: Codable, Hashable {
     var videoSavesUsed: Int
     var videoSavesLimit: Int?
     var resetsAt: String
+    var plusUntil: String?  // an App Store subscription is paid up to here (it renews unless cancelled)
+    var accountToken: String?  // attached to App Store purchases, so they belong to this account
 
     var isPlus: Bool { plan == "plus" }
+    var renewsDay: String? {
+        guard let plusUntil, let date = Fmt.parseISO(plusUntil) else { return nil }
+        return date.formatted(.dateTime.month(.wide).day().year())
+    }
     var savesLeft: Int? { videoSavesLimit.map { max(0, $0 - videoSavesUsed) } }
     var resetDay: String {
         guard let date = ISO8601DateFormatter().date(from: resetsAt) else { return "next month" }

@@ -4,6 +4,7 @@ from typing import Optional
 
 from pydantic import BaseModel
 
+from .appstore import PLUS_PRODUCTS, account_token
 from .db import Database
 
 PLANS = ("free", "plus")
@@ -14,6 +15,9 @@ class PlanOut(BaseModel):
     video_saves_used: int
     video_saves_limit: Optional[int] = None  # None: no limit
     resets_at: str  # when the month's count starts again (ISO, UTC)
+    plus_until: Optional[str] = None  # when an App Store subscription is paid up to (it renews unless cancelled)
+    account_token: str = ""  # attached to App Store purchases, so they belong to this account
+    products: list[str] = list(PLUS_PRODUCTS)
 
 
 def _month_start(now: datetime) -> datetime:
@@ -27,13 +31,17 @@ def _next_month(now: datetime) -> datetime:
 
 def plan_for(db: Database, user_id: str, is_admin: bool, free_limit: int, now: Optional[datetime] = None) -> PlanOut:
     now = now or datetime.now(timezone.utc)
-    plan = "plus" if is_admin else db.user_plan(user_id)
+    plan = "plus" if is_admin else db.user_plan(user_id, now.isoformat())
     unlimited = plan == "plus" or free_limit <= 0
+    token = account_token(user_id)
+    db.set_appstore_token(user_id, token)
     return PlanOut(
         plan=plan,
         video_saves_used=db.video_saves_since(user_id, _month_start(now).isoformat()),
         video_saves_limit=None if unlimited else free_limit,
         resets_at=_next_month(now).isoformat(),
+        plus_until=db.plus_expires_at(user_id) if plan == "plus" else None,
+        account_token=token,
     )
 
 

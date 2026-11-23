@@ -54,6 +54,13 @@ enum Fmt {
         return minutes < 60 ? "\(minutes) min" : "\(minutes / 60) h \(minutes % 60 > 0 ? "\(minutes % 60) min" : "")".trimmingCharacters(in: .whitespaces)
     }
 
+    /// A server timestamp (with or without fractional seconds or a zone).
+    static func parseISO(_ iso: String) -> Date? {
+        let parser = ISO8601DateFormatter()
+        parser.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return parser.date(from: iso) ?? ISO8601DateFormatter().date(from: iso) ?? ISO8601DateFormatter().date(from: iso + "Z")
+    }
+
     static func ago(_ iso: String) -> String {
         let parser = ISO8601DateFormatter()
         parser.formatOptions = [.withInternetDateTime, .withFractionalSeconds]

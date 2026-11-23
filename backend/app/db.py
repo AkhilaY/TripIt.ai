@@ -296,7 +296,8 @@ MIGRATIONS = {
     "trips": [("share_token", "TEXT"), ("kind", "TEXT NOT NULL DEFAULT 'trip'"), ("user_id", "TEXT"), ("stops", "TEXT"),
               ("invite_token", "TEXT")],
     "folders": [("user_id", "TEXT")],
-    "users": [("apple_sub", "TEXT"), ("apple_token", "TEXT"), ("plan", "TEXT NOT NULL DEFAULT 'free'")],
+    "users": [("apple_sub", "TEXT"), ("apple_token", "TEXT"), ("plan", "TEXT NOT NULL DEFAULT 'free'"),
+              ("plus_expires_at", "TEXT"), ("appstore_account_token", "TEXT"), ("appstore_original_tx", "TEXT")],
     "reels": [("user_id", "TEXT")],
     "jobs": [("user_id", "TEXT")],
     "push_subscriptions": [("user_id", "TEXT")],
@@ -1101,12 +1102,45 @@ class Database:
         )
         return rows[0]["n"]
 
-    def user_plan(self, user_id: str) -> str:
-        rows = self._rows("SELECT plan FROM users WHERE id = ?", (user_id,))
-        return (rows[0]["plan"] or "free") if rows else "free"
+    def user_plan(self, user_id: str, now: Optional[str] = None) -> str:
+        """"plus" while a subscription runs (or with no end date, when set by the owner), else "free"."""
+        rows = self._rows("SELECT plan, plus_expires_at FROM users WHERE id = ?", (user_id,))
+        if not rows or rows[0]["plan"] != "plus":
+            return "free"
+        expires = rows[0]["plus_expires_at"]
+        return "plus" if not expires or expires > (now or datetime.now(timezone.utc).isoformat()) else "free"
 
-    def set_user_plan(self, user_id: str, plan: str) -> None:
-        self._exec("UPDATE users SET plan = ? WHERE id = ?", (plan, user_id))
+    def set_user_plan(self, user_id: str, plan: str, expires_at: Optional[str] = None) -> None:
+        self._exec("UPDATE users SET plan = ?, plus_expires_at = ? WHERE id = ?", (plan, expires_at, user_id))
+
+    def set_appstore_subscription(self, user_id: str, account_token: str, original_tx: Optional[str],
+                                  expires_at: Optional[str]) -> None:
+        """Plus from the App Store until expires_at, or back to free when it's None (expired or refunded)."""
+        self._exec(
+            "UPDATE users SET plan = ?, plus_expires_at = ?, appstore_account_token = ?, "
+            "appstore_original_tx = COALESCE(?, appstore_original_tx) WHERE id = ?",
+            ("plus" if expires_at else "free", expires_at, account_token, original_tx, user_id),
+        )
+
+    def user_for_appstore(self, account_token: Optional[str], original_tx: Optional[str]) -> Optional[str]:
+        """The account a subscription belongs to, by the token it was bought with or its first transaction."""
+        if account_token:
+            rows = self._rows("SELECT id FROM users WHERE appstore_account_token = ?", (account_token,))
+            if rows:
+                return rows[0]["id"]
+        if original_tx:
+            rows = self._rows("SELECT id FROM users WHERE appstore_original_tx = ?", (original_tx,))
+            if rows:
+                return rows[0]["id"]
+        return None
+
+    def plus_expires_at(self, user_id: str) -> Optional[str]:
+        rows = self._rows("SELECT plus_expires_at FROM users WHERE id = ?", (user_id,))
+        return rows[0]["plus_expires_at"] if rows else None
+
+    def set_appstore_token(self, user_id: str, account_token: str) -> None:
+        self._exec("UPDATE users SET appstore_account_token = ? WHERE id = ? AND appstore_account_token IS NULL",
+                   (account_token, user_id))
 
     def unfinished_jobs(self) -> list[Job]:
         rows = self._rows(

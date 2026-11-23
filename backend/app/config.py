@@ -114,6 +114,10 @@ class Settings(BaseSettings):
     apple_signin_key_id: str = ""
     apple_team_id: str = ""
 
+    # Shown on the privacy, terms and support pages (/privacy, /terms, /support) as the way to reach you.
+    support_email: str = ""
+    legal_updated: str = "November 23, 2026"
+
     apns_key: str = ""
     apns_key_id: str = ""
     apns_team_id: str = ""

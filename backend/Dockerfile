@@ -16,6 +16,8 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 # TikTok and Instagram change often; always build with the newest yt-dlp.
 RUN pip install --no-cache-dir -U "yt-dlp[default,curl-cffi]"
+# YouTube needs a JavaScript runtime for yt-dlp to unlock its video formats; without one only the caption comes.
+RUN pip install --no-cache-dir -U deno && deno --version
 
 # A real browser, for opening restaurant websites and clicking through to their menus (app/menu_browser.py).
 RUN playwright install --with-deps --only-shell chromium \

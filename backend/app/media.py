@@ -72,7 +72,9 @@ def download_reel(url: str, workdir: Path, settings: Settings) -> DownloadedReel
             return _tiktok_photo_post(url, workdir, settings)
     opts = {
         "outtmpl": str(workdir / "%(id)s.%(ext)s"),
-        "format": "best[height<=720]/best",
+        # YouTube mostly serves video and audio separately now; ffmpeg joins them. TikTok and Instagram send both.
+        "format": ("bv*[height<=720]+ba/b[height<=720]/bv*+ba/b" if platform == "youtube" else "best[height<=720]/best"),
+        "merge_output_format": "mp4",
         "quiet": True,
         "no_warnings": True,
         "noplaylist": False,  # IG carousels come through as playlists

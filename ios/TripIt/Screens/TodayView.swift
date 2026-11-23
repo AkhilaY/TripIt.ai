@@ -153,7 +153,7 @@ struct TodayView: View {
     @ViewBuilder private func bag(day: Int) -> some View {
         let items = (packing?.items ?? []).filter { $0.dayBag && ($0.days.isEmpty || $0.days.contains(day)) }
         if !items.isEmpty {
-            Label("Today's bag", systemImage: "bag").font(.system(size: 10, weight: .semibold)).textCase(.uppercase).kerning(1.4)
+            Label("Today's bag", systemImage: "bag").font(Theme.text(.footnote))
                 .foregroundStyle(Theme.secondary).padding(.top, 22)
             Card(padding: 12) {
                 ForEach(items) { item in
@@ -175,7 +175,7 @@ struct TodayView: View {
             .sorted { $0.match && !$1.match }
             .prefix(3)
         if !list.isEmpty {
-            Label("On nearby", systemImage: "ticket").font(.system(size: 10, weight: .semibold)).textCase(.uppercase).kerning(1.4)
+            Label("On nearby", systemImage: "ticket").font(Theme.text(.footnote))
                 .foregroundStyle(Theme.secondary).padding(.top, 22)
             Card {
                 ForEach(Array(list)) { e in

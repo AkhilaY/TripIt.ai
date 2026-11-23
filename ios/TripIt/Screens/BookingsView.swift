@@ -176,15 +176,13 @@ struct BookingsView: View {
     // MARK: Header
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 10) {
-                Spacer()
-                RoundIconButton(symbol: "plus", label: "Add a booking") { addBooking() }
-                ProfileButton()
-            }
-            .padding(.top, 8)
-            Text("Bookings").font(Theme.serif(32)).foregroundStyle(Theme.label).padding(.top, 8)
+        HStack(alignment: .center, spacing: 8) {
+            Text("Bookings").font(Theme.serif(38)).foregroundStyle(Theme.label)
+            Spacer()
+            RoundIconButton(symbol: "plus", label: "Add a booking") { addBooking() }
+            ProfileButton()
         }
+        .padding(.top, 12)
     }
 
     private func addBooking() {
@@ -542,7 +540,7 @@ struct BookingCard: View {
 
     private func field(_ label: String, _ value: String, mono: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(label.uppercased()).font(.system(size: 9, weight: .semibold)).kerning(1).foregroundStyle(Theme.tertiary)
+            Text(label.uppercased()).font(Theme.serif(10)).kerning(1.2).foregroundStyle(Theme.tertiary)
             Text(value).font(mono ? Theme.text(.footnote).monospaced().weight(.semibold) : Theme.text(.footnote)).foregroundStyle(Theme.label).lineLimit(1)
         }
     }

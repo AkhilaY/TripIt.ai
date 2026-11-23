@@ -73,7 +73,7 @@ struct SymbolTile: View {
 
     var body: some View {
         RoundedRectangle(cornerRadius: size * 0.28, style: .continuous)
-            .fill(color.opacity(0.14))
+            .fill(Theme.cell)
             .frame(width: size, height: size)
             .overlay(Image(systemName: symbol).font(.system(size: size * 0.44, weight: .light)).foregroundStyle(color))
     }
@@ -87,12 +87,12 @@ struct PlaceThumb: View {
         let category = Category(place.category)
         RemoteImage(url: place.photos.first?.url(width: Int(size * 3))) {
             ZStack {
-                category.color.opacity(0.14)
-                Image(systemName: category.symbol).font(.system(size: size * 0.36, weight: .semibold)).foregroundStyle(category.color)
+                Theme.cell
+                Image(systemName: category.symbol).font(.system(size: size * 0.34, weight: .light)).foregroundStyle(Theme.secondary)
             }
         }
         .frame(width: size, height: size)
-        .clipShape(RoundedRectangle(cornerRadius: min(size * 0.22, 16), style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: min(size * 0.14, 14), style: .continuous))
     }
 }
 
@@ -105,7 +105,7 @@ struct PlaceRow: View {
     var distance: Double?
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 14) {
             PlaceThumb(place: place)
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 5) {
@@ -120,7 +120,7 @@ struct PlaceRow: View {
                         Circle().fill(Theme.warn).frame(width: 6, height: 6).accessibilityLabel("Not on the map yet")
                     }
                 }
-                Text(subtitle).font(Theme.text(.subheadline)).foregroundStyle(Theme.secondary).lineLimit(1)
+                Text(subtitle).font(Theme.text(.footnote)).foregroundStyle(Theme.secondary).lineLimit(1)
                 chips
                 if !place.recommendedItems.isEmpty {
                     Text("Try: " + place.recommendedItems.joined(separator: ", "))
@@ -138,15 +138,23 @@ struct PlaceRow: View {
             .compactMap { $0 }.joined(separator: " · ")
     }
 
+    /// The facts after the area, as one grey line ("★ 4.4 (939) · Book ahead"), with status words in their colour.
     @ViewBuilder private var chips: some View {
         let items = chipItems
         if !items.isEmpty {
-            HStack(spacing: 6) {
-                ForEach(items) { item in
-                    Chip(text: item.text, symbol: item.symbol, color: item.color)
-                }
-            }
+            metaLine(items)
+            .font(Theme.text(.footnote))
+            .lineLimit(1)
         }
+    }
+
+    private func metaLine(_ items: [ChipItem]) -> Text {
+        var line = Text("")
+        for (i, item) in items.enumerated() {
+            if i > 0 { line = line + Text(" · ").foregroundColor(Theme.secondary) }
+            line = line + Text((item.symbol == "star.fill" ? "★ " : "") + item.text).foregroundColor(item.color)
+        }
+        return line
     }
 
     private struct ChipItem: Identifiable {
@@ -184,11 +192,9 @@ struct Chip: View {
     var body: some View {
         HStack(spacing: 3) {
             if let symbol { Image(systemName: symbol).font(.system(size: 9, weight: .bold)) }
-            Text(text).font(Theme.text(.caption)).lineLimit(1)
+            Text(text).font(Theme.text(.footnote)).lineLimit(1)
         }
         .foregroundStyle(color)
-        .padding(.horizontal, 6).padding(.vertical, 2)
-        .background(color.opacity(0.12), in: Capsule())
     }
 }
 
@@ -213,10 +219,10 @@ struct FilterChip: View {
                 Text(label).font(Theme.text(.subheadline))
                 if let count { Text("\(count)").font(Theme.text(.caption)).opacity(0.6) }
             }
-            .padding(.horizontal, 12).padding(.vertical, 7)
+            .padding(.horizontal, 16).frame(minHeight: 40)
             .foregroundStyle(isOn ? Theme.accentInk : Theme.label)
-            .background(isOn ? Theme.accent : Theme.cell, in: Capsule())
-            .overlay(Capsule().strokeBorder(Theme.border, lineWidth: isOn ? 0 : 1))
+            .background(isOn ? Theme.accent : Theme.background, in: Capsule())
+            .overlay(Capsule().strokeBorder(Theme.chipBorder, lineWidth: isOn ? 0 : 1))
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(isOn ? .isSelected : [])
@@ -232,10 +238,10 @@ struct PrimaryButtonStyle: ButtonStyle {
     var compact = false
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(compact ? Theme.text(.subheadline) : Theme.text(.body))
-            .kerning(0.5)
-            .padding(.horizontal, compact ? 16 : 20).padding(.vertical, compact ? 10 : 16)
-            .frame(maxWidth: .infinity)
+            .font(compact ? Theme.text(.subheadline, weight: .medium) : Theme.text(.body, weight: .medium))
+            .kerning(compact ? 0.3 : 0.5)
+            .padding(.horizontal, compact ? 16 : 20)
+            .frame(maxWidth: .infinity, minHeight: compact ? 42 : 56)
             .foregroundStyle(tinted ? Theme.accent : Theme.accentInk)
             .background(tinted ? Color.clear : Theme.accent, in: Capsule())
             .overlay(Capsule().strokeBorder(Theme.accent, lineWidth: tinted ? 1 : 0))
@@ -255,8 +261,7 @@ struct QuietTileLabel: View {
         }
         .foregroundStyle(Theme.label)
         .frame(maxWidth: .infinity, minHeight: 50)
-        .background(Theme.cell, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.border))
+        .background(Theme.cell, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 }
 
@@ -272,7 +277,7 @@ struct Eyebrow: View {
 /// A section heading in the serif, with an optional action on the right.
 struct SectionHeading<Trailing: View>: View {
     let title: String
-    var size: CGFloat = 20
+    var size: CGFloat = 25
     @ViewBuilder var trailing: () -> Trailing
 
     var body: some View {
@@ -286,7 +291,7 @@ struct SectionHeading<Trailing: View>: View {
 }
 
 extension SectionHeading where Trailing == EmptyView {
-    init(_ title: String, size: CGFloat = 20) { self.init(title: title, size: size) { EmptyView() } }
+    init(_ title: String, size: CGFloat = 25) { self.init(title: title, size: size) { EmptyView() } }
 }
 
 /// A text button in the accent colour with a symbol ("+ New trip").
@@ -297,11 +302,11 @@ struct AccentTextButton: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 5) {
-                if let symbol { Image(systemName: symbol).font(Theme.text(.footnote)) }
-                Text(title).font(Theme.text(.footnote))
+                if let symbol { Image(systemName: symbol).font(.system(size: 13, weight: .light)) }
+                Text(title).font(Theme.text(.subheadline)).underline(true, color: Theme.link)
             }
             .foregroundStyle(Theme.link)
-            .frame(minHeight: 36)
+            .frame(minHeight: 44)
         }
         .buttonStyle(.plain)
     }
@@ -364,7 +369,7 @@ struct ToastOverlay: ViewModifier {
         content.overlay(alignment: .bottom) {
             if let toast = store.toast {
                 ToastView(toast: toast)
-                    .padding(.bottom, 64)
+                    .padding(.bottom, 24)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
                     .id(toast.id)
                     .task(id: toast.id) {
@@ -378,9 +383,9 @@ struct ToastOverlay: ViewModifier {
     }
 }
 
-/// A rounded card with a hairline border.
+/// A soft grey panel (the design's "Before you go" box).
 struct Card<Content: View>: View {
-    var radius: CGFloat = 16
+    var radius: CGFloat = 14
     var padding: CGFloat = 0
     @ViewBuilder var content: () -> Content
     var body: some View {
@@ -388,7 +393,6 @@ struct Card<Content: View>: View {
             .padding(padding)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Theme.cell, in: RoundedRectangle(cornerRadius: radius, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous).strokeBorder(Theme.border))
     }
 }
 
@@ -399,12 +403,12 @@ struct RoundIconButton: View {
     let action: () -> Void
     var body: some View {
         Button(action: action) {
-            Image(systemName: symbol).font(.system(size: 14, weight: .regular))
+            Image(systemName: symbol).font(.system(size: 17, weight: .light))
                 .foregroundStyle(Theme.label)
-                .frame(width: 36, height: 36)
+                .frame(width: 44, height: 44)
                 .background(Theme.background, in: Circle())
-                .shadow(color: .black.opacity(0.08), radius: 8, y: 3)
-                .frame(width: 40, height: 40)
+                .shadow(color: Color(red: 0.1, green: 0.07, blue: 0.04).opacity(0.08), radius: 9, y: 4)
+                .frame(width: 48, height: 48)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

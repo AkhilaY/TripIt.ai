@@ -7,34 +7,54 @@ struct MainTabs: View {
     @Environment(\.scenePhase) private var scenePhase
     @AppStorage(RootView.pendingJoinKey) private var pendingJoin = ""
 
+    @State private var opened: Set<AppTab> = [.home]  // tabs are built the first time they're opened, then kept
+    @State private var keyboardUp = false
+    @State private var searching = false
+
+    private var tabs: [BottomBar.Item] {
+        var items: [BottomBar.Item] = [
+            .init(tab: .home, title: "Home", symbol: "house"),
+            .init(tab: .library, title: "Library", symbol: "bookmark"),
+            .init(tab: .calendar, title: "Calendar", symbol: "calendar"),
+            .init(tab: .bookings, title: "Bookings", symbol: "ticket"),
+        ]
+        if !store.featuresOff.contains("concierge") { items.append(.init(tab: .concierge, title: "Concierge", symbol: "sparkles")) }
+        return items
+    }
+
     var body: some View {
-        TabView(selection: $router.tab) {
-            NavigationStack(path: $router.home) { HomeView().withRoutes() }
-                .blackTabBar()
-                .tabItem { Label("Home", systemImage: "house") }
-                .tag(AppTab.home)
-            NavigationStack(path: $router.library) { LibraryView().withRoutes() }
-                .blackTabBar()
-                .tabItem { Label("Library", systemImage: "bookmark") }
-                .tag(AppTab.library)
-            NavigationStack(path: $router.calendar) { CalendarView(isTab: true).withRoutes() }
-                .blackTabBar()
-                .tabItem { Label("Calendar", systemImage: "calendar") }
-                .tag(AppTab.calendar)
-            NavigationStack(path: $router.bookings) { BookingsView().withRoutes() }
-                .blackTabBar()
-                .tabItem { Label("Bookings", systemImage: "suitcase") }
-                .tag(AppTab.bookings)
-            if !store.featuresOff.contains("concierge") {
-                NavigationStack(path: $router.concierge) { ConciergeView().withRoutes() }
-                    .blackTabBar()
-                    .tabItem { Label("Concierge", systemImage: "sparkles") }
-                    .tag(AppTab.concierge)
+        VStack(spacing: 0) {
+            ZStack {
+                tabStack(.home) { NavigationStack(path: $router.home) { HomeView().withRoutes() } }
+                tabStack(.library) { NavigationStack(path: $router.library) { LibraryView().withRoutes() } }
+                tabStack(.calendar) { NavigationStack(path: $router.calendar) { CalendarView(isTab: true).withRoutes() } }
+                tabStack(.bookings) { NavigationStack(path: $router.bookings) { BookingsView().withRoutes() } }
+                if !store.featuresOff.contains("concierge") {
+                    tabStack(.concierge) { NavigationStack(path: $router.concierge) { ConciergeView().withRoutes() } }
+                }
+            }
+            .tint(Theme.accent)
+            .background(Theme.background.ignoresSafeArea(edges: .top))
+            // The page sits on the black bar like a card: square at the top, rounded where it meets the bar.
+            .clipShape(RoundedBottom(radius: keyboardUp ? 0 : 28))
+            .modifier(ToastOverlay())
+            if !keyboardUp {
+                BottomBar(items: tabs, selected: router.tab, onSelect: select, onSearch: { searching = true },
+                          onAdd: { router.addRequest = Router.AddRequest() })
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
-        .tint(.white)  // the open tab in the black tab bar; screens set their own ink tint
+        .background(Color.black.ignoresSafeArea())
+        .animation(.easeOut(duration: 0.2), value: keyboardUp)
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in keyboardUp = true }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in keyboardUp = false }
+        .onChange(of: router.tab) { _, tab in opened.insert(tab) }
+        .sheet(isPresented: $searching) {
+            SearchSheet { route in router.push(route) }
+                .environment(store)
+                .tint(Theme.accent)
+        }
         .environment(router)
-        .modifier(ToastOverlay())
         .sheet(isPresented: $router.showProfile) {
             NavigationStack(path: $router.profilePath) { ProfileView().withRoutes() }
                 .environment(router).environment(store).environment(session)
@@ -108,17 +128,123 @@ struct MainTabs: View {
             }
         }
     }
+
+    /// One tab's screens, kept alive (with their scroll position and pushed pages) while another tab is open.
+    @ViewBuilder private func tabStack<Content: View>(_ tab: AppTab, @ViewBuilder content: () -> Content) -> some View {
+        if opened.contains(tab) || router.tab == tab {
+            content()
+                .opacity(router.tab == tab ? 1 : 0)
+                .allowsHitTesting(router.tab == tab)
+                .accessibilityHidden(router.tab != tab)
+        }
+    }
+
+    /// Tapping the open tab again goes back to its first page.
+    private func select(_ tab: AppTab) {
+        Haptics.tap()
+        if router.tab == tab {
+            withAnimation {
+                switch tab {
+                case .home: router.home = []
+                case .library: router.library = []
+                case .calendar: router.calendar = []
+                case .bookings: router.bookings = []
+                case .concierge: router.concierge = []
+                }
+            }
+        } else {
+            router.tab = tab
+        }
+    }
+}
+
+/// A rectangle with rounded bottom corners whose top runs on up past the frame, so a background that fills the
+/// status bar isn't cut off there.
+struct RoundedBottom: Shape {
+    var radius: CGFloat
+    var animatableData: CGFloat {
+        get { radius }
+        set { radius = newValue }
+    }
+
+    func path(in rect: CGRect) -> Path {
+        var tall = rect
+        tall.origin.y -= 2000
+        tall.size.height += 2000
+        return UnevenRoundedRectangle(bottomLeadingRadius: radius, bottomTrailingRadius: radius, style: .continuous).path(in: tall)
+    }
+}
+
+/// The black bar under every tab, as in the design: a search field for your saved places, a round white + to save
+/// a link or a place, then the tabs in white (open) and grey.
+struct BottomBar: View {
+    struct Item: Identifiable {
+        let tab: AppTab
+        let title: String
+        let symbol: String
+        var id: AppTab { tab }
+    }
+
+    let items: [Item]
+    let selected: AppTab
+    let onSelect: (AppTab) -> Void
+    let onSearch: () -> Void
+    let onAdd: () -> Void
+
+    private static let grey = Color(red: 0.557, green: 0.541, blue: 0.525)  // #8E8A86
+
+    var body: some View {
+        VStack(spacing: 12) {
+            HStack(spacing: 12) {
+                Button(action: onSearch) {
+                    HStack(spacing: 12) {
+                        Image(systemName: "magnifyingglass").font(.system(size: 18, weight: .light))
+                        Text("Search your places").font(Theme.text(.body))
+                        Spacer(minLength: 0)
+                    }
+                    .foregroundStyle(Color(red: 0.604, green: 0.584, blue: 0.565))  // #9A9590
+                    .padding(.horizontal, 20)
+                    .frame(height: 52)
+                    .background(Color(red: 0.118, green: 0.118, blue: 0.118), in: Capsule())  // #1E1E1E
+                    .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                Button(action: onAdd) {
+                    Image(systemName: "plus").font(.system(size: 22, weight: .light))
+                        .foregroundStyle(Color(red: 0.098, green: 0.067, blue: 0.043))
+                        .frame(width: 52, height: 52)
+                        .background(Color.white, in: Circle())
+                        .shadow(color: .white.opacity(0.25), radius: 9)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Save a link or a place")
+            }
+            HStack(spacing: 0) {
+                ForEach(items) { item in
+                    let on = item.tab == selected
+                    Button { onSelect(item.tab) } label: {
+                        VStack(spacing: 5) {
+                            Image(systemName: item.symbol).font(.system(size: 19, weight: .light))
+                            Text(item.title).font(Theme.text(.footnote, weight: on ? .medium : .regular)).kerning(0.6)
+                        }
+                        .foregroundStyle(on ? Color.white : Self.grey)
+                        .frame(maxWidth: .infinity, minHeight: 50)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityAddTraits(on ? .isSelected : [])
+                }
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 14)
+        .padding(.bottom, 2)
+        .background(Color.black)
+        .environment(\.colorScheme, .dark)
+    }
 }
 
 extension View {
-    /// A tab's screens in ink, under a black tab bar with white icons.
-    func blackTabBar() -> some View {
-        tint(Theme.accent)
-            .toolbarBackground(Color.black, for: .tabBar)
-            .toolbarBackground(.visible, for: .tabBar)
-            .toolbarColorScheme(.dark, for: .tabBar)
-    }
-
     /// Lets this stack push any of the app's screens.
     func withRoutes() -> some View {
         navigationDestination(for: Route.self) { route in
@@ -148,6 +274,7 @@ struct RouteView: View {
         case .editPlace(let tripId, let editId, let entryId): EditPlaceView(tripId: tripId, editId: editId, entryId: entryId)
         case .bookings(let tripId): BookingsView(tripId: tripId)
         case .edit(let tripId, let editId): EditView(tripId: tripId, editId: editId)
+        case .savedEdit(let edit): SavedEditView(edit: edit)
         case .today(let tripId, let day): TodayView(tripId: tripId, day: day)
         case .packing(let tripId): PackingView(tripId: tripId)
         case .events(let tripId): EventsView(tripId: tripId)

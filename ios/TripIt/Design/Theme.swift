@@ -1,8 +1,9 @@
 import SwiftUI
 import UIKit
 
-/// The Travel Edit's look: an editorial, fashion-house feel. White pages and near-black ink by day, black and
-/// white by night, Futura for all type (built into iOS), and colour kept for status only (open, needs booking).
+/// The Travel Edit's look, from the "Light redesign" design: white pages and near-black ink by day (black and white by
+/// night), Jost for all type (bundled, Futura-like, used at its regular and light weights the way fashion houses
+/// set type), photos instead of icons where there is one, and colour kept for status only (open, needs booking).
 /// Light, Dark or the phone's setting is chosen in Profile → Appearance; new installs start in Light.
 enum Theme {
     static let accent = dynamic(0x19110B, 0xFFFFFF)  // ink: buttons and active states
@@ -15,7 +16,8 @@ enum Theme {
     static let secondary = dynamic(0x6F6A66, 0xA8A29C)
     static let tertiary = dynamic(0x9A9590, 0x6B6763)
     static let fill = translucent(0x19110B, 0.05, 0xFFFFFF, 0.08)  // quiet buttons and tiles
-    static let border = translucent(0x19110B, 0.10, 0xFFFFFF, 0.12)  // hairlines
+    static let border = dynamic(0xE6E3DF, 0x2A2826)  // hairlines between rows and around outlined pieces
+    static let chipBorder = dynamic(0xD9D5D0, 0x3A3734)
     static let divider = border
     static let raised = fill
     static let raisedBorder = border
@@ -37,38 +39,49 @@ enum Theme {
     static let red = dynamic(0x9A3B1E, 0xE08A6E)
     static let pink = dynamic(0xB2707A, 0xC98C95)
 
-    /// The app's typeface. Futura ships with iOS (Medium and Bold faces), so nothing is bundled.
-    static let fontName = "Futura-Medium"
-    static let boldFontName = "Futura-Bold"
+    /// The app's typeface: Jost (SIL Open Font License, in Shared/Fonts), the face the design is set in.
+    static let fontName = "Jost-Regular"
+    static let lightFontName = "Jost-Light"
+    static let mediumFontName = "Jost-Medium"
 
-    /// Display type (titles and headings), now in Futura. The name is kept so existing screens don't change.
-    /// Headings stay at the regular weight, the way fashion houses set them; only `.heavy`/`.black` go bold.
-    static func serif(_ size: CGFloat, weight: Font.Weight = .semibold) -> Font {
-        let name = (weight == .heavy || weight == .black) ? boldFontName : fontName
-        return Font.custom(name, size: size * 0.96, relativeTo: size >= 28 ? .largeTitle : size >= 20 ? .title2 : .headline)
+    private static func faceName(_ weight: Font.Weight) -> String {
+        switch weight {
+        case .ultraLight, .thin, .light: lightFontName
+        case .medium, .bold, .heavy, .black: mediumFontName
+        default: fontName
+        }
     }
 
-    static func uiSerif(_ size: CGFloat, weight: UIFont.Weight = .semibold) -> UIFont {
-        UIFont(name: fontName, size: size * 0.96) ?? .systemFont(ofSize: size, weight: weight)
+    /// Display type (titles and headings). Headings are set at the regular weight, as in the design; `.light` gives
+    /// the thin wordmark weight and `.medium` or heavier the button weight. (The name is from the earlier serif look.)
+    static func serif(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
+        Font.custom(faceName(weight), size: size, relativeTo: size >= 28 ? .largeTitle : size >= 20 ? .title2 : .headline)
     }
 
-    /// Body type in Futura at the size of a system text style, growing with the phone's text size.
-    static func text(_ style: Font.TextStyle) -> Font {
+    static func uiSerif(_ size: CGFloat, weight: UIFont.Weight = .regular) -> UIFont {
+        let name = weight.rawValue <= UIFont.Weight.light.rawValue ? lightFontName
+            : weight.rawValue >= UIFont.Weight.medium.rawValue ? mediumFontName : fontName
+        return UIFont(name: name, size: size) ?? .systemFont(ofSize: size, weight: weight)
+    }
+
+    /// Body type at the size of a system text style, growing with the phone's text size. Regular unless asked;
+    /// `.medium` is for buttons and the open tab.
+    static func text(_ style: Font.TextStyle, weight: Font.Weight = .regular) -> Font {
         let size: CGFloat = switch style {
         case .largeTitle: 34
         case .title: 28
         case .title2: 22
         case .title3: 20
-        case .headline: 17
+        case .headline: 18
         case .body: 17
         case .callout: 16
         case .subheadline: 15
-        case .footnote: 13
-        case .caption: 12
+        case .footnote: 14
+        case .caption: 13
         case .caption2: 11
         @unknown default: 17
         }
-        return Font.custom(fontName, size: size, relativeTo: style)
+        return Font.custom(faceName(weight), size: size, relativeTo: style)
     }
 
     static func translucent(_ light: UInt32, _ lightAlpha: CGFloat, _ dark: UInt32, _ darkAlpha: CGFloat) -> Color {
@@ -79,42 +92,31 @@ enum Theme {
         Color(uiColor: UIColor { $0.userInterfaceStyle == .dark ? UIColor(hex: dark) : UIColor(hex: light) })
     }
 
-    /// Navigation and tab bars in the app's fonts and colours.
+    /// Navigation bars, bar buttons and segmented controls in the app's type and colours. (The tab bar is the app's
+    /// own; see MainTabs.)
     static func applyAppearance() {
         let nav = UINavigationBarAppearance()
         nav.configureWithDefaultBackground()
         nav.backgroundEffect = UIBlurEffect(style: .systemChromeMaterial)
-        nav.largeTitleTextAttributes = [.font: uiSerif(34, weight: .regular), .foregroundColor: UIColor(Theme.label)]
-        nav.titleTextAttributes = [.font: uiSerif(18, weight: .regular), .foregroundColor: UIColor(Theme.label), .kern: 0.4]
+        nav.largeTitleTextAttributes = [.font: uiSerif(34), .foregroundColor: UIColor(Theme.label)]
+        nav.titleTextAttributes = [.font: uiSerif(18), .foregroundColor: UIColor(Theme.label), .kern: 0.3]
+        let button = UIBarButtonItemAppearance()
+        button.normal.titleTextAttributes = [.font: uiSerif(17)]
+        nav.buttonAppearance = button
+        nav.doneButtonAppearance = button
         let scrollEdge = UINavigationBarAppearance()
         scrollEdge.configureWithTransparentBackground()
         scrollEdge.largeTitleTextAttributes = nav.largeTitleTextAttributes
         scrollEdge.titleTextAttributes = nav.titleTextAttributes
+        scrollEdge.buttonAppearance = button
+        scrollEdge.doneButtonAppearance = button
         UINavigationBar.appearance().standardAppearance = nav
         UINavigationBar.appearance().compactAppearance = nav
         UINavigationBar.appearance().scrollEdgeAppearance = scrollEdge
         UISegmentedControl.appearance().selectedSegmentTintColor = UIColor(Theme.background)
-        if let small = UIFont(name: fontName, size: 13) {
+        if let small = UIFont(name: fontName, size: 14) {
             UISegmentedControl.appearance().setTitleTextAttributes([.font: small], for: .normal)
         }
-
-        // The tab bar: black, with white for the open tab and grey for the rest (like a fashion house's app).
-        let tab = UITabBarAppearance()
-        tab.configureWithOpaqueBackground()
-        tab.backgroundColor = .black
-        tab.shadowColor = .clear
-        let item = UITabBarItemAppearance()
-        let grey = UIColor(white: 0.58, alpha: 1)
-        let tabFont = UIFont(name: fontName, size: 11) ?? .systemFont(ofSize: 11, weight: .medium)
-        item.normal.iconColor = grey
-        item.normal.titleTextAttributes = [.foregroundColor: grey, .font: tabFont, .kern: 0.4]
-        item.selected.iconColor = .white
-        item.selected.titleTextAttributes = [.foregroundColor: UIColor.white, .font: tabFont, .kern: 0.4]
-        tab.stackedLayoutAppearance = item
-        tab.inlineLayoutAppearance = item
-        tab.compactInlineLayoutAppearance = item
-        UITabBar.appearance().standardAppearance = tab
-        UITabBar.appearance().scrollEdgeAppearance = tab
     }
 }
 

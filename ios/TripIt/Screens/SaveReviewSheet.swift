@@ -81,7 +81,7 @@ struct SaveReviewSheet: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } }
                 ToolbarItem(placement: .principal) {
-                    Text("THE TRAVEL EDIT").font(Theme.serif(14, weight: .semibold)).kerning(2)
+                    Text("THE TRAVEL EDIT").font(Theme.serif(13)).kerning(3.4)
                 }
             }
             .navigationBarTitleDisplayMode(.inline)
@@ -175,7 +175,7 @@ struct SaveReviewSheet: View {
         } label: {
             HStack(spacing: 12) {
                 Image(systemName: fresh ? (ticked ? "checkmark.circle.fill" : "circle") : "checkmark.seal")
-                    .font(.system(size: 18)).foregroundStyle(fresh ? (ticked ? Theme.gold : Theme.quiet) : Theme.secondary)
+                    .font(.system(size: 22, weight: .light)).foregroundStyle(fresh ? (ticked ? Theme.accent : Theme.quiet) : Theme.secondary)
                 PlaceThumb(place: p, size: 40)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(p.name).font(Theme.text(.subheadline)).foregroundStyle(ticked || !fresh ? Theme.label : Theme.secondary).lineLimit(1)

@@ -15,9 +15,9 @@ struct ImportProgressCard: View {
     }
 
     var body: some View {
-        Card(padding: 14) {
+        Card(padding: 16) {
             HStack(spacing: 12) {
-                SymbolTile(symbol: JobRow.symbol(for: job.url), color: Theme.indigo)
+                Image(systemName: JobRow.symbol(for: job.url)).font(.system(size: 18, weight: .light)).foregroundStyle(Theme.label).frame(width: 24)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(job.reel?.title ?? (job.url.hasPrefix("upload:") ? "Your screenshots" : "A saved post"))
                         .font(Theme.text(.subheadline)).foregroundStyle(Theme.label).lineLimit(1)
@@ -29,10 +29,10 @@ struct ImportProgressCard: View {
             HStack(spacing: 6) {
                 ForEach(Self.steps.indices, id: \.self) { i in
                     Capsule()
-                        .fill(i <= step ? Theme.gold : Theme.fill)
-                        .frame(height: 4)
+                        .fill(i < step ? Theme.accent : Theme.border)
+                        .frame(height: 3)
                         .overlay {
-                            if i == step { Capsule().fill(Theme.gold.opacity(0.5)).phaseAnimator([0.3, 1]) { v, p in v.opacity(p) } }
+                            if i == step { Capsule().fill(Theme.accent).phaseAnimator([0.25, 0.9]) { v, p in v.opacity(p) } }
                         }
                 }
             }
@@ -44,8 +44,9 @@ struct ImportProgressCard: View {
     }
 }
 
-/// What's next: the soonest saved event, booking or trip in the coming month.
+/// What's next: the soonest saved event, booking or trip in the coming month (Home shows trips on their own).
 struct NextUpCard: View {
+    var includeTrips = true
     @Environment(Store.self) private var store
     @Environment(Router.self) private var router
 
@@ -74,7 +75,7 @@ struct NextUpCard: View {
                               subtitle: [b.bookingKind.label, b.startTime.map(Fmt.clock)].compactMap { $0 }.joined(separator: " · "),
                               route: .bookings(tripId: b.tripId)))
         }
-        for t in store.upcomingTrips {
+        for t in store.upcomingTrips where includeTrips {
             guard let start = t.startDate, start > today, start <= horizon else { continue }
             items.append(Item(key: start, symbol: "airplane", color: Theme.gold, title: t.name,
                               subtitle: "Trip · \(t.dateRange ?? "")", route: .trip(id: t.id)))
@@ -85,18 +86,17 @@ struct NextUpCard: View {
     var body: some View {
         if let item = next {
             Button { router.push(item.route) } label: {
-                Card(radius: 18, padding: 16) {
-                    Eyebrow(text: "Next up · \(Self.when(item.key))")
-                    HStack(spacing: 12) {
-                        SymbolTile(symbol: item.symbol, color: item.color, size: 40)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(item.title).font(Theme.serif(20)).foregroundStyle(Theme.label).lineLimit(2)
+                Card(padding: 18) {
+                    HStack(spacing: 14) {
+                        Image(systemName: item.symbol).font(.system(size: 20, weight: .light)).foregroundStyle(Theme.label).frame(width: 24)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Next up · \(Self.when(item.key))").font(Theme.text(.footnote)).foregroundStyle(Theme.secondary)
+                            Text(item.title).font(Theme.text(.headline)).foregroundStyle(Theme.label).lineLimit(2)
                             if !item.subtitle.isEmpty { Text(item.subtitle).font(Theme.text(.footnote)).foregroundStyle(Theme.secondary) }
                         }
                         Spacer(minLength: 0)
-                        Image(systemName: "chevron.right").font(Theme.text(.footnote)).foregroundStyle(Theme.quiet)
+                        Image(systemName: "chevron.right").font(.system(size: 13, weight: .light)).foregroundStyle(Theme.tertiary)
                     }
-                    .padding(.top, 8)
                 }
             }
             .buttonStyle(.plain)
@@ -118,7 +118,7 @@ struct GetStartedCard: View {
     @Environment(Router.self) private var router
 
     var body: some View {
-        Card(radius: 18, padding: 18) {
+        Card(padding: 18) {
             Eyebrow(text: "Get started")
             Text("Save your first place").font(Theme.serif(24)).foregroundStyle(Theme.label).padding(.top, 6)
             VStack(alignment: .leading, spacing: 12) {

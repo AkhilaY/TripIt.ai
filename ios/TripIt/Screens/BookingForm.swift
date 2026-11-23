@@ -596,7 +596,7 @@ private struct ValueButtonStyle: ButtonStyle {
     let empty: Bool
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(Theme.text(.body).weight(empty ? .semibold : .regular))
+            .font(Theme.text(.body, weight: empty ? .medium : .regular))
             .foregroundStyle(empty ? Theme.link : Theme.label)
             .padding(.horizontal, 12).padding(.vertical, 6)
             .background(empty ? Color.clear : Theme.fill, in: Capsule())

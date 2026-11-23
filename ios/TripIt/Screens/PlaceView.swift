@@ -129,7 +129,7 @@ struct PlaceView: View {
     private func header(_ p: Place, _ category: Category) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Eyebrow(text: [category.label, p.mustDo ? "Starred" : nil].compactMap { $0 }.joined(separator: " · "), color: Theme.tertiary)
-            Text(p.name).font(Theme.serif(28)).foregroundStyle(Theme.label).fixedSize(horizontal: false, vertical: true)
+            Text(p.name).font(Theme.serif(32)).foregroundStyle(Theme.label).fixedSize(horizontal: false, vertical: true)
             let loc = [p.neighborhood, p.city.isEmpty ? nil : p.city].compactMap { $0 }.joined(separator: ", ")
             if !loc.isEmpty { Text(loc).font(Theme.text(.subheadline)).foregroundStyle(Theme.secondary) }
             statusLine(p)
@@ -194,7 +194,7 @@ struct PlaceView: View {
                     .font(.system(size: 18, weight: .regular))
                     .foregroundStyle(on ? Theme.ok : Theme.tertiary)
                     .contentTransition(.symbolEffect(.replace))
-                Text("Been here").font(Theme.text(.footnote).weight(on ? .semibold : .medium))
+                Text("Been here").font(Theme.text(.footnote, weight: on ? .medium : .regular))
                     .foregroundStyle(on ? Theme.ok : Theme.label)
             }
             .padding(.leading, 8).padding(.trailing, 14).frame(minHeight: 34)
@@ -522,7 +522,7 @@ struct PlaceView: View {
                         VStack(alignment: .leading, spacing: 4) {
                             ForEach(Array(hours.text.enumerated()), id: \.offset) { i, line in
                                 Text(line)
-                                    .font(Theme.text(.footnote).weight(hours.weekly != nil && i == today ? .semibold : .regular))
+                                    .font(Theme.text(.footnote, weight: hours.weekly != nil && i == today ? .medium : .regular))
                                     .foregroundStyle(hours.weekly != nil && i == today ? Theme.label : Theme.secondary)
                             }
                         }

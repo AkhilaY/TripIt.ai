@@ -83,15 +83,13 @@ struct CalendarView: View {
 
     /// The same header as the other tabs: actions top right, the title in the serif.
     private var tabHeader: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 10) {
-                Spacer()
-                RoundIconButton(symbol: "calendar.badge.plus", label: "Sync with Apple or Google Calendar") { syncing = true }
-                ProfileButton()
-            }
-            .padding(.top, 8)
-            Text("Calendar").font(Theme.serif(32)).foregroundStyle(Theme.label).padding(.top, 8).padding(.bottom, 4)
+        HStack(alignment: .center, spacing: 8) {
+            Text("Calendar").font(Theme.serif(38)).foregroundStyle(Theme.label)
+            Spacer()
+            RoundIconButton(symbol: "calendar.badge.plus", label: "Sync with Apple or Google Calendar") { syncing = true }
+            ProfileButton()
         }
+        .padding(.top, 12).padding(.bottom, 4)
     }
 
     private func load() async {
@@ -384,7 +382,7 @@ private struct MonthGrid: View {
         return Button { selected = isSelected ? nil : iso } label: {
             VStack(spacing: 3) {
                 Text("\(number)")
-                    .font(Theme.text(.subheadline).weight(iso == today ? .bold : .regular))
+                    .font(Theme.text(.subheadline, weight: iso == today ? .medium : .regular))
                     .foregroundStyle(isSelected ? Theme.accentInk : (iso < today ? Theme.tertiary : Theme.label))
                     .frame(width: 32, height: 32)
                     .background(isSelected ? Theme.accent : Color.clear, in: Circle())

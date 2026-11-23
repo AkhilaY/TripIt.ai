@@ -25,6 +25,8 @@ enum Route: Hashable {
     case bookings(tripId: String)
     /// One of a trip's edits.
     case edit(tripId: String, editId: String)
+    /// One of Home's daily edits made from your saves.
+    case savedEdit(SavedEdit)
     /// A trip day as you live it (today's, or the given day).
     case today(tripId: String, day: Int?)
     case packing(tripId: String)

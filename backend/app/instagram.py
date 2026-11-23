@@ -45,14 +45,23 @@ def _media_from_context(page: str) -> Optional[dict]:
 
 def parse_embed(page: str) -> tuple[list[str], str, str]:
     """(picture links, caption, author) from an embed page."""
+    pictures, _, caption, author = parse_embed_media(page)
+    return pictures, caption, author
+
+
+def parse_embed_media(page: str) -> tuple[list[str], list[str], str, str]:
+    """(picture links, video links, caption, author) from an embed page."""
     pictures: list[str] = []
+    videos: list[str] = []
     caption = author = ""
     media = _media_from_context(page)
     if media:
         edges = ((media.get("edge_sidecar_to_children") or {}).get("edges")) or []
         nodes = [e.get("node") or {} for e in edges] or [media]
         for node in nodes:
-            if not node.get("is_video") and node.get("display_url"):
+            if node.get("is_video") and node.get("video_url"):
+                videos.append(node["video_url"])
+            elif not node.get("is_video") and node.get("display_url"):
                 pictures.append(node["display_url"])
         captions = ((media.get("edge_media_to_caption") or {}).get("edges")) or []
         if captions:
@@ -70,15 +79,35 @@ def parse_embed(page: str) -> tuple[list[str], str, str]:
     if not author:
         match = re.search(r'class="UsernameText"[^>]*>([^<]+)<', page)
         author = htmllib.unescape(match.group(1)).strip() if match else ""
-    seen: list[str] = []
-    for p in pictures:
-        if p not in seen:
-            seen.append(p)
-    return seen[:MAX_SLIDES], caption, author
+    if not videos:
+        videos = [htmllib.unescape(v) for v in re.findall(r'<video[^>]+src="([^"]+)"', page)]
+    return list(dict.fromkeys(pictures))[:MAX_SLIDES], list(dict.fromkeys(videos))[:1], caption, author
 
 
-def download_photo_post(url: str, workdir: Path, client: Optional[httpx.Client] = None) -> Optional[tuple[ReelMetadata, list[Path]]]:
-    """The post's caption and its pictures saved as slides, or None if the embed page had neither."""
+def resolve(url: str, client: Optional[httpx.Client] = None) -> str:
+    """Instagram's share links (instagram.com/share/...) open the post they point to; others are left alone."""
+    parts = [p for p in urlparse(url).path.split("/") if p]
+    if not parts or parts[0] != "share":
+        return url
+    own = client is None
+    client = client or httpx.Client(headers={"User-Agent": UA}, timeout=15, follow_redirects=True)
+    try:
+        final = str(client.get(url).url)
+        host = (urlparse(final).hostname or "").lower()
+        return final if (host == "instagram.com" or host.endswith(".instagram.com")) and shortcode(final) else url
+    except httpx.HTTPError as e:
+        log.warning("Instagram share link didn't open: %s", e)
+        return url
+    finally:
+        if own:
+            client.close()
+
+
+def download_post(url: str, workdir: Path, client: Optional[httpx.Client] = None,
+                  max_video_bytes: int = 80 << 20) -> Optional[tuple[ReelMetadata, list[Path], Optional[Path]]]:
+    """A post read from its public embed page: (caption and author, pictures saved as slides, the video if it
+    has one), or None if the page gave nothing usable. Used for photo posts and carousels, which yt-dlp can't
+    download, and as a second way in when yt-dlp is blocked."""
     code = shortcode(url)
     if not code:
         return None
@@ -89,7 +118,7 @@ def download_photo_post(url: str, workdir: Path, client: Optional[httpx.Client] 
         if r.status_code != 200:
             log.warning("Instagram embed answered %s", r.status_code)
             return None
-        pictures, caption, author = parse_embed(r.text)
+        pictures, videos, caption, author = parse_embed_media(r.text)
         slides: list[Path] = []
         for i, link in enumerate(pictures, start=1):
             try:
@@ -100,13 +129,35 @@ def download_photo_post(url: str, workdir: Path, client: Optional[httpx.Client] 
                 path = workdir / f"ig-slide-{i:02d}.jpg"
                 path.write_bytes(img.content)
                 slides.append(path)
-        if not slides and not caption:
+        video: Optional[Path] = None
+        for link in videos:
+            try:
+                with client.stream("GET", link) as v:
+                    if v.status_code != 200 or not v.headers.get("content-type", "").startswith("video/"):
+                        continue
+                    path, size = workdir / "ig-video.mp4", 0
+                    with path.open("wb") as out:
+                        for chunk in v.iter_bytes():
+                            size += len(chunk)
+                            if size > max_video_bytes:
+                                break
+                            out.write(chunk)
+                    if size <= max_video_bytes:
+                        video = path
+            except httpx.HTTPError:
+                continue
+        if not slides and not caption and video is None:
             return None
         metadata = ReelMetadata(platform="instagram", url=url, caption=caption or None, uploader=author or None)
-        return metadata, slides
+        return metadata, slides, video
     except httpx.HTTPError as e:
         log.warning("Instagram embed failed: %s", e)
         return None
     finally:
         if own:
             client.close()
+
+
+def download_photo_post(url: str, workdir: Path, client: Optional[httpx.Client] = None) -> Optional[tuple[ReelMetadata, list[Path]]]:
+    got = download_post(url, workdir, client)
+    return (got[0], got[1]) if got else None

@@ -64,6 +64,8 @@ def download_reel(url: str, workdir: Path, settings: Settings) -> DownloadedReel
     import yt_dlp
 
     platform = platform_for(url)
+    if platform == "instagram":
+        url = instagram.resolve(url)
     if platform == "tiktok":
         url = tiktok.resolve(url)
         if tiktok.is_photo_post(url):
@@ -87,7 +89,7 @@ def download_reel(url: str, workdir: Path, settings: Settings) -> DownloadedReel
             info = ydl.extract_info(url, download=True)
         except yt_dlp.utils.DownloadError as e:
             log.warning("Media download failed, retrying for metadata only: %s", e)
-            if platform == "instagram" and _no_video(str(e)):
+            if platform == "instagram":  # photo posts always land here; blocked reels sometimes do
                 post = _instagram_photo_post(url, workdir)
                 if post:
                     return post
@@ -123,19 +125,14 @@ def _tiktok_photo_post(url: str, workdir: Path, settings: Settings) -> Downloade
     return DownloadedReel(metadata=metadata, image_paths=slides)
 
 
-def _no_video(message: str) -> bool:
-    low = message.lower()
-    return "no video" in low or "no video formats" in low
-
-
 def _instagram_photo_post(url: str, workdir: Path) -> Optional[DownloadedReel]:
-    """A picture or carousel post, read from Instagram's embed page (yt-dlp only knows videos)."""
-    got = instagram.download_photo_post(url, workdir)
+    """A picture or carousel post, or a reel yt-dlp couldn't get, read from Instagram's embed page."""
+    got = instagram.download_post(url, workdir)
     if not got:
         return None
-    metadata, slides = got
-    log.info("Instagram photo post: %d slides", len(slides))
-    return DownloadedReel(metadata=metadata, image_paths=slides)
+    metadata, slides, video = got
+    log.info("Instagram embed: %d slides, %s", len(slides), "a video" if video else "no video")
+    return DownloadedReel(metadata=metadata, image_paths=slides, video_path=video)
 
 
 class DownloadFailed(Exception):

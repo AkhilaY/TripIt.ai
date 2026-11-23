@@ -19,6 +19,7 @@ from urllib.parse import urlparse
 sys.path.insert(0, ".")
 
 from app.config import get_settings  # noqa: E402
+from app import instagram  # noqa: E402
 from app.media import DownloadFailed, download_reel, fetch_oembed, platform_for  # noqa: E402
 
 LIMIT = int(sys.argv[1]) if len(sys.argv) > 1 else 40
@@ -58,6 +59,16 @@ def attempt(url: str, settings) -> tuple[str, str]:
         return "caption only", "opened, but no video or images"
 
 
+def embed_check(url: str) -> str:
+    """The Instagram backup route on its own (the post's embed page), whatever yt-dlp managed."""
+    with tempfile.TemporaryDirectory(prefix="embed-") as tmp:
+        got = instagram.download_post(instagram.resolve(url), Path(tmp))
+        if not got:
+            return "embed: nothing"
+        meta, slides, video = got
+        return f"embed: {len(slides)} pictures, {'video' if video else 'no video'}, caption {'yes' if meta.caption else 'no'}"
+
+
 def main() -> None:
     settings = get_settings()
     db = sqlite3.connect(f"file:{settings.database_path}?mode=ro", uri=True)
@@ -81,7 +92,13 @@ def main() -> None:
         took = time.monotonic() - start
         before = "failed before" if row["failed"] == row["tries"] else ("failed once" if row["failed"] else "worked before")
         results.append((platform_for(url), shape(url), outcome, why))
-        print(f"{tag(url)}  {shape(url):28} {outcome:13} {took:5.1f}s  ({before})  {why}", flush=True)
+        extra = ""
+        if platform_for(url) == "instagram":
+            try:
+                extra = "  | " + pool.submit(embed_check, url).result(timeout=PER_LINK)
+            except Exception as e:  # noqa: BLE001
+                extra = f"  | embed: {type(e).__name__}"
+        print(f"{tag(url)}  {shape(url):28} {outcome:13} {took:5.1f}s  ({before})  {why}{extra}", flush=True)
 
     print("\nSummary by kind of link")
     by_shape = collections.defaultdict(collections.Counter)

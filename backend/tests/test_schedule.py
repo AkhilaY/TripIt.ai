@@ -314,3 +314,30 @@ def test_instagram_photo_post_downloads_slides(tmp_path):
     with httpx.Client(transport=httpx.MockTransport(handler)) as client:
         meta, slides = instagram.download_photo_post("https://www.instagram.com/p/ABC/", tmp_path, client)
     assert meta.caption == "Pizza at Lucali" and len(slides) == 1 and slides[0].read_bytes().startswith(b"\xff\xd8")
+
+
+def test_instagram_embed_fallback_gets_reel_video_and_follows_share_links(tmp_path):
+    import json as _json
+    import httpx
+    from app import instagram
+
+    media = {"is_video": True, "video_url": "https://cdn/v.mp4", "display_url": "https://cdn/cover.jpg",
+             "edge_media_to_caption": {"edges": [{"node": {"text": "Rooftop bars in Lisbon"}}]}}
+    page = '"contextJSON":' + _json.dumps(_json.dumps({"gql_data": {"shortcode_media": media}}))
+
+    def handler(request):
+        if request.url.path.startswith("/share/"):
+            return httpx.Response(302, headers={"location": "https://www.instagram.com/reel/REEL1/"})
+        if request.url.path.startswith("/reel/"):
+            return httpx.Response(200, text="ok")
+        if "embed" in request.url.path:
+            assert "/p/REEL1/" in request.url.path
+            return httpx.Response(200, text=page)
+        return httpx.Response(200, content=b"\x00\x00\x00 ftypmp4", headers={"content-type": "video/mp4"})
+
+    with httpx.Client(transport=httpx.MockTransport(handler), follow_redirects=True) as client:
+        url = instagram.resolve("https://www.instagram.com/share/reel/BAbc/", client)
+        assert url == "https://www.instagram.com/reel/REEL1/"
+        meta, slides, video = instagram.download_post(url, tmp_path, client)
+    assert meta.caption == "Rooftop bars in Lisbon" and slides == [] and video and video.read_bytes().endswith(b"mp4")
+    assert instagram.resolve("https://www.instagram.com/p/X/") == "https://www.instagram.com/p/X/"

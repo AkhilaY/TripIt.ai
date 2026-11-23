@@ -260,3 +260,19 @@ def test_tiktok_short_link_kept_when_it_never_reaches_the_post(monkeypatch):
     monkeypatch.setattr(tiktok.httpx, "Client", lambda **kw: real(transport=httpx.MockTransport(handler), **kw))
     monkeypatch.setattr(tiktok, "RESOLVE_PAUSE", 0)
     assert tiktok.resolve("https://www.tiktok.com/t/ZPNrrb5w7/") == "https://www.tiktok.com/t/ZPNrrb5w7/"
+
+
+def test_edit_cover_prefers_a_saved_places_photo_over_an_expiring_google_link():
+    from app.concierge import Curator
+    from app.db import Database
+    from app.models import EditItem, PlacePhoto
+    curator = Curator(Database(":memory:"), None, photo_url=lambda ref: f"/v1/discover/photo?ref={ref}&sig=x")
+    saved = PlacePhoto(source="google", url="/v1/places/p1/photos/0?sig=y")
+    reel = PlacePhoto(source="reel", url="/v1/places/p2/photos/0?sig=z")
+    pick = PlacePhoto(source="google", url="/v1/discover/photo?ref=places/a&sig=x")
+    items = [EditItem(id="i1", name="Press pick", category="food", city="NYC", photo=pick),
+             EditItem(id="i2", place_id="p2", saved=True, name="Reel place", category="food", city="NYC", photo=reel),
+             EditItem(id="i3", place_id="p1", saved=True, name="Saved", category="food", city="NYC", photo=saved)]
+    assert curator._pick_cover({"ref": "places/a"}, items) == saved  # Claude's Google pick loses to a saved photo
+    assert curator._pick_cover(None, items[:1]) == pick  # nothing saved: the pick is all there is
+    assert curator._pick_cover(None, []) is None

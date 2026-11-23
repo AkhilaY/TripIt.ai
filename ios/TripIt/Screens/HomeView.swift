@@ -11,11 +11,41 @@ struct HomeView: View {
     @State private var settingHome = false
     @State private var homeCity = ""
     @State private var tripEdits: [HomeEdit] = []
+    @State private var headerShowing = true  // the photo is behind the status bar, so its text goes white
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 0) {
-                headerBox
+        GeometryReader { outer in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    headerBox(top: outer.safeAreaInsets.top)
+                    sections.padding(.horizontal, 20)
+                }
+                .padding(.bottom, 40)
+            }
+            .ignoresSafeArea(edges: .top)
+        }
+        .background(Theme.background.ignoresSafeArea())
+        .toolbarBackground(.hidden, for: .navigationBar)
+        .toolbarColorScheme(headerShowing ? .dark : nil, for: .navigationBar)
+        .refreshable { await store.refresh() }
+        .task(id: store.upcomingTrips.first?.id) {
+            guard let trip = store.upcomingTrips.first else { tripEdits = []; return }
+            if store.tripDetails[trip.id] == nil { _ = try? await store.loadTrip(trip.id) }
+            await loadTripEdits(trip)
+        }
+        .onAppear { location.request() }
+        .task { if !store.bookingsLoaded { await store.reloadBookings() } }
+        .alert("Your home city", isPresented: $settingHome) {
+            TextField("e.g. Atlanta", text: $homeCity)
+            Button("Cancel", role: .cancel) {}
+            Button("Save") { Task { _ = await store.setHome(homeCity.trimmingCharacters(in: .whitespaces)) } }
+        } message: {
+            Text("Places you save there are kept as Around your city, with no trip needed.")
+        }
+    }
+
+    @ViewBuilder private var sections: some View {
+        VStack(alignment: .leading, spacing: 0) {
                 if !store.loaded, let error = store.error {
                     EmptyState(symbol: "wifi.slash", title: "Can't reach The Travel Edit", text: error) {
                         Button("Try again") { Task { await store.refresh() } }.buttonStyle(PrimaryButtonStyle(tinted: true)).frame(maxWidth: 200)
@@ -40,33 +70,14 @@ struct HomeView: View {
                     }
                     recent
                 }
-            }
-            .padding(.horizontal, 20)
-            .padding(.bottom, 40)
-        }
-        .background(Theme.background.ignoresSafeArea())
-        .toolbar(.hidden, for: .navigationBar)
-        .refreshable { await store.refresh() }
-        .task(id: store.upcomingTrips.first?.id) {
-            guard let trip = store.upcomingTrips.first else { tripEdits = []; return }
-            if store.tripDetails[trip.id] == nil { _ = try? await store.loadTrip(trip.id) }
-            await loadTripEdits(trip)
-        }
-        .onAppear { location.request() }
-        .task { if !store.bookingsLoaded { await store.reloadBookings() } }
-        .alert("Your home city", isPresented: $settingHome) {
-            TextField("e.g. Atlanta", text: $homeCity)
-            Button("Cancel", role: .cancel) {}
-            Button("Save") { Task { _ = await store.setHome(homeCity.trimmingCharacters(in: .whitespaces)) } }
-        } message: {
-            Text("Places you save there are kept as Around your city, with no trip needed.")
         }
     }
 
     // MARK: Header
 
-    /// The greeting in a box of slowly changing scenery (the welcome screen's), still while another page covers it.
-    private var headerBox: some View {
+    /// The greeting over slowly changing scenery (the welcome screen's), edge to edge and up under the clock, with
+    /// rounded bottom corners. Still while another page covers it.
+    private func headerBox(top: CGFloat) -> some View {
         WelcomeScenery(paused: router.tab != .home || !router.home.isEmpty, fullBleed: false, gradient: WelcomeSceneryStyle.header) { current, textOpacity in
             VStack(alignment: .leading, spacing: 0) {
                 HStack(alignment: .center) {
@@ -90,11 +101,11 @@ struct HomeView: View {
                     .padding(.top, 6)
                     .accessibilityHidden(true)
             }
-            .padding(.horizontal, 20).padding(.top, 14).padding(.bottom, 20)
+            .padding(.horizontal, 20).padding(.top, top + 6).padding(.bottom, 26)
         }
-        .frame(height: 300)
-        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .padding(.top, 8)
+        .frame(height: 330 + top)
+        .clipShape(UnevenRoundedRectangle(bottomLeadingRadius: 28, bottomTrailingRadius: 28, style: .continuous))
+        .onGeometryChange(for: Bool.self) { $0.frame(in: .global).maxY > top + 30 } action: { headerShowing = $0 }
     }
 
     /// Where you are: today's stop during a trip, otherwise home.
@@ -130,7 +141,7 @@ struct HomeView: View {
                 Text("Today's edits").font(Theme.serif(25)).foregroundStyle(Theme.label)
                 Text("Picked from your saves, new each day").font(Theme.text(.subheadline)).foregroundStyle(Theme.secondary)
             }
-            .padding(.top, 36)
+            .padding(.top, 32)
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(alignment: .top, spacing: 12) {
                     ForEach(all) { edit in

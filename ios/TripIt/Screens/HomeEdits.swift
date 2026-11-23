@@ -10,6 +10,7 @@ struct HomeEdit: Identifiable, Hashable {
     let note: String
     let placeIds: [String]
     let cover: PlacePhoto?
+    var fallbacks: [PlacePhoto] = []  // tried in turn if the cover doesn't load
     var tripId: String?
     var tripEditId: String?
 
@@ -41,8 +42,9 @@ enum HomeEdits {
         func add(_ id: String, _ caption: String, _ title: String, _ note: String, _ places: [Place], min: Int = 3) {
             guard places.count >= min else { return }
             let picked = order(places, day: day)
+            let photos = picked.compactMap(\.photos.first)
             out.append(HomeEdit(id: id, caption: "\(caption) · \(Fmt.plural(places.count, "place"))", title: title, note: note,
-                                placeIds: picked.map(\.id), cover: picked.first { !$0.photos.isEmpty }?.photos.first))
+                                placeIds: picked.map(\.id), cover: photos.first, fallbacks: Array(photos.dropFirst().prefix(3))))
         }
 
         // The city most of your saves are in stands in for home until you set one.
@@ -103,7 +105,8 @@ enum HomeEdits {
     static func fromTrip(_ trip: Trip, _ edits: TripEdits) -> [HomeEdit] {
         edits.edits.prefix(2).map { edit in
             HomeEdit(id: "trip-\(trip.id)-\(edit.id)", caption: "\(trip.name) · \(Fmt.plural(edit.entries.count, "place"))",
-                     title: edit.title, note: edit.dek, placeIds: [], cover: edit.coverPhoto, tripId: trip.id, tripEditId: edit.id)
+                     title: edit.title, note: edit.dek, placeIds: [], cover: edit.coverCandidates.first,
+                     fallbacks: Array(edit.coverCandidates.dropFirst()), tripId: trip.id, tripEditId: edit.id)
         }
     }
 }
@@ -121,7 +124,9 @@ struct HomeEditCard: View {
                 .frame(width: width, height: height)
                 .overlay {
                     if let cover = edit.cover {
-                        RemoteImage(url: cover.url(width: 800)) { Theme.cell }
+                        ChainImage(urls: ([cover] + edit.fallbacks).compactMap { $0.url(width: 800) }) {
+                            ZStack { Theme.cell; Image(systemName: "sparkles").font(.system(size: 28, weight: .light)).foregroundStyle(Theme.secondary) }
+                        }
                     } else if let fallback {
                         PhotoBox(place: fallback, width: width, height: height, radius: 0)
                     } else {

@@ -194,27 +194,27 @@ struct BottomBar: View {
     private static let grey = Color(red: 0.557, green: 0.541, blue: 0.525)  // #8E8A86
 
     var body: some View {
-        VStack(spacing: 12) {
-            HStack(spacing: 12) {
+        VStack(spacing: 4) {
+            HStack(spacing: 10) {
                 Button(action: onSearch) {
-                    HStack(spacing: 12) {
-                        Image(systemName: "magnifyingglass").font(.system(size: 18, weight: .light))
-                        Text("Search your places").font(Theme.text(.body))
+                    HStack(spacing: 10) {
+                        Image(systemName: "magnifyingglass").font(.system(size: 15, weight: .light))
+                        Text("Search your places").font(Theme.text(.subheadline))
                         Spacer(minLength: 0)
                     }
                     .foregroundStyle(Color(red: 0.604, green: 0.584, blue: 0.565))  // #9A9590
-                    .padding(.horizontal, 20)
-                    .frame(height: 52)
+                    .padding(.horizontal, 16)
+                    .frame(height: 40)
                     .background(Color(red: 0.118, green: 0.118, blue: 0.118), in: Capsule())  // #1E1E1E
                     .contentShape(Capsule())
                 }
                 .buttonStyle(.plain)
                 Button(action: onAdd) {
-                    Image(systemName: "plus").font(.system(size: 22, weight: .light))
+                    Image(systemName: "plus").font(.system(size: 18, weight: .light))
                         .foregroundStyle(Color(red: 0.098, green: 0.067, blue: 0.043))
-                        .frame(width: 52, height: 52)
+                        .frame(width: 40, height: 40)
                         .background(Color.white, in: Circle())
-                        .shadow(color: .white.opacity(0.25), radius: 9)
+                        .shadow(color: .white.opacity(0.2), radius: 7)
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Save a link or a place")
@@ -223,12 +223,12 @@ struct BottomBar: View {
                 ForEach(items) { item in
                     let on = item.tab == selected
                     Button { onSelect(item.tab) } label: {
-                        VStack(spacing: 5) {
-                            Image(systemName: item.symbol).font(.system(size: 19, weight: .light))
-                            Text(item.title).font(Theme.text(.footnote, weight: on ? .medium : .regular)).kerning(0.6)
+                        VStack(spacing: 3) {
+                            Image(systemName: item.symbol).font(.system(size: 17, weight: .light))
+                            Text(item.title).font(Theme.text(.caption, weight: on ? .medium : .regular)).kerning(0.5)
                         }
                         .foregroundStyle(on ? Color.white : Self.grey)
-                        .frame(maxWidth: .infinity, minHeight: 50)
+                        .frame(maxWidth: .infinity, minHeight: 44)
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
@@ -237,8 +237,8 @@ struct BottomBar: View {
             }
         }
         .padding(.horizontal, 20)
-        .padding(.top, 14)
-        .padding(.bottom, 2)
+        .padding(.top, 8)
+        .padding(.bottom, -6)  // the tabs sit a little into the home-indicator area, as system tab bars do
         .background(Color.black)
         .environment(\.colorScheme, .dark)
     }

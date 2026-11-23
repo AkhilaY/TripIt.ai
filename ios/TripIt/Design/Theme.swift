@@ -222,6 +222,21 @@ enum PlaceGroup: String, CaseIterable, Identifiable {
     }
 
     var color: Color { categories[0].color }
+
+    /// A muted swatch for the kind of place, shown as a small dot on its filter chip and in place rows.
+    var swatch: Color {
+        switch self {
+        case .food: Theme.dynamic(0x9A4A2E, 0xD58E70)  // rust
+        case .coffee: Theme.dynamic(0x6B4E37, 0xC2A184)  // umber
+        case .drinks: Theme.dynamic(0x6E2E3F, 0xCC8C9C)  // burgundy
+        case .stay: Theme.dynamic(0x3F5566, 0x93AABC)  // slate
+        case .shopping: Theme.dynamic(0x86641A, 0xD4B062)  // ochre
+        case .sights: Theme.dynamic(0x4F6B4A, 0x98B391)  // sage
+        case .activities: Theme.dynamic(0x2F5F5B, 0x7FB0AA)  // teal
+        case .events: Theme.dynamic(0x5B3B66, 0xB597C3)  // plum
+        case .other: Theme.tertiary
+        }
+    }
 }
 
 /// A restaurant's cuisine, as the server works it out (see backend/app/cuisine.py), with an emoji for its chip.

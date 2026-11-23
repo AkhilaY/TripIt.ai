@@ -98,7 +98,7 @@ struct PlaceFilterBar: View {
         VStack(alignment: .leading, spacing: 10) {
             FlowLayout(spacing: 8) {
                 if showSort { sortMenu }
-                FilterChip(label: "Starred", symbol: "star.fill", tint: Theme.gold, isOn: filter.starred) { filter.starred.toggle() }
+                FilterChip(label: "Starred", dot: Theme.label, isOn: filter.starred) { filter.starred.toggle() }
                 groupChips
                 moreMenu
             }
@@ -152,12 +152,17 @@ struct PlaceFilterBar: View {
                 }
             }
         } label: {
-            Label(sort.label, systemImage: "arrow.up.arrow.down")
-                .font(Theme.text(.subheadline))
-                .padding(.horizontal, 12).padding(.vertical, 7)
-                .background(Theme.cell, in: Capsule())
-                .overlay(Capsule().strokeBorder(Theme.fill, lineWidth: 1))
+            HStack(spacing: 6) {
+                Image(systemName: "arrow.up.arrow.down").font(.system(size: 12, weight: .light))
+                Text(sort.label).font(Theme.text(.subheadline))
+            }
+            .foregroundStyle(Theme.label)
+            .padding(.horizontal, 16).frame(height: 40)
+            .background(Theme.background, in: Capsule())
+            .overlay(Capsule().strokeBorder(Theme.chipBorder))
+            .fixedSize()
         }
+        .fixedSize()
         .onChange(of: sort) { _, value in
             if value == .closest { Location.shared.request() }
         }
@@ -167,8 +172,7 @@ struct PlaceFilterBar: View {
         let counts = groupCounts
         let shown: [PlaceGroup] = PlaceGroup.allCases.filter { counts[$0] != nil }
         return ForEach(shown) { group in
-            FilterChip(label: group.label, count: counts[group], symbol: group.symbol, tint: group.color,
-                       isOn: filter.groups.contains(group)) {
+            FilterChip(label: group.label, count: counts[group], dot: group.swatch, isOn: filter.groups.contains(group)) {
                 toggle(group)
             }
         }
@@ -222,13 +226,14 @@ private struct FilterChipLabel: View {
     let text: String
     let isOn: Bool
     var body: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 6) {
             Text(text).font(Theme.text(.subheadline))
-            Image(systemName: "chevron.down").font(Theme.text(.caption2))
+            Image(systemName: "chevron.down").font(.system(size: 11, weight: .light))
         }
-        .padding(.horizontal, 12).padding(.vertical, 7)
+        .padding(.horizontal, 16).frame(height: 40)
         .foregroundStyle(isOn ? Theme.accentInk : Theme.label)
-        .background(isOn ? Theme.accent : Theme.cell, in: Capsule())
-        .overlay(Capsule().strokeBorder(Theme.fill, lineWidth: isOn ? 0 : 1))
+        .background(isOn ? Theme.accent : Theme.background, in: Capsule())
+        .overlay(Capsule().strokeBorder(Theme.chipBorder, lineWidth: isOn ? 0 : 1))
+        .fixedSize()
     }
 }

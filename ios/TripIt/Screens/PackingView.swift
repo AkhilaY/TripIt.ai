@@ -1,7 +1,9 @@
 import SwiftUI
 
 /// A trip's packing list: made for its days, the weather and your taste, imported from a list you have, or your own.
-/// Tick things off as you pack; after the trip, mark what you didn't use and it's left off next time.
+/// How much is packed at the top, then the weather, then the list by category; each item says why it's there and,
+/// when it's for one evening or outing, which day that is. Tick things off as you pack; press and hold (or swipe) for
+/// more. After the trip, mark what you didn't use and it's left off next time.
 struct PackingView: View {
     let tripId: String
     @Environment(Store.self) private var store
@@ -10,7 +12,6 @@ struct PackingView: View {
     @State private var error: String?
     @State private var making = false
     @State private var sheet: Sheet?
-    @State private var acting: PackingItem?
 
     enum Sheet: String, Identifiable {
         case add, importList
@@ -54,7 +55,7 @@ struct PackingView: View {
                 start
             }
         }
-        .listStyle(.insetGrouped)
+        .listStyle(.plain)
         .tripBackground()
         .navigationTitle("Packing")
         .task { await load() }
@@ -64,13 +65,6 @@ struct PackingView: View {
             case .add: AddPackingItem(tripId: tripId) { list = $0 }
             case .importList: ImportPackingList(tripId: tripId) { list = $0 }
             }
-        }
-        .confirmationDialog(acting?.text ?? "", isPresented: Binding(get: { acting != nil }, set: { if !$0 { acting = nil } }),
-                            titleVisibility: .visible, presenting: acting) { item in
-            Button(item.unused ? "I did use this" : "I didn't use this") {
-                Task { await change(item, ["unused": !item.unused], message: item.unused ? "Noted" : "Noted. It's left off next time") }
-            }
-            Button("Delete", role: .destructive) { Task { await remove(item) } }
         }
     }
 
@@ -118,110 +112,154 @@ struct PackingView: View {
 
     @ViewBuilder private func content(_ list: PackingList) -> some View {
         let packed = list.items.filter(\.packed).count
+        let total = list.items.count
         Section {
-            HStack {
-                Label(byline(list), systemImage: list.generatedBy == "claude" ? "sparkles" : "checklist")
-                    .font(Theme.text(.footnote)).foregroundStyle(Theme.secondary)
-                Spacer()
-                Menu {
-                    Button { sheet = .importList } label: { Label("Import a list", systemImage: "doc.on.doc") }
-                    Button { Task { await make([:]) } } label: {
-                        Label(list.generatedBy == "manual" ? "Add suggestions" : "Make it again", systemImage: "sparkles")
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(summary(list)).font(Theme.text(.subheadline)).foregroundStyle(Theme.secondary).lineLimit(1)
+                    Spacer()
+                    Menu {
+                        Button { sheet = .add } label: { Label("Add an item", systemImage: "plus") }
+                        Button { sheet = .importList } label: { Label("Import a list", systemImage: "doc.on.doc") }
+                        Button { Task { await make([:]) } } label: {
+                            Label(list.generatedBy == "manual" ? "Add suggestions" : "Make it again", systemImage: "sparkles")
+                        }
+                        Button { Task { await make(["carry_on_only": !list.carryOnOnly]) } } label: {
+                            Label(list.carryOnOnly ? "Checked bag too" : "Carry-on only", systemImage: "suitcase.rolling")
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis").font(.system(size: 17, weight: .light)).foregroundStyle(Theme.label)
+                            .frame(width: 44, height: 32)
                     }
-                    Button { Task { await make(["carry_on_only": !list.carryOnOnly]) } } label: {
-                        Label(list.carryOnOnly ? "Checked bag too" : "Carry-on only", systemImage: "suitcase.rolling")
-                    }
-                } label: { Image(systemName: "ellipsis.circle").font(Theme.text(.body)) }
                     .accessibilityLabel("List options")
+                }
+                Text(total == 0 ? "Nothing on the list yet" : packed == total ? "All packed" : "\(packed) of \(total) packed")
+                    .font(Theme.serif(30)).foregroundStyle(Theme.label)
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(Theme.border)
+                        Capsule().fill(Theme.accent).frame(width: total == 0 ? 0 : geo.size.width * Double(packed) / Double(total))
+                    }
+                }
+                .frame(height: 3)
+                .animation(.snappy, value: packed)
+                if let notes = list.notes, !notes.isEmpty {
+                    Text(notes).font(Theme.text(.subheadline)).foregroundStyle(Theme.secondary)
+                        .fixedSize(horizontal: false, vertical: true).padding(.top, 4)
+                }
             }
-            if list.carryOnOnly {
-                Label("Carry-on only", systemImage: "suitcase.rolling").font(Theme.text(.footnote)).foregroundStyle(Theme.teal)
-            }
-            if let notes = list.notes, !notes.isEmpty {
-                Text(notes).font(Theme.text(.subheadline)).foregroundStyle(Theme.label)
-            }
-            VStack(alignment: .leading, spacing: 6) {
-                ProgressView(value: list.items.isEmpty ? 0 : Double(packed) / Double(list.items.count)).tint(Theme.ok)
-                Text("\(packed) of \(list.items.count) packed").font(Theme.text(.footnote)).foregroundStyle(Theme.secondary)
-            }
+            .padding(.vertical, 8)
+            .listRowInsets(EdgeInsets(top: 8, leading: 20, bottom: 8, trailing: 12))
+            .listRowSeparator(.hidden)
+            .listRowBackground(Color.clear)
+            if !list.weather.isEmpty { weather(list.weather) }
         }
-        if !list.weather.isEmpty { weather(list.weather) }
+        .listSectionSeparator(.hidden)
         ForEach(Self.groups) { group in
             let items = list.items.filter { $0.group == group.id }
             if !items.isEmpty {
                 Section {
-                    ForEach(items) { item in row(item) }
-                } header: {
-                    HStack {
-                        Text(group.label).font(Theme.serif(19)).foregroundStyle(Theme.label).textCase(nil)
-                        Text("\(items.count)").foregroundStyle(Theme.secondary)
+                    ForEach(items) { item in
+                        row(item)
+                            .listRowInsets(EdgeInsets(top: 12, leading: 20, bottom: 12, trailing: 20))
+                            .listRowBackground(Color.clear)
+                            .listRowSeparatorTint(Theme.border)
                     }
+                } header: {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(group.label).font(Theme.serif(22)).foregroundStyle(Theme.label)
+                        Text("\(items.filter(\.packed).count) of \(items.count)").font(Theme.text(.footnote)).foregroundStyle(Theme.secondary)
+                        Spacer()
+                    }
+                    .textCase(nil)
+                    .padding(.top, 18).padding(.bottom, 4)
+                    .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
                 }
+                .listSectionSeparator(.hidden)
             }
         }
         Section {
-            Button { sheet = .add } label: { Label("Add an item", systemImage: "plus") }
-        } footer: {
-            Text("Back from the trip? Swipe or tap ••• on anything you didn't use and it's left off next time. Things you add stay when the list is made again.")
+            VStack(alignment: .leading, spacing: 10) {
+                AccentTextButton(title: "Add an item", symbol: "plus") { sheet = .add }
+                Text("Back from the trip? Press and hold anything you didn't use and it's left off next time. Things you add stay when the list is made again.")
+                    .font(Theme.text(.footnote)).foregroundStyle(Theme.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.top, 12)
+            .listRowInsets(EdgeInsets(top: 8, leading: 20, bottom: 24, trailing: 20))
+            .listRowSeparator(.hidden)
+            .listRowBackground(Color.clear)
         }
     }
 
-    private func byline(_ list: PackingList) -> String {
-        switch list.generatedBy {
-        case "claude": "Made for this trip"
+    /// "Made for Switzerland · 3 days · Carry-on only"
+    private func summary(_ list: PackingList) -> String {
+        let made: String = switch list.generatedBy {
+        case "claude": "Made for \(trip?.name ?? "this trip")"
         case "manual": "Your list"
         default: "A basic list"
         }
+        let days = (trip?.dayCount ?? 0) > 0 ? Fmt.plural(trip?.dayCount ?? 0, "day") : nil
+        return [made, days, list.carryOnOnly ? "Carry-on only" : nil].compactMap { $0 }.joined(separator: " · ")
     }
 
     private func weather(_ days: [WeatherDay]) -> some View {
-        Section {
+        VStack(alignment: .leading, spacing: 8) {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 10) {
                     ForEach(days, id: \.day) { w in
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(Fmt.shortDay(w.date)).font(Theme.text(.caption)).foregroundStyle(Theme.secondary)
-                            Text("\(TravelHome.temperature(w.tempMax))° / \(TravelHome.temperature(w.tempMin))°").font(Theme.text(.subheadline))
-                            Text(w.summary + (w.rainChance.map { " · \($0)%" } ?? "")).font(Theme.text(.caption)).foregroundStyle(Theme.secondary).lineLimit(1)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(Fmt.shortDay(w.date)).font(Theme.text(.footnote)).foregroundStyle(Theme.secondary)
+                            Text("\(TravelHome.temperature(w.tempMax))° / \(TravelHome.temperature(w.tempMin))°").font(Theme.serif(20)).foregroundStyle(Theme.label)
+                            Text(w.summary + (w.rainChance.map { " · \($0)%" } ?? "")).font(Theme.text(.footnote)).foregroundStyle(Theme.secondary).lineLimit(1)
                         }
-                        .padding(10)
-                        .frame(minWidth: 110, alignment: .leading)
-                        .background(Theme.fill, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .padding(14)
+                        .frame(minWidth: 120, alignment: .leading)
+                        .background(Theme.cell, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                     }
                 }
+                .padding(.horizontal, 20)
             }
-            .listRowInsets(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12))
-        } header: {
-            Label("Weather", systemImage: "sun.max").textCase(nil)
-        } footer: {
             Text(days.allSatisfy { $0.source == "typical" }
-                 ? "Too far ahead for a forecast, so these are last year's conditions for the same dates."
+                 ? "Too far ahead for a forecast: these are last year's conditions on the same dates."
                  : "Forecast. It can change, so check again before you pack.")
+                .font(Theme.text(.footnote)).foregroundStyle(Theme.tertiary).padding(.horizontal, 20)
         }
+        .padding(.vertical, 4)
+        .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 12, trailing: 0))
+        .listRowSeparator(.hidden)
+        .listRowBackground(Color.clear)
     }
 
     private func row(_ item: PackingItem) -> some View {
-        HStack(alignment: .top, spacing: 12) {
+        HStack(alignment: .top, spacing: 14) {
             Button { Haptics.tap(); Task { await change(item, ["packed": !item.packed]) } } label: {
                 Image(systemName: item.packed ? "checkmark.circle.fill" : "circle")
-                    .font(Theme.text(.title3)).foregroundStyle(item.packed ? Theme.ok : Theme.tertiary)
+                    .font(.system(size: 22, weight: .light))
+                    .foregroundStyle(item.packed ? Theme.accent : Theme.tertiary)
+                    .contentTransition(.symbolEffect(.replace))
             }
             .buttonStyle(.plain)
             .accessibilityLabel(item.packed ? "Packed: \(item.text)" : "Not packed: \(item.text)")
             VStack(alignment: .leading, spacing: 3) {
-                Text(item.text).strikethrough(item.packed).foregroundStyle(item.unused ? Theme.secondary : Theme.label)
-                if item.reason != nil || !item.days.isEmpty {
-                    HStack(spacing: 6) {
-                        if let reason = item.reason { Text(reason).font(Theme.text(.footnote)).foregroundStyle(Theme.secondary) }
-                        if !item.days.isEmpty { Chip(text: Self.dayList(item.days)) }
-                    }
+                Text(item.text).font(Theme.text(.body))
+                    .strikethrough(item.packed, color: Theme.tertiary)
+                    .foregroundStyle(item.packed || item.unused ? Theme.secondary : Theme.label)
+                if let line = detail(item) {
+                    Text(line).font(Theme.text(.footnote)).foregroundStyle(Theme.secondary).fixedSize(horizontal: false, vertical: true)
                 }
-                if item.unused { Text("Didn't use it last time").font(Theme.text(.caption)).foregroundStyle(Theme.tertiary) }
+                if item.unused { Text("Didn't use it last time").font(Theme.text(.footnote)).foregroundStyle(Theme.tertiary) }
             }
-            Spacer(minLength: 4)
-            Button { acting = item } label: { Image(systemName: "ellipsis").foregroundStyle(Theme.secondary).frame(width: 28, height: 28) }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Options for \(item.text)")
+            Spacer(minLength: 0)
+        }
+        .contentShape(Rectangle())
+        .contextMenu {
+            Button { Task { await change(item, ["packed": !item.packed]) } } label: {
+                Label(item.packed ? "Not packed yet" : "Packed", systemImage: item.packed ? "circle" : "checkmark.circle")
+            }
+            Button { Task { await change(item, ["unused": !item.unused], message: item.unused ? "Noted" : "Noted. It's left off next time") } } label: {
+                Label(item.unused ? "I did use this" : "I didn't use this", systemImage: "arrow.uturn.backward")
+            }
+            Button(role: .destructive) { Task { await remove(item) } } label: { Label("Delete", systemImage: "trash") }
         }
         .swipeActions(edge: .trailing) {
             Button(role: .destructive) { Task { await remove(item) } } label: { Label("Delete", systemImage: "trash") }
@@ -232,10 +270,21 @@ struct PackingView: View {
         }
     }
 
-    static func dayList(_ days: [Int]) -> String {
+    /// Why it's on the list, and the day it's for in words: "Evening at Rosengarten in Bern · For day 2, Thu 18 Dec".
+    private func detail(_ item: PackingItem) -> String? {
+        let parts = [item.reason, item.days.isEmpty ? nil : dayText(item.days)].compactMap { $0 }.filter { !$0.isEmpty }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    private func dayText(_ days: [Int]) -> String {
         guard let first = days.first, let last = days.last else { return "" }
-        if days.count > 3 { return "Days \(first)–\(last)" }
-        return (days.count > 1 ? "Days " : "Day ") + days.map(String.init).joined(separator: ", ")
+        func date(_ day: Int) -> String? {
+            guard let start = trip?.startDate, let d = Fmt.day(BookingTime.addDays(start, day - 1)) else { return nil }
+            return d.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated))
+        }
+        if days.count == 1 { return "For day \(first)" + (date(first).map { ", \($0)" } ?? "") }
+        if days.count > 3 || (first < last && days == Array(first...last) && days.count > 2) { return "For days \(first)–\(last)" }
+        return "For days " + days.map(String.init).joined(separator: " and ")
     }
 
     // MARK: Calls

@@ -408,6 +408,17 @@ struct EditItem: Codable, Identifiable, Hashable {
     var mapsUrl: String?
 }
 
+extension TripEdit {
+    /// Photos to try for the cover, best first: the cover, then saved places' photos (kept on the server), then the
+    /// rest (a Google link for a place that isn't saved can expire).
+    var coverCandidates: [PlacePhoto] {
+        let saved = entries.filter(\.saved).compactMap(\.photo)
+        let others = entries.filter { !$0.saved }.compactMap(\.photo)
+        var seen = Set<String>()
+        return ([coverPhoto].compactMap { $0 } + saved + others).filter { seen.insert($0.url).inserted }.prefix(5).map { $0 }
+    }
+}
+
 struct TripEdit: Codable, Identifiable, Hashable {
     var id: String
     var title: String

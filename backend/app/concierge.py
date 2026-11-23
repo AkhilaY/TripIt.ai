@@ -260,6 +260,21 @@ class Curator:
                         rating=g.get("rating"), rating_count=g.get("rating_count"), latitude=g.get("latitude"),
                         longitude=g.get("longitude"), maps_url=g.get("maps_url"))
 
+    def _pick_cover(self, chosen: Optional[dict], items: list[EditItem]) -> Optional[PlacePhoto]:
+        """An edit's cover: Claude's pick when it's a saved place's photo, else a saved place's photo (those are kept
+        on the server), else Claude's pick or any photo. Google photo links for picks that aren't saved can expire,
+        so they come last."""
+        picked = self._cover(chosen)
+        if picked and not picked.url.startswith("/v1/discover/"):  # a saved place's photo, kept on the server
+            return picked
+        saved = [it.photo for it in items if it.saved and it.photo]
+        if saved:
+            return next((ph for ph in saved if ph.source != "reel"), saved[0])
+        if picked:
+            return picked
+        photos = [it.photo for it in items if it.photo]
+        return next((ph for ph in photos if ph.source != "reel"), photos[0] if photos else None)
+
     def _cover(self, chosen: Optional[dict]) -> Optional[PlacePhoto]:
         """The cover Claude picked, if its photo still exists."""
         if not chosen:
@@ -282,8 +297,7 @@ class Curator:
         for e in json.loads(row["data"]):
             items = [it for it in (self._item_for(x, i, trip) for i, x in enumerate(e["entries"], start=1)) if it]
             if len(items) >= 2 or (items and e.get("id") == "must"):
-                photos = [it.photo for it in items if it.photo]
-                cover = self._cover(e.get("cover")) or next((ph for ph in photos if ph.source != "reel"), photos[0] if photos else None)
+                cover = self._pick_cover(e.get("cover"), items)
                 edits.append(TripEdit(id=e["id"], title=e["title"], dek=e["dek"], entries=items, cover_photo=cover,
                                       folder_id=e.get("folder_id") if e.get("folder_id") in folders else None,
                                       new_count=sum(1 for it in items if not it.saved)))

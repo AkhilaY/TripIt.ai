@@ -287,7 +287,7 @@ struct VisitPicker: View {
         }
         .padding(4)
         .background(Theme.background, in: Capsule())
-        .shadow(color: Color(red: 0.1, green: 0.07, blue: 0.04).opacity(0.08), radius: 9, y: 4)
+        .overlay(Capsule().strokeBorder(Theme.chipBorder))
     }
 }
 

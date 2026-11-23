@@ -23,11 +23,12 @@ struct CityView: View {
             Section {
                 VStack(alignment: .leading, spacing: 4) {
                     if isHome { Eyebrow(text: "Your city") }
-                    Text(isHome ? "Around \(city)" : city).font(Theme.serif(28)).foregroundStyle(Theme.label)
+                    Text(isHome ? "Around \(city)" : city).font(Theme.serif(34)).foregroundStyle(Theme.label)
                     Text(subtitle(all, trip: trip)).font(Theme.text(.subheadline)).foregroundStyle(Theme.secondary)
                 }
                 .listRowBackground(Color.clear)
-                .listRowInsets(EdgeInsets(top: 4, leading: 20, bottom: 8, trailing: 20))
+                .listRowSeparator(.hidden)
+                .listRowInsets(EdgeInsets(top: 8, leading: 20, bottom: 12, trailing: 20))
                 if let trip {
                     // A plain button, not a NavigationLink: in a List that adds a second chevron next to the row's own.
                     VStack(alignment: .leading, spacing: 6) {
@@ -44,35 +45,42 @@ struct CityView: View {
                     }
                     .buttonStyle(PrimaryButtonStyle())
                     .listRowBackground(Color.clear)
-                    .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+                    .listRowSeparator(.hidden)
+                    .listRowInsets(EdgeInsets(top: 4, leading: 20, bottom: 4, trailing: 20))
                 }
                 VisitPicker(visit: $visit, places: all)
                     .listRowBackground(Color.clear)
-                    .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 0, trailing: 16))
+                    .listRowSeparator(.hidden)
+                    .listRowInsets(EdgeInsets(top: 8, leading: 20, bottom: 4, trailing: 20))
                 PlaceFilterBar(places: all, filter: $filter, sort: $sort)
-                    .listRowInsets(EdgeInsets())
+                    .listRowInsets(EdgeInsets(top: 8, leading: 4, bottom: 8, trailing: 4))
                     .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
             }
             .listSectionSeparator(.hidden)
             Section {
                 if places.isEmpty {
-                    EmptyState(symbol: "mappin.slash", title: all.isEmpty ? "Nothing here yet" : "Nothing matches",
+                    EmptyState(symbol: "mappin.and.ellipse", title: all.isEmpty ? "Nothing here yet" : "Nothing matches",
                                text: all.isEmpty ? "Places you save in \(city) land here automatically." : "Try fewer filters.")
                         .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
                 }
                 ForEach(places) { place in
                     NavigationLink(value: Route.place(id: place.id, tripId: nil)) {
                         PlaceRow(place: place, showCategory: true, distance: sort == .closest ? place.distance(from: location.current) : nil)
                     }
                     .placeActions(place, onDelete: { Task { await store.deleteWithUndo(place) } }, sheet: $sheet)
-                    .listRowBackground(Theme.cell)
+                    .listRowBackground(Color.clear)
+                    .listRowSeparatorTint(Theme.border)
+                    .listRowInsets(EdgeInsets(top: 12, leading: 20, bottom: 12, trailing: 16))
                 }
             }
+            .listSectionSeparator(.hidden)
         }
-        .listStyle(.insetGrouped)
+        .listStyle(.plain)
         .tripBackground()
         .animation(.snappy, value: store.saved.map(\.id))
-        .searchable(text: $filter.query, prompt: "Search \(isHome ? "around \(city)" : city)")
+        .searchable(text: $filter.query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search \(isHome ? "around \(city)" : city)")
         .navigationTitle(isHome ? "Around \(city)" : city)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {

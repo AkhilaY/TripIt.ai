@@ -88,7 +88,7 @@ struct FolderView: View {
             .tripBackground()
             .animation(.snappy, value: shown.map(\.id))
             .navigationTitle(folder.name)
-            .searchable(text: $filter.query, prompt: "Search this folder")
+            .searchable(text: $filter.query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search this folder")
             .refreshable { await store.reloadPlaces() }
             .toolbar {
                 Menu {

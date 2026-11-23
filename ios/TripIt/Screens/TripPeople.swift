@@ -50,7 +50,14 @@ struct PeopleRow: View {
             }
             Spacer(minLength: 8)
             Button { Task { await TripInvite.share(trip, store: store) } } label: {
-                Label("Invite", systemImage: "plus").font(Theme.text(.footnote)).foregroundStyle(Theme.link)
+                HStack(spacing: 5) {
+                    Image(systemName: "plus").font(.system(size: 12, weight: .light))
+                    Text("Invite").font(Theme.text(.subheadline))
+                }
+                .foregroundStyle(Theme.label)
+                .padding(.horizontal, 14).frame(height: 36)
+                .overlay(Capsule().strokeBorder(Theme.chipBorder))
+                .contentShape(Capsule())
             }
             .buttonStyle(.borderless)
         }

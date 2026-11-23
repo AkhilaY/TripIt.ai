@@ -227,11 +227,11 @@ struct EditCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             ZStack(alignment: .topLeading) {
-                RemoteImage(url: (edit.coverPhoto ?? edit.entries.first?.photo)?.url(width: 600)) {
-                    LinearGradient(colors: [Theme.gold, Theme.accent], startPoint: .topLeading, endPoint: .bottomTrailing)
+                ChainImage(urls: edit.coverCandidates.compactMap { $0.url(width: 600) }) {
+                    ZStack { Theme.cell; Image(systemName: "sparkles").font(.system(size: 22, weight: .light)).foregroundStyle(Theme.secondary) }
                 }
-                .frame(width: 220, height: 140)
-                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .frame(width: 220, height: 160)
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                 if edit.newCount > 0 {
                     Text("\(edit.newCount) new").font(Theme.text(.caption)).foregroundStyle(.white)
                         .padding(.horizontal, 8).padding(.vertical, 4)
@@ -239,8 +239,8 @@ struct EditCard: View {
                         .padding(8)
                 }
             }
-            Text(edit.title).font(Theme.serif(18)).foregroundStyle(Theme.label).lineLimit(2)
-            Text(edit.dek).font(Theme.text(.caption)).foregroundStyle(Theme.secondary).lineLimit(2)
+            Text(edit.title).font(Theme.serif(19)).foregroundStyle(Theme.label).lineLimit(2).padding(.top, 6)
+            Text(edit.dek).font(Theme.text(.footnote)).foregroundStyle(Theme.secondary).lineLimit(2)
         }
         .frame(width: 220, alignment: .leading)
     }

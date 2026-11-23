@@ -47,6 +47,29 @@ struct RemoteImage<Placeholder: View>: View {
     }
 }
 
+/// Like RemoteImage, but tries each address in turn (a Google photo link can expire; a saved place's photo won't).
+struct ChainImage<Placeholder: View>: View {
+    let urls: [URL]
+    @ViewBuilder var placeholder: () -> Placeholder
+    @State private var image: UIImage?
+
+    var body: some View {
+        ZStack {
+            if let image {
+                Image(uiImage: image).resizable().scaledToFill()
+            } else {
+                placeholder()
+            }
+        }
+        .task(id: urls) {
+            image = nil
+            for url in urls {
+                if let found = await ImageLoader.shared.image(url) { image = found; return }
+            }
+        }
+    }
+}
+
 extension PlacePhoto {
     /// The photo's address at a given width (the server resizes Google photos).
     func url(width: Int) -> URL? {
@@ -120,7 +143,10 @@ struct PlaceRow: View {
                         Circle().fill(Theme.warn).frame(width: 6, height: 6).accessibilityLabel("Not on the map yet")
                     }
                 }
-                Text(subtitle).font(Theme.text(.footnote)).foregroundStyle(Theme.secondary).lineLimit(1)
+                HStack(spacing: 6) {
+                    Circle().fill(PlaceGroup.of(place.category).swatch).frame(width: 6, height: 6)
+                    Text(subtitle).font(Theme.text(.footnote)).foregroundStyle(Theme.secondary).lineLimit(1)
+                }
                 chips
                 if !place.recommendedItems.isEmpty {
                     Text("Try: " + place.recommendedItems.joined(separator: ", "))
@@ -205,12 +231,17 @@ struct FilterChip: View {
     var symbol: String?
     var tint: Color?  // colours the symbol while the chip is off
     var emoji: String?
+    var dot: Color?  // a swatch dot before the label
     let isOn: Bool
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
             HStack(spacing: 5) {
+                if let dot {
+                    Circle().fill(dot).frame(width: 7, height: 7)
+                        .overlay(Circle().strokeBorder(Theme.accentInk, lineWidth: isOn ? 1.5 : 0))
+                }
                 if let emoji { Text(emoji).font(Theme.text(.subheadline)) }
                 if let symbol {
                     Image(systemName: symbol).font(Theme.text(.caption))

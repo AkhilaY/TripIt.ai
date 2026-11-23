@@ -94,6 +94,7 @@ struct WelcomeScenery<Content: View>: View {
     var paused = false
     var fullBleed = true  // the welcome screen runs under the status bar; Home's box doesn't
     var gradient: Gradient = WelcomeSceneryStyle.welcome
+    var world: [WorldScene] = []  // drawn places instead of the welcome photos (Home's header)
     @ViewBuilder var content: (_ current: Int, _ textOpacity: Double) -> Content
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var start = Date()
@@ -104,7 +105,7 @@ struct WelcomeScenery<Content: View>: View {
     var body: some View {
         TimelineView(.animation(paused: paused || reduceMotion)) { context in
             let elapsed = reduceMotion ? 0 : max(0, context.date.timeIntervalSince(start))
-            let count = WelcomeSceneryStyle.scenes.count
+            let count = world.isEmpty ? WelcomeSceneryStyle.scenes.count : world.count
             let current = Int(elapsed / period) % count
             let previous = (current + count - 1) % count
             let local = elapsed.truncatingRemainder(dividingBy: period)
@@ -130,14 +131,18 @@ struct WelcomeScenery<Content: View>: View {
     }
 
     /// One scene, zooming in slowly (a little over 1.1× across its time on screen).
-    private func scene(_ index: Int, age: Double, size: CGSize) -> some View {
+    @ViewBuilder private func scene(_ index: Int, age: Double, size: CGSize) -> some View {
         let zoom = 1.03 + 0.08 * min(1, age / (period + fade))
-        return Image(WelcomeSceneryStyle.scenes[index].image)
-            .resizable()
-            .scaledToFill()
-            .frame(width: size.width, height: size.height)
-            .scaleEffect(reduceMotion ? 1.03 : zoom)
-            .clipped()
+        Group {
+            if world.isEmpty {
+                Image(WelcomeSceneryStyle.scenes[index].image).resizable().scaledToFill()
+            } else {
+                WorldSceneImage(scene: world[index])
+            }
+        }
+        .frame(width: size.width, height: size.height)
+        .scaleEffect(reduceMotion ? 1.03 : zoom)
+        .clipped()
     }
 }
 

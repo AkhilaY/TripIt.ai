@@ -6,6 +6,16 @@ import UIKit
 /// Downloads and caches photos (place photos are signed links on the server, so no headers are needed).
 actor ImageLoader {
     static let shared = ImageLoader()
+
+    /// Photos are kept on the phone too (up to 300 MB), so one seen before shows at once, even offline.
+    private static let session: URLSession = {
+        let config = URLSessionConfiguration.default
+        config.urlCache = URLCache(memoryCapacity: 40 << 20, diskCapacity: 300 << 20, diskPath: "photos")
+        config.requestCachePolicy = .returnCacheDataElseLoad
+        config.timeoutIntervalForRequest = 12
+        config.httpMaximumConnectionsPerHost = 6
+        return URLSession(configuration: config)
+    }()
     private let cache = NSCache<NSURL, UIImage>()
     private var running: [URL: Task<UIImage?, Never>] = [:]
 
@@ -13,7 +23,7 @@ actor ImageLoader {
         if let hit = cache.object(forKey: url as NSURL) { return hit }
         if let task = running[url] { return await task.value }
         let task = Task<UIImage?, Never> {
-            guard let (data, response) = try? await URLSession.shared.data(from: url),
+            guard let (data, response) = try? await Self.session.data(from: url),
                   (response as? HTTPURLResponse)?.statusCode ?? 200 < 400,
                   let image = UIImage(data: data) else { return nil }
             return await image.byPreparingForDisplay() ?? image
@@ -75,7 +85,9 @@ struct ChainImage<Placeholder: View>: View {
 extension PlacePhoto {
     /// The photo's address at a given width (the server resizes Google photos).
     func url(width: Int) -> URL? {
-        API.shared.url(url + (url.contains("?") ? "&" : "?") + "w=\(width)")
+        // The server keeps each photo at 400, 800 and 1200 px; asking for one of those means it's usually ready.
+        let size = width <= 400 ? 400 : width <= 800 ? 800 : 1200
+        return API.shared.url(url + (url.contains("?") ? "&" : "?") + "w=\(size)")
     }
 }
 

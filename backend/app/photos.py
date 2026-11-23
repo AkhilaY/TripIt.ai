@@ -50,6 +50,20 @@ class PhotoStore:
             return None
         return name
 
+    # Google photos, kept once fetched so each is downloaded from Google only once per size. Google's photo links
+    # can expire; a kept copy doesn't.
+    CACHE_WIDTHS = (400, 800, 1200)
+
+    @classmethod
+    def cache_width(cls, w: int) -> int:
+        return next((c for c in cls.CACHE_WIDTHS if w <= c), cls.CACHE_WIDTHS[-1])
+
+    def cached_path(self, ref: str, width: int) -> Path:
+        name = hashlib.sha256(ref.encode()).hexdigest()[:32]
+        folder = self.dir / "google-cache"
+        folder.mkdir(parents=True, exist_ok=True)
+        return folder / f"{name}_{width}.jpg"
+
     def path(self, ref: str) -> Optional[Path]:
         if "/" in ref or "\\" in ref or ref.startswith("."):
             return None

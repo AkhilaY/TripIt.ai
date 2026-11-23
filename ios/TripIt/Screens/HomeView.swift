@@ -83,7 +83,9 @@ struct HomeView: View {
     /// The greeting over slowly changing scenery (the welcome screen's), edge to edge and up under the clock, with
     /// rounded bottom corners. Still while another page covers it.
     private func headerBox(top: CGFloat) -> some View {
-        WelcomeScenery(paused: router.tab != .home || !router.home.isEmpty, fullBleed: false, gradient: WelcomeSceneryStyle.header) { current, textOpacity in
+        let scenes = headerScenes
+        return WelcomeScenery(paused: router.tab != .home || !router.home.isEmpty, fullBleed: false,
+                              gradient: WelcomeSceneryStyle.header, world: scenes) { current, textOpacity in
             VStack(alignment: .leading, spacing: 0) {
                 HStack(alignment: .center) {
                     Text([Self.today.string(from: Date()), headerCity].compactMap { $0 }.joined(separator: " · "))
@@ -99,7 +101,7 @@ struct HomeView: View {
                     .foregroundStyle(.white)
                     .lineLimit(2).minimumScaleFactor(0.8)
                     .accessibilityAddTraits(.isHeader)
-                Text(WelcomeSceneryStyle.scenes[current].place)
+                Text(scenes[current].place)
                     .font(Theme.text(.footnote)).kerning(0.6)
                     .foregroundStyle(.white.opacity(0.78))
                     .opacity(textOpacity)
@@ -112,6 +114,15 @@ struct HomeView: View {
         .clipShape(UnevenRoundedRectangle(bottomLeadingRadius: 28, bottomTrailingRadius: 28, style: .continuous))
         .padding(.top, -pull)  // grows upward into the pull, so nothing white shows above it
         .onGeometryChange(for: Bool.self) { $0.frame(in: .global).maxY > top + 30 } action: { headerShowing = $0 }
+    }
+
+    /// Drawn places for the header: your next trip's cities and home first, then others, a new order each day.
+    private var headerScenes: [WorldScene] {
+        var cities: [String] = []
+        if let active = store.activeTrip { cities += active.trip.cities }
+        for trip in store.upcomingTrips.prefix(2) { cities += trip.cities + [trip.name] }
+        if let home = store.home?.city { cities.append(home) }
+        return WorldScenes.forHome(cities: cities)
     }
 
     /// Where you are: today's stop during a trip, otherwise home.

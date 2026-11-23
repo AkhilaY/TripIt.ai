@@ -1967,6 +1967,15 @@ async def find_menu(place_id: str, request: Request, body: Optional[MenuRequest]
         raise _claude_http(e)
 
 
+def _photo_client(request: Request) -> httpx.AsyncClient:
+    """One shared connection to Google for photos (a new one per photo added a TLS handshake to every image)."""
+    client = getattr(request.app.state, "photo_client", None)
+    if client is None or client.is_closed:
+        client = httpx.AsyncClient(timeout=httpx.Timeout(8, connect=4), follow_redirects=True)
+        request.app.state.photo_client = client
+    return client
+
+
 @app.get("/v1/places/{place_id}/photos/{index}", include_in_schema=False)
 async def place_photo(
     place_id: str, index: int, request: Request, settings: Annotated[Settings, Depends(get_settings)],
@@ -1986,19 +1995,30 @@ async def place_photo(
         return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=2592000, immutable"})
     if photo["source"] == "wikimedia":
         return RedirectResponse(photo["ref"], status_code=302, headers={"Cache-Control": "private, max-age=86400"})
-    if photo["source"] == "google" and settings.google_maps_api_key:
-        width = min(max(w, 100), 1600)
+    if photo["source"] == "google":
+        store = request.app.state.photos
+        width = store.cache_width(w)
+        cached = store.cached_path(photo["ref"], width)
+        if cached.is_file():  # fetched before: served straight from the disk
+            return FileResponse(cached, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=2592000, immutable"})
+        if not settings.google_maps_api_key:
+            raise HTTPException(status_code=404, detail="Photo not available")
         _count_google(request, "photo")
         try:
-            async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
-                r = await client.get(f"https://places.googleapis.com/v1/{photo['ref']}/media",
-                                     params={"maxWidthPx": width, "key": settings.google_maps_api_key})
+            r = await _photo_client(request).get(f"https://places.googleapis.com/v1/{photo['ref']}/media",
+                                                 params={"maxWidthPx": width, "key": settings.google_maps_api_key})
         except httpx.HTTPError:
             raise HTTPException(status_code=502, detail="Couldn't load photo")
-        if r.status_code != 200:
+        if r.status_code != 200 or not r.headers.get("content-type", "").startswith("image/"):
             raise HTTPException(status_code=404, detail="Photo no longer available")
+        try:
+            tmp = cached.with_suffix(".part")
+            tmp.write_bytes(r.content)
+            tmp.replace(cached)
+        except OSError:
+            pass  # still served, just not kept
         return Response(r.content, media_type=r.headers.get("content-type", "image/jpeg"),
-                        headers={"Cache-Control": "private, max-age=86400"})
+                        headers={"Cache-Control": "private, max-age=2592000, immutable"})
     raise HTTPException(status_code=404, detail="Photo not available")
 
 

@@ -3400,3 +3400,27 @@ def test_free_plan_video_saves_then_plus(client):
     assert client.get("/v1/me/plan", headers=b).json()["video_saves_limit"] is None
     assert client.post("/v1/jobs", json={"url": "https://www.tiktok.com/@x/video/99"}, headers=b).status_code == 202
     assert next(u for u in client.get("/v1/admin/users", headers=owner).json() if u["id"] == b_id)["plan"] == "plus"
+
+
+def test_google_photos_are_fetched_once_then_served_from_disk(client):
+    job = import_reel(client)
+    place = client.get("/v1/places", headers=H).json()[0]
+    app.state.db.update_place(place["id"], photos=[{"source": "google", "ref": "places/x/photos/1"}])
+    url = next(p for p in client.get("/v1/places", headers=H).json() if p["id"] == place["id"])["photos"][0]["url"]
+    calls = []
+
+    def google(request):
+        calls.append(str(request.url))
+        return httpx.Response(200, content=b"\xff\xd8\xffjpeg", headers={"content-type": "image/jpeg"})
+
+    app.state.photo_client = httpx.AsyncClient(transport=httpx.MockTransport(google))
+    keyed = Settings(app_api_key="secret", anthropic_api_key="x", google_maps_api_key="k")
+    app.dependency_overrides[get_settings] = lambda: keyed
+    first = client.get(url + "&w=600")
+    again = client.get(url + "&w=700")  # same size bucket: from the disk
+    assert first.status_code == 200 and again.status_code == 200 and again.content == b"\xff\xd8\xffjpeg"
+    assert len(calls) == 1 and "maxWidthPx=800" in calls[0]
+    assert "immutable" in again.headers["cache-control"]
+    client.get(url + "&w=1500")  # a bigger size is fetched once
+    assert len(calls) == 2
+    app.state.photo_client = None

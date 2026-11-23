@@ -7,6 +7,15 @@ struct CityScene: View {
     let city: String
 
     var body: some View {
+        if let drawn = WorldScenes.find(city) {
+            WorldSceneImage(scene: drawn)
+        } else {
+            landscape
+        }
+    }
+
+    /// Anywhere without a drawn scene: a simple landscape that fits it.
+    @ViewBuilder private var landscape: some View {
         let look = CityLook.of(city)
         let sky = look.palette.sky(hour: Calendar.current.component(.hour, from: Date()))
         Canvas { ctx, size in

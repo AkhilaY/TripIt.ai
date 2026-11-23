@@ -245,6 +245,7 @@ private enum Palette {
     static let gold = Color(light: Color(red: 0.435, green: 0.416, blue: 0.4), dark: Color(red: 0.66, green: 0.635, blue: 0.61))  // quiet grey
     static let ok = Color(red: 0.184, green: 0.42, blue: 0.278)
     static let accent = Color(light: ink, dark: .white)
+    static let accentInk = Color(light: .white, dark: ink)  // text on an accent button
 }
 
 /// Futura (built into iOS) at a system text style's size, as in the app.
@@ -353,7 +354,7 @@ struct ShareView: View {
         switch model.phase {
         case .done(_, let again):
             Button { model.review() } label: {
-                Text(again ? "Open in Travel Edit" : "Review places").frame(maxWidth: .infinity)
+                Text(again ? "Open in Travel Edit" : "Review places").frame(maxWidth: .infinity).foregroundStyle(Palette.accentInk)
             }
             .buttonStyle(.borderedProminent).controlSize(.large).tint(Palette.accent)
             .transition(.move(edge: .bottom).combined(with: .opacity))
@@ -384,7 +385,7 @@ struct ShareView: View {
                 perk("bookmark", "We'll keep this post and save it as soon as you upgrade")
                 perk("photo.on.rectangle", "Screenshots and map links stay free")
             }
-            Button { model.upgrade() } label: { Text("Upgrade to Plus").frame(maxWidth: .infinity) }
+            Button { model.upgrade() } label: { Text("Upgrade to Plus").frame(maxWidth: .infinity).foregroundStyle(Palette.accentInk) }
                 .buttonStyle(.borderedProminent).controlSize(.large).tint(Palette.accent)
             Button { model.onFinish() } label: { Text("Not now").frame(maxWidth: .infinity) }
                 .buttonStyle(.bordered).controlSize(.large).tint(Palette.accent)

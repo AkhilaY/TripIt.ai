@@ -35,7 +35,8 @@ struct WelcomeView: View {
     private let period = 6.0  // seconds on each scene
     private let fade = 1.4  // crossfade between scenes
 
-    private var paused: Bool { pausedAt != nil || reduceMotion }
+    // Also still while the sign-in sheet covers it, so it isn't redrawing every frame unseen.
+    private var paused: Bool { pausedAt != nil || reduceMotion || signIn != nil }
 
     var body: some View {
         TimelineView(.animation(paused: paused)) { context in

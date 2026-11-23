@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
   # Or push a commit whose message contains [testflight], or a tag like testflight-3.
   push:
-    branches: [main, feature/tripit-mvp]
+    branches: [main, feature/tripit-mvp, feature/lv-redesign]
     tags: ["testflight-*"]
 
 concurrency:

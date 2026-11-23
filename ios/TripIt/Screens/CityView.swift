@@ -20,77 +20,80 @@ struct CityView: View {
         let places = sort.sorted(filter.apply(visit.apply(all)), from: location.current)
         let trip = isHome ? nil : store.trip(forCity: city)
         List {
-            Section {
-                VStack(alignment: .leading, spacing: 4) {
-                    if isHome { Eyebrow(text: "Your city") }
-                    Text(isHome ? "Around \(city)" : city).font(Theme.serif(34)).foregroundStyle(Theme.label)
-                    Text(subtitle(all, trip: trip)).font(Theme.text(.subheadline)).foregroundStyle(Theme.secondary)
-                }
-                .listRowBackground(Color.clear)
-                .listRowSeparator(.hidden)
-                .listRowInsets(EdgeInsets(top: 8, leading: 20, bottom: 12, trailing: 20))
-                if let trip {
-                    // A plain button, not a NavigationLink: in a List that adds a second chevron next to the row's own.
-                    Button { router.push(.trip(id: trip.id)) } label: { TripRow(trip: trip) }
-                        .buttonStyle(.plain)
-                        .listRowBackground(Color.clear)
-                        .listRowSeparator(.hidden)
-                        .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 4, trailing: 20))
-                } else if !isHome, !all.isEmpty {
-                    Button { sheet = .newTrip(all.map(\.id), nil) } label: {
-                        Label("Plan a trip to \(city)", systemImage: "airplane")
-                    }
-                    .buttonStyle(PrimaryButtonStyle())
-                    .listRowBackground(Color.clear)
-                    .listRowSeparator(.hidden)
-                    .listRowInsets(EdgeInsets(top: 4, leading: 20, bottom: 4, trailing: 20))
-                }
-                VisitPicker(visit: $visit, places: all)
-                    .listRowBackground(Color.clear)
-                    .listRowSeparator(.hidden)
-                    .listRowInsets(EdgeInsets(top: 8, leading: 20, bottom: 4, trailing: 20))
-                PlaceFilterBar(places: all, filter: $filter, sort: $sort)
-                    .listRowInsets(EdgeInsets(top: 8, leading: 4, bottom: 8, trailing: 4))
-                    .listRowBackground(Color.clear)
-                    .listRowSeparator(.hidden)
-            }
-            .listSectionSeparator(.hidden)
-            Section {
-                if places.isEmpty {
-                    EmptyState(symbol: "mappin.and.ellipse", title: all.isEmpty ? "Nothing here yet" : "Nothing matches",
-                               text: all.isEmpty ? "Places you save in \(city) land here automatically." : "Try fewer filters.")
-                        .listRowBackground(Color.clear)
-                        .listRowSeparator(.hidden)
-                }
-                ForEach(places) { place in
-                    NavigationLink(value: Route.place(id: place.id, tripId: nil)) {
-                        PlaceRow(place: place, showCategory: true, distance: sort == .closest ? place.distance(from: location.current) : nil)
-                    }
-                    .placeActions(place, onDelete: { Task { await store.deleteWithUndo(place) } }, sheet: $sheet)
-                    .listRowBackground(Color.clear)
-                    .listRowSeparatorTint(Theme.border)
-                    .listRowInsets(EdgeInsets(top: 12, leading: 20, bottom: 12, trailing: 16))
-                }
-            }
-            .listSectionSeparator(.hidden)
+            header(all: all, trip: trip)
+            placeList(all: all, places: places)
         }
         .listStyle(.plain)
         .tripBackground()
         .animation(.snappy, value: store.saved.map(\.id))
-        .searchable(text: $filter.query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search \(isHome ? "around \(city)" : city)")
+        .searchable(text: $filter.query, placement: .navigationBarDrawer(displayMode: .always), prompt: searchPrompt)
         .navigationTitle(isHome ? "Around \(city)" : city)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .principal) { Text("") }  // the page's own big title says it; no second one up here
-            Button { router.addRequest = Router.AddRequest(tripId: trip?.id, city: city) } label: { Image(systemName: "plus") }
-                .accessibilityLabel("Add a place in \(city)")
-            Button { router.push(.map) } label: { Image(systemName: "map") }.accessibilityLabel("Map")
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                Button { router.addRequest = Router.AddRequest(tripId: trip?.id, city: city) } label: { Image(systemName: "plus") }
+                    .accessibilityLabel("Add a place in \(city)")
+                Button { router.push(.map) } label: { Image(systemName: "map") }.accessibilityLabel("Map")
+            }
         }
         .sheet(item: $sheet) { $0.view.environment(store).environment(router) }
         .confirmationDialog("Delete this place everywhere? It leaves your Library, lists and trips.",
                             isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }), titleVisibility: .visible) {
             Button("Delete place", role: .destructive) { if let place = deleting { Task { await store.delete(place) } } }
         }
+    }
+
+    private var searchPrompt: String { isHome ? "Search around \(city)" : "Search \(city)" }
+
+    /// The title, the trip (or a way to plan one), Want to go / Been and the filters.
+    @ViewBuilder private func header(all: [Place], trip: Trip?) -> some View {
+        Section {
+            VStack(alignment: .leading, spacing: 4) {
+                if isHome { Eyebrow(text: "Your city") }
+                Text(isHome ? "Around \(city)" : city).font(Theme.serif(34)).foregroundStyle(Theme.label)
+                Text(subtitle(all, trip: trip)).font(Theme.text(.subheadline)).foregroundStyle(Theme.secondary)
+            }
+            .plainRow(EdgeInsets(top: 8, leading: 20, bottom: 12, trailing: 20))
+            if let trip {
+                // A plain button, not a NavigationLink: in a List that adds a second chevron next to the row's own.
+                Button { router.push(.trip(id: trip.id)) } label: { TripRow(trip: trip) }
+                    .buttonStyle(.plain)
+                    .plainRow(EdgeInsets(top: 0, leading: 20, bottom: 4, trailing: 20))
+            } else if !isHome, !all.isEmpty {
+                Button { sheet = .newTrip(all.map(\.id), nil) } label: {
+                    Label("Plan a trip to \(city)", systemImage: "airplane")
+                }
+                .buttonStyle(PrimaryButtonStyle())
+                .plainRow(EdgeInsets(top: 4, leading: 20, bottom: 4, trailing: 20))
+            }
+            VisitPicker(visit: $visit, places: all)
+                .plainRow(EdgeInsets(top: 8, leading: 20, bottom: 4, trailing: 20))
+            PlaceFilterBar(places: all, filter: $filter, sort: $sort)
+                .plainRow(EdgeInsets(top: 8, leading: 4, bottom: 8, trailing: 4))
+        }
+        .listSectionSeparator(.hidden)
+    }
+
+    @ViewBuilder private func placeList(all: [Place], places: [Place]) -> some View {
+        Section {
+            if places.isEmpty {
+                let none = all.isEmpty
+                EmptyState(symbol: "mappin.and.ellipse", title: none ? "Nothing here yet" : "Nothing matches",
+                           text: none ? "Places you save in \(city) land here automatically." : "Try fewer filters.")
+                    .plainRow(EdgeInsets())
+            }
+            ForEach(places) { place in
+                NavigationLink(value: Route.place(id: place.id, tripId: nil)) {
+                    PlaceRow(place: place, showCategory: true, distance: sort == .closest ? place.distance(from: location.current) : nil)
+                }
+                .placeActions(place, onDelete: { Task { await store.deleteWithUndo(place) } }, sheet: $sheet)
+                .listRowBackground(Color.clear)
+                .listRowSeparatorTint(Theme.border)
+                .listRowInsets(EdgeInsets(top: 12, leading: 20, bottom: 12, trailing: 16))
+            }
+        }
+        .listSectionSeparator(.hidden)
     }
 
     private func subtitle(_ all: [Place], trip: Trip?) -> String {
@@ -105,5 +108,12 @@ struct CityView: View {
             parts.append("your wishlist, no trip yet")
         }
         return parts.joined(separator: " · ")
+    }
+}
+
+extension View {
+    /// A list row with no background or separator: for headers and controls laid out on the page itself.
+    func plainRow(_ insets: EdgeInsets) -> some View {
+        listRowBackground(Color.clear).listRowSeparator(.hidden).listRowInsets(insets)
     }
 }

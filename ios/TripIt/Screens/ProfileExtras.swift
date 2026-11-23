@@ -87,7 +87,7 @@ struct TasteView: View {
                                 .background(on ? Theme.accent : Theme.cell, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                                 .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Theme.border, lineWidth: on ? 0 : 1))
                             }
-                            .buttonStyle(.plain)
+                            .buttonStyle(PressStyle())
                             .accessibilityAddTraits(on ? .isSelected : [])
                         }
                     }

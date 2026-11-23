@@ -36,7 +36,7 @@ struct ProfileView: View {
                         Spacer()
                         Image(systemName: "pencil").font(Theme.text(.footnote)).foregroundStyle(Theme.tertiary)
                     } }
-                    .buttonStyle(.plain)
+                    .buttonStyle(PressStyle())
                     .accessibilityHint("Change your name")
                     .listRowBackground(Color.clear)
                 }
@@ -63,7 +63,7 @@ struct ProfileView: View {
             } header: {
                 Text("Appearance")
             } footer: {
-                Text("Light is white with black type; Dark is black with white. System follows your iPhone's setting.")
+                EmptyView()
             }
             Section {
                 Toggle(isOn: Binding(get: { notifications == .authorized }, set: { on in

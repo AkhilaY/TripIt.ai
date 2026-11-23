@@ -109,7 +109,6 @@ struct ConciergeView: View {
 
     private var welcome: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Eyebrow(text: "At your service")
             Text("Ask about your saved places, plan an evening, or rework a day. I suggest changes; nothing moves until you confirm.")
                 .font(Theme.serif(20)).foregroundStyle(Theme.label).fixedSize(horizontal: false, vertical: true)
             FlowLayout(spacing: 8) {
@@ -120,7 +119,7 @@ struct ConciergeView: View {
                             .background(Theme.cell, in: Capsule())
                             .overlay(Capsule().strokeBorder(Theme.border))
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(PressStyle())
                 }
             }
         }
@@ -157,7 +156,7 @@ struct ConciergeView: View {
                         .padding(8)
                         .background(Theme.fill, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(PressStyle())
                 }
                 if !m.actions.isEmpty { proposal(m, index: index) }
             }
@@ -215,7 +214,7 @@ struct ConciergeView: View {
                     .frame(width: 40, height: 40)
                     .background(Theme.accent, in: Circle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(PressStyle())
             .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || busy)
             .accessibilityLabel("Send")
         }

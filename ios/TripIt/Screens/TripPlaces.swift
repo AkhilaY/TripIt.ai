@@ -65,7 +65,7 @@ struct TripPlaces: View {
                 } header: {
                     Label("Suggested for quiet days · \(suggested.count)", systemImage: "sparkles")
                 } footer: {
-                    Text("Swipe right to keep one; it joins your saved places too.")
+                    EmptyView()
                 }
             }
             ForEach(Category.allCases) { category in
@@ -158,7 +158,7 @@ struct EditsRail: View {
                     HStack(alignment: .top, spacing: 12) {
                         ForEach(edits.edits) { edit in
                             Button { router.push(.edit(tripId: trip.id, editId: edit.id)) } label: { EditCard(edit: edit) }
-                                .buttonStyle(.plain)
+                                .buttonStyle(PressStyle())
                         }
                     }
                     .padding(.horizontal, 16)
@@ -228,7 +228,7 @@ struct EditCard: View {
         VStack(alignment: .leading, spacing: 6) {
             ZStack(alignment: .topLeading) {
                 ChainImage(urls: edit.coverCandidates.compactMap { $0.url(width: 600) }) {
-                    ZStack { Theme.cell; Image(systemName: "sparkles").font(.system(size: 22, weight: .light)).foregroundStyle(Theme.secondary) }
+                    CityScene(city: edit.entries.first?.city ?? "")
                 }
                 .frame(width: 220, height: 160)
                 .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))

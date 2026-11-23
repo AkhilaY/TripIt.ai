@@ -34,15 +34,15 @@ struct RemoteImage<Placeholder: View>: View {
 
     var body: some View {
         ZStack {
+            placeholder()
             if let image {
-                Image(uiImage: image).resizable().scaledToFill()
-            } else {
-                placeholder()
+                Image(uiImage: image).resizable().scaledToFill().transition(.opacity)
             }
         }
         .task(id: url) {
             image = nil
-            if let url { image = await ImageLoader.shared.image(url) }
+            guard let url, let found = await ImageLoader.shared.image(url) else { return }
+            withAnimation(.easeOut(duration: 0.35)) { image = found }  // photos fade in over the stand-in
         }
     }
 }
@@ -55,16 +55,18 @@ struct ChainImage<Placeholder: View>: View {
 
     var body: some View {
         ZStack {
+            placeholder()
             if let image {
-                Image(uiImage: image).resizable().scaledToFill()
-            } else {
-                placeholder()
+                Image(uiImage: image).resizable().scaledToFill().transition(.opacity)
             }
         }
         .task(id: urls) {
             image = nil
             for url in urls {
-                if let found = await ImageLoader.shared.image(url) { image = found; return }
+                if let found = await ImageLoader.shared.image(url) {
+                    withAnimation(.easeOut(duration: 0.35)) { image = found }
+                    return
+                }
             }
         }
     }
@@ -255,7 +257,8 @@ struct FilterChip: View {
             .background(isOn ? Theme.accent : Theme.background, in: Capsule())
             .overlay(Capsule().strokeBorder(Theme.chipBorder, lineWidth: isOn ? 0 : 1))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressStyle())
+        .animation(.easeOut(duration: 0.18), value: isOn)
         .accessibilityAddTraits(isOn ? .isSelected : [])
     }
 }
@@ -276,7 +279,19 @@ struct PrimaryButtonStyle: ButtonStyle {
             .foregroundStyle(tinted ? Theme.accent : Theme.accentInk)
             .background(tinted ? Color.clear : Theme.accent, in: Capsule())
             .overlay(Capsule().strokeBorder(Theme.accent, lineWidth: tinted ? 1 : 0))
-            .opacity(configuration.isPressed ? 0.75 : 1)
+            .opacity(configuration.isPressed ? 0.8 : 1)
+            .scaleEffect(configuration.isPressed ? 0.98 : 1)
+            .animation(.easeOut(duration: 0.14), value: configuration.isPressed)
+    }
+}
+
+/// Rows and cards that dip a little while pressed, so every tap answers straight away.
+struct PressStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.97 : 1)
+            .opacity(configuration.isPressed ? 0.8 : 1)
+            .animation(.easeOut(duration: 0.14), value: configuration.isPressed)
     }
 }
 

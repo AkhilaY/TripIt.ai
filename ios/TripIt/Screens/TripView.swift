@@ -202,7 +202,7 @@ struct PlanSheet: View {
                     Toggle("Start date", isOn: $hasStart.animation())
                     if hasStart { DatePicker("Starts", selection: $start, displayedComponents: .date) }
                 } footer: {
-                    Text("Your \(Fmt.plural(trip.places.count, "place")), grouped by neighbourhood and time of day. Starred places always fit in. This replaces the current plan.")
+                    Text("This replaces the current plan.")
                 }
                 Section("Anything to keep in mind?") {
                     TextField("e.g. slow mornings, no museums", text: $preferences, axis: .vertical)
@@ -262,7 +262,7 @@ struct TidySheet: View {
                         }
                     }
                 } footer: {
-                    Text("Keeps your places on their days unless you ask otherwise, orders the stops and suggests times.")
+                    EmptyView()
                 }
             }
             .tripBackground()

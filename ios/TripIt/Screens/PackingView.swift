@@ -181,8 +181,6 @@ struct PackingView: View {
         Section {
             VStack(alignment: .leading, spacing: 10) {
                 AccentTextButton(title: "Add an item", symbol: "plus") { sheet = .add }
-                Text("Back from the trip? Press and hold anything you didn't use and it's left off next time. Things you add stay when the list is made again.")
-                    .font(Theme.text(.footnote)).foregroundStyle(Theme.secondary).fixedSize(horizontal: false, vertical: true)
             }
             .padding(.top, 12)
             .listRowInsets(EdgeInsets(top: 8, leading: 20, bottom: 24, trailing: 20))
@@ -238,7 +236,7 @@ struct PackingView: View {
                     .foregroundStyle(item.packed ? Theme.accent : Theme.tertiary)
                     .contentTransition(.symbolEffect(.replace))
             }
-            .buttonStyle(.plain)
+            .buttonStyle(PressStyle())
             .accessibilityLabel(item.packed ? "Packed: \(item.text)" : "Not packed: \(item.text)")
             VStack(alignment: .leading, spacing: 3) {
                 Text(item.text).font(Theme.text(.body))

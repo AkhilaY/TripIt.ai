@@ -187,7 +187,7 @@ struct SaveReviewSheet: View {
             .padding(.vertical, 8)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressStyle())
         .accessibilityAddTraits(ticked && fresh ? .isSelected : [])
     }
 
@@ -207,7 +207,7 @@ struct SaveReviewSheet: View {
             .foregroundStyle(on ? Theme.background : Theme.label)
             .padding(.horizontal, 10).frame(height: 28)
             .background(on ? Theme.label : Theme.raised, in: Capsule())
-            .buttonStyle(.plain)
+            .buttonStyle(PressStyle())
         }
         .padding(.vertical, 8)
     }
@@ -292,14 +292,14 @@ struct SaveReviewSheet: View {
                             .background(on ? Theme.label : Theme.cell, in: Capsule())
                             .overlay(Capsule().strokeBorder(Theme.border, lineWidth: on ? 0 : 1))
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(PressStyle())
                 }
                 Button { newListName = ""; newList = true } label: {
                     Label("New list", systemImage: "plus").font(Theme.text(.caption)).foregroundStyle(Theme.link)
                         .padding(.horizontal, 10).frame(height: 30)
                         .overlay(Capsule().strokeBorder(Theme.border))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(PressStyle())
             }
         }
     }

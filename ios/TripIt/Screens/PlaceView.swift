@@ -201,7 +201,7 @@ struct PlaceView: View {
             .background(on ? Theme.ok.opacity(0.1) : .clear, in: Capsule())
             .overlay(Capsule().strokeBorder(on ? Theme.ok.opacity(0.4) : Theme.border, lineWidth: 1))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressStyle())
         .sensoryFeedback(.success, trigger: on) { _, new in new }
         .accessibilityAddTraits(on ? .isSelected : [])
         .accessibilityHint(on ? "Marks it as somewhere you still want to go" : "Marks it as visited")
@@ -218,7 +218,7 @@ struct PlaceView: View {
                 HStack(alignment: .top, spacing: 14) {
                     if let reel {
                         Button { Links.open(URL(string: reel.url)) } label: { ReelThumb(reel: reel, place: p) }
-                            .buttonStyle(.plain)
+                            .buttonStyle(PressStyle())
                             .accessibilityLabel("Open the post")
                     }
                     VStack(alignment: .leading, spacing: 3) {
@@ -322,13 +322,13 @@ struct PlaceView: View {
         return HStack(spacing: 10) {
             if !isDirections { DirectionsButton(apple: p.directionsURL, google: p.googleDirectionsURL) }
             if category.hasMenu, Features.isOn("menus") {
-                Button { router.push(.menu(placeId: p.id)) } label: { QuietTileLabel(symbol: "menucard", title: "Menu") }.buttonStyle(.plain)
+                Button { router.push(.menu(placeId: p.id)) } label: { QuietTileLabel(symbol: "menucard", title: "Menu") }.buttonStyle(PressStyle())
             }
             if let phone {
-                Button { Links.open(phone) } label: { QuietTileLabel(symbol: "phone", title: "Call") }.buttonStyle(.plain)
+                Button { Links.open(phone) } label: { QuietTileLabel(symbol: "phone", title: "Call") }.buttonStyle(PressStyle())
             }
             if let site, !isTickets {
-                Button { Links.open(site) } label: { QuietTileLabel(symbol: "globe", title: "Website") }.buttonStyle(.plain)
+                Button { Links.open(site) } label: { QuietTileLabel(symbol: "globe", title: "Website") }.buttonStyle(PressStyle())
             }
         }
     }
@@ -381,7 +381,7 @@ struct PlaceView: View {
                     Button { Task { await store.patch(p, ["event_date": Fmt.iso(Date())]) } } label: {
                         infoRow("calendar.badge.plus", "Add the date", "So it shows on your calendar")
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(PressStyle())
                 }
                 if let venue = p.venue { infoRow("mappin", venue, nil).padding(.top, 10) }
             }
@@ -439,7 +439,7 @@ struct PlaceView: View {
                     }
                 }
             }
-            .buttonStyle(.plain)
+            .buttonStyle(PressStyle())
         }
     }
 
@@ -482,7 +482,7 @@ struct PlaceView: View {
                 }
             }
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressStyle())
     }
 
     private func locate(_ p: Place) async {
@@ -516,7 +516,7 @@ struct PlaceView: View {
                         .padding(14)
                         .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(PressStyle())
                     if allHours {
                         let today = Hours.mondayIndex()
                         VStack(alignment: .leading, spacing: 4) {
@@ -583,18 +583,18 @@ struct PlaceView: View {
         if let phone = p.phone {
             rows.append(AnyView(Button { Links.open(URL(string: "tel:" + phone.filter { $0.isNumber || $0 == "+" })) } label: {
                 infoRow("phone", phone, nil).padding(14)
-            }.buttonStyle(.plain)))
+            }.buttonStyle(PressStyle())))
         }
         if let site = p.website, let url = URL(string: site) {
             rows.append(AnyView(Button { Links.open(url) } label: {
                 infoRow("globe", (url.host ?? site).replacingOccurrences(of: "www.", with: ""), nil).padding(14)
-            }.buttonStyle(.plain)))
+            }.buttonStyle(PressStyle())))
         }
         if let rating = p.rating {
             let reviews = p.ratingCount.map { " · \($0.formatted()) reviews" } ?? ""
             rows.append(AnyView(Button { Links.open(p.googleMapsURL) } label: {
                 infoRow("star", String(format: "%.1f on Google", rating) + reviews, nil, quiet: true).padding(14)
-            }.buttonStyle(.plain)))
+            }.buttonStyle(PressStyle())))
         }
         return rows
     }
@@ -639,7 +639,7 @@ struct PlaceView: View {
                     }
                 }
             }
-            .buttonStyle(.plain)
+            .buttonStyle(PressStyle())
         }
     }
 
@@ -704,7 +704,7 @@ struct QuickButton: View {
 
     var body: some View {
         Button(action: action) { QuickLabel(symbol: symbol, color: color, title: title) }
-            .buttonStyle(.plain)
+            .buttonStyle(PressStyle())
     }
 }
 
@@ -730,7 +730,7 @@ struct DirectionsButton: View {
         } label: {
             QuickLabel(symbol: "arrow.triangle.turn.up.right.diamond.fill", color: Theme.orange, title: "Directions")
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressStyle())
     }
 }
 

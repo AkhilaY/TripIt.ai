@@ -50,7 +50,6 @@ struct CityView: View {
     @ViewBuilder private func header(all: [Place], trip: Trip?) -> some View {
         Section {
             VStack(alignment: .leading, spacing: 4) {
-                if isHome { Eyebrow(text: "Your city") }
                 Text(isHome ? "Around \(city)" : city).font(Theme.serif(34)).foregroundStyle(Theme.label)
                 Text(subtitle(all, trip: trip)).font(Theme.text(.subheadline)).foregroundStyle(Theme.secondary)
             }
@@ -58,7 +57,7 @@ struct CityView: View {
             if let trip {
                 // A plain button, not a NavigationLink: in a List that adds a second chevron next to the row's own.
                 Button { router.push(.trip(id: trip.id)) } label: { TripRow(trip: trip) }
-                    .buttonStyle(.plain)
+                    .buttonStyle(PressStyle())
                     .plainRow(EdgeInsets(top: 0, leading: 20, bottom: 4, trailing: 20))
             } else if !isHome, !all.isEmpty {
                 Button { sheet = .newTrip(all.map(\.id), nil) } label: {

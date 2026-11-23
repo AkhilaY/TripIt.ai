@@ -35,98 +35,62 @@ struct AddPlaceSheet: View {
 
     var body: some View {
         NavigationStack {
-            List {
-                Section {
-                    HStack {
-                        Image(systemName: "magnifyingglass").foregroundStyle(Theme.secondary)
-                        TextField("Paste a link, or search for a place", text: $text, axis: .vertical)
-                            .focused($focused)
-                            .autocorrectionDisabled()
-                            .textInputAutocapitalization(.never)
-                            .submitLabel(.search)
-                        if !text.isEmpty {
-                            Button { text = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(Theme.tertiary) }
-                                .buttonStyle(.borderless)
-                        }
-                    }
-                    if !store.trips.isEmpty {
-                        Picker("Also add to", selection: $tripId) {
-                            Text("Just save it").tag(String?.none)
-                            ForEach(store.trips) { Text($0.name).tag(String?.some($0.id)) }
-                        }
-                    }
-                } footer: {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(request.city.map { "Save a place in \($0)" } ?? "Save a place")
+                        .font(Theme.serif(28)).foregroundStyle(Theme.label)
+                        .padding(.top, 4)
+                    field.padding(.top, 18)
                     if kind == .empty {
-                        Text("Share posts straight from TikTok or Instagram with Share → Travel Edit.")
-                    }
-                }
-
-                if let error {
-                    Text(error).foregroundStyle(Theme.danger)
-                }
-
-                switch kind {
-                case .reel:
-                    Section {
-                        Button { Task { await importReel() } } label: {
-                            action("sparkles", Theme.gold, "Save the places in this post",
-                                   "The Travel Edit watches it and finds every place mentioned. About a minute.")
-                        }
-                    }
-                case .map:
-                    Section {
-                        Button { Task { await addMapLink() } } label: {
-                            action("map.fill", Theme.green, "Add this place", "From the Google Maps or Apple Maps link")
-                        }
-                    }
-                case .search:
-                    Section {
-                        if searching && results.isEmpty { HStack { ProgressView(); Text("Searching…").foregroundStyle(Theme.secondary) } }
-                        ForEach(results) { result in
-                            Button { Task { await add(result) } } label: {
-                                HStack(spacing: 12) {
-                                    CategoryTile(category: Category(result.category))
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(result.name).foregroundStyle(Theme.label)
-                                        if let address = result.address {
-                                            Text(address).font(Theme.text(.caption)).foregroundStyle(Theme.secondary).lineLimit(2)
-                                        }
-                                    }
-                                    Spacer()
-                                    Image(systemName: "plus.circle.fill").foregroundStyle(Theme.link)
+                        HStack(spacing: 10) {
+                            PasteButton(payloadType: String.self) { strings in
+                                if let first = strings.first { text = first }
+                            }
+                            .labelStyle(.titleAndIcon)
+                            .buttonBorderShape(.capsule)
+                            .tint(Theme.accent)
+                            PhotosPicker(selection: $shots, maxSelectionCount: 10, matching: .images) {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "photo.on.rectangle").font(.system(size: 13, weight: .light))
+                                    Text("Screenshots").font(Theme.text(.subheadline))
                                 }
+                                .foregroundStyle(Theme.label)
+                                .padding(.horizontal, 14).frame(height: 36)
+                                .overlay(Capsule().strokeBorder(Theme.chipBorder))
                             }
                         }
-                        let name = text.trimmingCharacters(in: .whitespacesAndNewlines)
-                        if name.count >= 2 && !searching {
-                            if tripId == nil {
-                                TextField("City (to add “\(name)” by name)", text: $city)
-                            }
-                            Button { Task { await addByName(name) } } label: {
-                                Label("Add “\(name)” by name", systemImage: "text.badge.plus")
-                            }
-                            .disabled(tripId == nil && city.trimmingCharacters(in: .whitespaces).isEmpty)
-                        }
-                    } header: {
-                        if !results.isEmpty { Text("Places") }
+                        .padding(.top, 14)
+                    } else if !store.trips.isEmpty {
+                        alsoAdd.padding(.top, 12)
                     }
-                case .empty:
-                    Section {
-                        PhotosPicker(selection: $shots, maxSelectionCount: 10, matching: .images) {
-                            action("photo.on.rectangle.angled", Theme.indigo, "Screenshots",
-                                   "Of a post, a map or an article. The Travel Edit finds the places in them.")
-                        }
-                        PasteButton(payloadType: String.self) { strings in
-                            if let first = strings.first { text = first }
-                        }
-                        .labelStyle(.titleAndIcon)
+                    if let error {
+                        Text(error).font(Theme.text(.subheadline)).foregroundStyle(Theme.danger).padding(.top, 14)
                     }
+                    switch kind {
+                    case .reel:
+                        Button("Save the places in this post") { Task { await importReel() } }
+                            .buttonStyle(PrimaryButtonStyle()).padding(.top, 24)
+                    case .map:
+                        Button("Add this place") { Task { await addMapLink() } }
+                            .buttonStyle(PrimaryButtonStyle()).padding(.top, 24)
+                    case .search:
+                        resultList(text.trimmingCharacters(in: .whitespacesAndNewlines)).padding(.top, 18)
+                    case .empty:
+                        EmptyView()
+                    }
+                }
+                .padding(.horizontal, 20)
+                .padding(.bottom, 32)
+            }
+            .scrollDismissesKeyboard(.interactively)
+            .background(Theme.background.ignoresSafeArea())
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button { dismiss() } label: { Image(systemName: "xmark").font(.system(size: 14, weight: .light)) }
+                        .accessibilityLabel("Close")
                 }
             }
-            .tripBackground()
-            .navigationTitle(request.city.map { "Add in \($0)" } ?? "Add")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
             .overlay { if busy { ProgressView().controlSize(.large).padding(24).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16)) } }
             .disabled(busy)
             .task(id: text) { await search() }
@@ -140,13 +104,81 @@ struct AddPlaceSheet: View {
         }
     }
 
-    private func action(_ symbol: String, _ color: Color, _ title: String, _ subtitle: String) -> some View {
-        HStack(spacing: 12) {
-            SymbolTile(symbol: symbol, color: color, size: 38)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(Theme.text(.body)).foregroundStyle(Theme.label)
-                Text(subtitle).font(Theme.text(.caption)).foregroundStyle(Theme.secondary)
+    private var field: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "magnifyingglass").font(.system(size: 15, weight: .light)).foregroundStyle(Theme.secondary)
+            TextField("Paste a link or search", text: $text, axis: .vertical)
+                .font(Theme.text(.body))
+                .focused($focused)
+                .autocorrectionDisabled()
+                .textInputAutocapitalization(.never)
+                .submitLabel(.search)
+                .lineLimit(1...3)
+            if !text.isEmpty {
+                Button { text = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(Theme.tertiary) }
+                    .buttonStyle(.borderless)
+                    .accessibilityLabel("Clear")
             }
+        }
+        .padding(.horizontal, 16).padding(.vertical, 12)
+        .background(Theme.cell, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+    }
+
+    /// "Also add to" as one small chip, shown once there's something to save.
+    private var alsoAdd: some View {
+        Menu {
+            Picker("Also add to", selection: $tripId) {
+                Text("Just save it").tag(String?.none)
+                ForEach(store.trips) { Text($0.name).tag(String?.some($0.id)) }
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Text(tripId.flatMap { id in store.trips.first { $0.id == id }?.name }.map { "Also add to \($0)" } ?? "Also add to a trip")
+                    .font(Theme.text(.subheadline))
+                Image(systemName: "chevron.down").font(.system(size: 11, weight: .light))
+            }
+            .foregroundStyle(Theme.label)
+            .padding(.horizontal, 14).frame(height: 34)
+            .overlay(Capsule().strokeBorder(Theme.chipBorder))
+        }
+    }
+
+    @ViewBuilder private func resultList(_ name: String) -> some View {
+        if searching && results.isEmpty {
+            ProgressView().frame(maxWidth: .infinity).padding(.vertical, 12)
+        }
+        VStack(spacing: 0) {
+            ForEach(results) { result in
+                Button { Task { await add(result) } } label: {
+                    HStack(spacing: 14) {
+                        CategoryTile(category: Category(result.category), size: 44)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(result.name).font(Theme.text(.body)).foregroundStyle(Theme.label).lineLimit(1)
+                            if let address = result.address {
+                                Text(address).font(Theme.text(.footnote)).foregroundStyle(Theme.secondary).lineLimit(1)
+                            }
+                        }
+                        Spacer(minLength: 8)
+                        Image(systemName: "plus").font(.system(size: 15, weight: .light)).foregroundStyle(Theme.label)
+                    }
+                    .padding(.vertical, 12)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(PressStyle())
+                Divider().overlay(Theme.border)
+            }
+        }
+        if name.count >= 2 && !searching {
+            if tripId == nil && request.city == nil {
+                TextField("City", text: $city)
+                    .font(Theme.text(.body))
+                    .padding(.horizontal, 16).frame(height: 44)
+                    .background(Theme.cell, in: Capsule())
+                    .padding(.top, 16)
+            }
+            AccentTextButton(title: "Add “\(name)” by name", symbol: "plus") { Task { await addByName(name) } }
+                .disabled(tripId == nil && city.trimmingCharacters(in: .whitespaces).isEmpty)
+                .padding(.top, 6)
         }
     }
 

@@ -81,7 +81,7 @@ struct FolderView: View {
                             }
                         }
                     } footer: {
-                        Text("Swipe left to take a place out of this folder. It stays in your saved places.")
+                        EmptyView()
                     }
                 }
             }

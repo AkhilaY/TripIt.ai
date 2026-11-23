@@ -159,7 +159,7 @@ struct CalendarView: View {
                                 Spacer(minLength: 0)
                             }
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(PressStyle())
                         Button("Set date") { dating = item }
                             .buttonStyle(PrimaryButtonStyle(tinted: true, compact: true)).fixedSize()
                     }
@@ -294,7 +294,7 @@ private struct AgendaRow: View {
                 }
                 .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(PressStyle())
             if let item = row.item, item.kind == "event" || item.kind == "booking", item.googleUrl != nil || item.icsUrl != nil {
                 Menu {
                     if let ics = item.icsUrl, let url = API.shared.url(ics) {
@@ -347,7 +347,7 @@ private struct MonthGrid: View {
                     .accessibilityLabel("Next month")
             }
             .foregroundStyle(Theme.link)
-            .buttonStyle(.plain)
+            .buttonStyle(PressStyle())
             HStack(spacing: 0) {
                 ForEach(ordered.indices, id: \.self) { i in
                     Text(ordered[i]).font(Theme.text(.caption2)).foregroundStyle(Theme.tertiary).frame(maxWidth: .infinity, minHeight: 20)
@@ -395,7 +395,7 @@ private struct MonthGrid: View {
             .frame(maxWidth: .infinity, minHeight: 44)
             .background(inTrip ? CalendarView.color("trip").opacity(0.14) : Color.clear)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressStyle())
         .accessibilityLabel(Fmt.shortDay(iso) + (items.isEmpty ? "" : ", \(Fmt.plural(items.count, "item"))") + (inTrip ? ", trip day" : ""))
     }
 

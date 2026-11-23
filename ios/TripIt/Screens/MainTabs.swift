@@ -34,6 +34,7 @@ struct MainTabs: View {
                 }
             }
             .tint(Theme.accent)
+            .animation(.easeInOut(duration: 0.25), value: router.tab)  // tabs crossfade
             .background(Theme.background.ignoresSafeArea(edges: .top))
             // The page sits on the black bar like a card: square at the top, rounded where it meets the bar.
             .clipShape(RoundedBottom(radius: keyboardUp ? 0 : 28))
@@ -208,7 +209,7 @@ struct BottomBar: View {
                     .background(Color(red: 0.118, green: 0.118, blue: 0.118), in: Capsule())  // #1E1E1E
                     .contentShape(Capsule())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(PressStyle())
                 Button(action: onAdd) {
                     Image(systemName: "plus").font(.system(size: 18, weight: .light))
                         .foregroundStyle(Color(red: 0.098, green: 0.067, blue: 0.043))
@@ -216,7 +217,7 @@ struct BottomBar: View {
                         .background(Color.white, in: Circle())
                         .shadow(color: .white.opacity(0.2), radius: 7)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(PressStyle())
                 .accessibilityLabel("Save a link or a place")
             }
             HStack(spacing: 0) {
@@ -231,7 +232,7 @@ struct BottomBar: View {
                         .frame(maxWidth: .infinity, minHeight: 44)
                         .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(PressStyle())
                     .accessibilityAddTraits(on ? .isSelected : [])
                 }
             }

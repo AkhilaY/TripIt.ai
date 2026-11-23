@@ -53,7 +53,6 @@ struct EditView: View {
                         .clipped()
                 }
                 VStack(alignment: .leading, spacing: 8) {
-                    Eyebrow(text: "The edit · \(trip?.name ?? store.trips.first { $0.id == tripId }?.name ?? "")")
                     Text(edit.title).font(Theme.serif(30)).foregroundStyle(Theme.label)
                     if !edit.dek.isEmpty {
                         Text(edit.dek).font(Theme.text(.body)).foregroundStyle(Theme.secondary).fixedSize(horizontal: false, vertical: true)
@@ -136,7 +135,7 @@ struct EditView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(PressStyle())
             Divider().overlay(Theme.divider)
             HStack(spacing: 12) {
                 if let source = item.source {
@@ -158,7 +157,7 @@ struct EditView: View {
                     .disabled(saving.contains(item.id))
                 }
             }
-            .buttonStyle(.plain)
+            .buttonStyle(PressStyle())
             .padding(.horizontal, 14).padding(.vertical, 10)
         }
     }

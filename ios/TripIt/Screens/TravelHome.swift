@@ -163,7 +163,7 @@ struct TravelHome: View {
                 .padding(.bottom, 14)
                 .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(PressStyle())
         }
     }
 
@@ -264,7 +264,7 @@ struct TravelHome: View {
                             }
                             .frame(width: 124, alignment: .leading)
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(PressStyle())
                     }
                 }
                 .padding(.trailing, 20)

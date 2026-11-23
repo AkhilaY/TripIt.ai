@@ -43,7 +43,7 @@ struct PeopleRow: View {
                         Text(names(people)).font(Theme.text(.subheadline)).foregroundStyle(Theme.secondary).lineLimit(1)
                     }
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(PressStyle())
                 .accessibilityLabel("People on this trip: \(names(people))")
             } else {
                 Label("Plan it together", systemImage: "person.2").font(Theme.text(.subheadline)).foregroundStyle(Theme.secondary)

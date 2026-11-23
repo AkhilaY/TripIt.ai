@@ -12,11 +12,14 @@ struct HomeView: View {
     @State private var homeCity = ""
     @State private var tripEdits: [HomeEdit] = []
     @State private var headerShowing = true  // the photo is behind the status bar, so its text goes white
+    @State private var pull: CGFloat = 0  // how far the page is pulled down past the top; the scenery stretches with it
 
     var body: some View {
         GeometryReader { outer in
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
+                    Color.clear.frame(height: 0)
+                        .onGeometryChange(for: CGFloat.self) { $0.frame(in: .scrollView).minY } action: { pull = max(0, $0) }
                     headerBox(top: outer.safeAreaInsets.top)
                     sections.padding(.horizontal, 20)
                 }
@@ -25,8 +28,10 @@ struct HomeView: View {
             .ignoresSafeArea(edges: .top)
         }
         .background(Theme.background.ignoresSafeArea())
-        .toolbarBackground(.hidden, for: .navigationBar)
-        .toolbarColorScheme(headerShowing ? .dark : nil, for: .navigationBar)
+        // A clear but "visible" bar lets its colour scheme set the status bar: white over the scenery, dark below it.
+        .toolbarBackground(Color.clear, for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
+        .toolbarColorScheme(headerShowing ? .dark : .light, for: .navigationBar)
         .refreshable { await store.refresh() }
         .task(id: store.upcomingTrips.first?.id) {
             guard let trip = store.upcomingTrips.first else { tripEdits = []; return }
@@ -103,8 +108,9 @@ struct HomeView: View {
             }
             .padding(.horizontal, 20).padding(.top, top + 6).padding(.bottom, 26)
         }
-        .frame(height: 330 + top)
+        .frame(height: 330 + top + pull)
         .clipShape(UnevenRoundedRectangle(bottomLeadingRadius: 28, bottomTrailingRadius: 28, style: .continuous))
+        .padding(.top, -pull)  // grows upward into the pull, so nothing white shows above it
         .onGeometryChange(for: Bool.self) { $0.frame(in: .global).maxY > top + 30 } action: { headerShowing = $0 }
     }
 
@@ -137,18 +143,15 @@ struct HomeView: View {
     @ViewBuilder private var edits: some View {
         let all = homeEdits
         if !all.isEmpty {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Today's edits").font(Theme.serif(25)).foregroundStyle(Theme.label)
-                Text("Picked from your saves, new each day").font(Theme.text(.subheadline)).foregroundStyle(Theme.secondary)
-            }
-            .padding(.top, 32)
+            Text("Today's edits").font(Theme.serif(25)).foregroundStyle(Theme.label)
+                .padding(.top, 32)
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(alignment: .top, spacing: 12) {
                     ForEach(all) { edit in
                         Button { router.push(edit.route) } label: {
                             HomeEditCard(edit: edit, fallback: edit.placeIds.first.flatMap { store.place($0) })
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(PressStyle())
                     }
                 }
                 .scrollTargetLayout()
@@ -176,10 +179,11 @@ struct HomeView: View {
             let picks = WeekendPicks.make(from: store.saved.filter { store.isHome($0) && !$0.visited }, seed: shuffle)
             VStack(alignment: .leading, spacing: 6) {
                 Text("This weekend in \(home.city)").font(Theme.serif(25)).foregroundStyle(Theme.label)
-                Text(picks.isEmpty ? "Save places around \(home.city) and we'll pick a couple for the weekend from the ones you haven't been to."
-                                   : "Picked from places you've saved but haven't been to yet")
-                    .font(Theme.text(.subheadline)).foregroundStyle(Theme.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                if picks.isEmpty {
+                    Text("Save places around \(home.city) and a couple will be picked for the weekend.")
+                        .font(Theme.text(.subheadline)).foregroundStyle(Theme.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
             if !picks.isEmpty {
                 VStack(spacing: 0) {
@@ -198,7 +202,7 @@ struct HomeView: View {
                             .padding(.vertical, 16)
                             .contentShape(Rectangle())
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(PressStyle())
                     }
                     Divider().overlay(Theme.border)
                 }
@@ -213,9 +217,8 @@ struct HomeView: View {
             }
         } else {
             Card(padding: 18) {
-                Text("Your city").font(Theme.text(.footnote)).foregroundStyle(Theme.secondary)
-                Text("Where's home?").font(Theme.text(.headline)).foregroundStyle(Theme.label).padding(.top, 6)
-                Text("Set your home city and places you save there are kept as Around your city, with weekend picks and what's open now.")
+                Text("Where's home?").font(Theme.text(.headline)).foregroundStyle(Theme.label)
+                Text("For weekend picks and what's open near you.")
                     .font(Theme.text(.subheadline)).foregroundStyle(Theme.secondary).padding(.top, 4)
                     .fixedSize(horizontal: false, vertical: true)
                 AccentTextButton(title: "Set home city", symbol: nil) { homeCity = ""; settingHome = true }
@@ -305,7 +308,7 @@ struct HomeView: View {
             .frame(maxWidth: width == nil ? .infinity : nil, alignment: .leading)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressStyle())
     }
 
     /// The first place on the trip that must be booked and has no reservation yet.
@@ -329,7 +332,7 @@ struct HomeView: View {
                 Button { router.tab = .library } label: {
                     Text("See all").font(Theme.text(.subheadline)).underline().foregroundStyle(Theme.link)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(PressStyle())
             }
             .padding(.top, 44)
             VStack(spacing: 0) {
@@ -347,7 +350,7 @@ struct HomeView: View {
                         .padding(.vertical, 14)
                         .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(PressStyle())
                 }
                 Divider().overlay(Theme.border)
             }
@@ -378,7 +381,7 @@ struct ProfileButton: View {
                 .frame(width: 48, height: 48)
                 .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressStyle())
         .accessibilityLabel("Profile and settings")
     }
 
@@ -400,12 +403,7 @@ struct PhotoBox: View {
             .frame(width: width, height: height)
             .frame(maxWidth: width == nil ? .infinity : nil)
             .overlay {
-                RemoteImage(url: place.photos.first?.url(width: 600)) {
-                    ZStack {
-                        Theme.raised
-                        Image(systemName: Category(place.category).symbol).font(Theme.text(.title2)).foregroundStyle(Theme.secondary)
-                    }
-                }
+                RemoteImage(url: place.photos.first?.url(width: 600)) { CityScene(city: place.city) }
             }
             .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
     }
@@ -425,9 +423,7 @@ struct TripCover: View {
             .frame(width: height == nil ? size : width, height: h)
             .frame(maxWidth: height != nil && width == nil ? .infinity : nil)
             .overlay {
-                RemoteImage(url: trip.coverPhoto?.url(width: height == nil ? Int(size * 3) : 900)) {
-                    ZStack { Theme.cell; Image(systemName: "airplane").font(.system(size: min(h * 0.3, 26), weight: .light)).foregroundStyle(Theme.secondary) }
-                }
+                RemoteImage(url: trip.coverPhoto?.url(width: height == nil ? Int(size * 3) : 900)) { CityScene(city: trip.city) }
             }
             .clipShape(RoundedRectangle(cornerRadius: radius ?? min(size * 0.14, 14), style: .continuous))
     }

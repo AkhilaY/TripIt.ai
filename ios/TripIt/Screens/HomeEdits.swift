@@ -10,6 +10,7 @@ struct HomeEdit: Identifiable, Hashable {
     let note: String
     let placeIds: [String]
     let cover: PlacePhoto?
+    var city = ""  // for the drawn stand-in while (or if) there's no photo
     var fallbacks: [PlacePhoto] = []  // tried in turn if the cover doesn't load
     var tripId: String?
     var tripEditId: String?
@@ -44,7 +45,8 @@ enum HomeEdits {
             let picked = order(places, day: day)
             let photos = picked.compactMap(\.photos.first)
             out.append(HomeEdit(id: id, caption: "\(caption) · \(Fmt.plural(places.count, "place"))", title: title, note: note,
-                                placeIds: picked.map(\.id), cover: photos.first, fallbacks: Array(photos.dropFirst().prefix(3))))
+                                placeIds: picked.map(\.id), cover: photos.first, city: picked.first?.city ?? caption,
+                                fallbacks: Array(photos.dropFirst().prefix(3))))
         }
 
         // The city most of your saves are in stands in for home until you set one.
@@ -87,7 +89,7 @@ enum HomeEdits {
             let ids = open.map(\.id)
             picks.insert(HomeEdit(id: "open-now", caption: "Right now · \(Fmt.plural(open.count, "place"))", title: "Open now near you",
                                   note: "Saved places that are open as you read this, the closest first.", placeIds: ids,
-                                  cover: open.first { !$0.photos.isEmpty }?.photos.first), at: 0)
+                                  cover: open.first { !$0.photos.isEmpty }?.photos.first, city: open.first?.city ?? ""), at: 0)
         }
         return picks
     }
@@ -105,7 +107,7 @@ enum HomeEdits {
     static func fromTrip(_ trip: Trip, _ edits: TripEdits) -> [HomeEdit] {
         edits.edits.prefix(2).map { edit in
             HomeEdit(id: "trip-\(trip.id)-\(edit.id)", caption: "\(trip.name) · \(Fmt.plural(edit.entries.count, "place"))",
-                     title: edit.title, note: edit.dek, placeIds: [], cover: edit.coverCandidates.first,
+                     title: edit.title, note: edit.dek, placeIds: [], cover: edit.coverCandidates.first, city: trip.city,
                      fallbacks: Array(edit.coverCandidates.dropFirst()), tripId: trip.id, tripEditId: edit.id)
         }
     }
@@ -123,14 +125,8 @@ struct HomeEditCard: View {
             Color.clear
                 .frame(width: width, height: height)
                 .overlay {
-                    if let cover = edit.cover {
-                        ChainImage(urls: ([cover] + edit.fallbacks).compactMap { $0.url(width: 800) }) {
-                            ZStack { Theme.cell; Image(systemName: "sparkles").font(.system(size: 28, weight: .light)).foregroundStyle(Theme.secondary) }
-                        }
-                    } else if let fallback {
-                        PhotoBox(place: fallback, width: width, height: height, radius: 0)
-                    } else {
-                        ZStack { Theme.cell; Image(systemName: "sparkles").font(.system(size: 28, weight: .light)).foregroundStyle(Theme.secondary) }
+                    ChainImage(urls: ([edit.cover].compactMap { $0 } + edit.fallbacks).compactMap { $0.url(width: 800) }) {
+                        CityScene(city: edit.city.isEmpty ? (fallback?.city ?? "") : edit.city)
                     }
                 }
                 .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
@@ -153,7 +149,6 @@ struct SavedEditView: View {
         List {
             Section {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Today's edit").font(Theme.text(.subheadline)).foregroundStyle(Theme.secondary)
                     Text(edit.title).font(Theme.serif(32)).foregroundStyle(Theme.label)
                     Text(edit.note).font(Theme.text(.body)).foregroundStyle(Theme.secondary).fixedSize(horizontal: false, vertical: true)
                 }

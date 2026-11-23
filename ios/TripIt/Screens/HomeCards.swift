@@ -99,7 +99,7 @@ struct NextUpCard: View {
                     }
                 }
             }
-            .buttonStyle(.plain)
+            .buttonStyle(PressStyle())
         }
     }
 
@@ -119,8 +119,7 @@ struct GetStartedCard: View {
 
     var body: some View {
         Card(padding: 18) {
-            Eyebrow(text: "Get started")
-            Text("Save your first place").font(Theme.serif(24)).foregroundStyle(Theme.label).padding(.top, 6)
+            Text("Save your first place").font(Theme.serif(24)).foregroundStyle(Theme.label)
             VStack(alignment: .leading, spacing: 12) {
                 step("1", "Find a post you love on TikTok or Instagram")
                 step("2", "Tap Share, then Travel Edit (it may be under More)")

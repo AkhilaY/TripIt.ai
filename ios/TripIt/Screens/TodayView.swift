@@ -142,7 +142,7 @@ struct TodayView: View {
                         }
                         .padding(12)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(PressStyle())
                     if b.id != list.last?.id { Divider().overlay(Theme.divider) }
                 }
             }
@@ -190,7 +190,7 @@ struct TodayView: View {
                         }
                         .padding(12)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(PressStyle())
                 }
             }
             .padding(.top, 8)
@@ -247,7 +247,7 @@ struct TodayView: View {
                 }
                 .padding(.top, 8)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(PressStyle())
             HStack(spacing: 8) {
                 Menu {
                     Button { Links.open(p.directionsURL) } label: { Label("Apple Maps", systemImage: "map") }
@@ -281,10 +281,10 @@ struct TodayView: View {
                     Spacer(minLength: 0)
                 }
             }
-            .buttonStyle(.plain)
+            .buttonStyle(PressStyle())
             if p.visited {
                 Button("Undo") { Task { await store.patch(p, ["visited": false], tripId: tripId) } }
-                    .font(Theme.text(.footnote)).foregroundStyle(Theme.link).buttonStyle(.plain)
+                    .font(Theme.text(.footnote)).foregroundStyle(Theme.link).buttonStyle(PressStyle())
                     .accessibilityLabel("Mark \(p.name) not visited")
             }
         }

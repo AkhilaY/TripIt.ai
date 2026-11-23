@@ -94,7 +94,7 @@ struct LibraryView: View {
                         .padding(.horizontal, 16).frame(height: 40)
                         .overlay(Capsule().strokeBorder(Theme.chipBorder))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(PressStyle())
                 ProfileButton()
             }
             .padding(.top, 12)
@@ -132,12 +132,12 @@ struct LibraryView: View {
             ForEach(cityHits) { city in
                 NavigationLink(value: Route.city(name: city.name)) {
                     ListRow(title: city.name, subtitle: Fmt.plural(city.places.count, "place"), photo: city.places.first?.photos.first, symbol: "building.2")
-                }.buttonStyle(.plain)
+                }.buttonStyle(PressStyle())
             }
             ForEach(folders) { folder in
                 NavigationLink(value: Route.folder(id: folder.id)) {
                     ListRow(title: folder.name, subtitle: Fmt.plural(folder.placeCount, "place"), photo: folder.covers.first, symbol: "list.bullet")
-                }.buttonStyle(.plain)
+                }.buttonStyle(PressStyle())
             }
         }
         if !places.isEmpty {
@@ -146,7 +146,7 @@ struct LibraryView: View {
                 NavigationLink(value: Route.place(id: place.id, tripId: nil)) {
                     PlaceRow(place: place).padding(.vertical, 6)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(PressStyle())
                 .placeActions(place, onDelete: { Task { await store.deleteWithUndo(place) } }, sheet: $sheet)
                 Divider().overlay(Theme.divider)
             }
@@ -179,7 +179,7 @@ struct LibraryView: View {
                     if !places.isEmpty { PhotoStrip(places: places).padding(.top, 12) }
                 }
             }
-            .buttonStyle(.plain)
+            .buttonStyle(PressStyle())
         }
     }
 
@@ -199,7 +199,7 @@ struct LibraryView: View {
             NavigationLink(value: Route.trip(id: trip.id)) {
                 if i == 0 { TripRouteCard(trip: trip) } else { TripRow(trip: trip) }
             }
-            .buttonStyle(.plain)
+            .buttonStyle(PressStyle())
             .padding(.top, i == 0 ? 4 : 10)
         }
     }
@@ -218,7 +218,7 @@ struct LibraryView: View {
                         }
                         .font(Theme.text(.footnote)).foregroundStyle(Theme.link).frame(minHeight: 36)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(PressStyle())
                 } else {
                     Text("Sorted for you automatically").font(Theme.text(.caption)).foregroundStyle(Theme.tertiary)
                 }
@@ -228,7 +228,7 @@ struct LibraryView: View {
             LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], alignment: .leading, spacing: 16) {
                 ForEach(visible) { city in
                     NavigationLink(value: Route.city(name: city.name)) { CityTile(city: city, trip: store.trip(forCity: city.name)) }
-                        .buttonStyle(.plain)
+                        .buttonStyle(PressStyle())
                 }
             }
             .padding(.top, 4)
@@ -251,7 +251,7 @@ struct LibraryView: View {
             NavigationLink(value: Route.folder(id: folder.id)) {
                 ListRow(title: folder.name, subtitle: listSubtitle(folder), photo: folder.covers.first, symbol: "list.bullet")
             }
-            .buttonStyle(.plain)
+            .buttonStyle(PressStyle())
         }
         if !store.folders.isEmpty { Divider().overlay(Theme.divider) }
     }
@@ -281,7 +281,7 @@ struct VisitPicker: View {
                     .frame(maxWidth: .infinity, minHeight: 40)
                     .background(on ? Theme.cell : .clear, in: Capsule())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(PressStyle())
                 .accessibilityAddTraits(on ? .isSelected : [])
             }
         }
@@ -384,7 +384,7 @@ struct CityTile: View {
             let photos = Array(city.places.filter { !$0.photos.isEmpty }.prefix(2))
             HStack(spacing: 2) {
                 if photos.isEmpty {
-                    ZStack { Theme.cell; Image(systemName: "building.2").font(.system(size: 20, weight: .light)).foregroundStyle(Theme.secondary) }.frame(height: 110)
+                    CityScene(city: city.name).frame(height: 110)
                 } else {
                     ForEach(photos) { p in PhotoBox(place: p, width: nil, height: 110, radius: 0) }
                 }
@@ -511,7 +511,7 @@ struct FolderStrip: View {
             HStack(alignment: .top, spacing: 12) {
                 ForEach(folders) { folder in
                     NavigationLink(value: Route.folder(id: folder.id)) { FolderCard(folder: folder) }
-                        .buttonStyle(.plain)
+                        .buttonStyle(PressStyle())
                 }
                 Button(action: onNew) {
                     VStack(alignment: .leading, spacing: 6) {
@@ -525,7 +525,7 @@ struct FolderStrip: View {
                     }
                     .frame(width: 128, alignment: .leading)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(PressStyle())
             }
             .padding(.horizontal, 16).padding(.vertical, 4)
         }

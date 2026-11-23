@@ -43,7 +43,7 @@ struct PlacesMap: View {
                     .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
                     .padding(.horizontal, 12).padding(.bottom, 8)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(PressStyle())
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }

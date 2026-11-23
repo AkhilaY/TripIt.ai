@@ -364,7 +364,7 @@ struct TripRouteStrip: View {
                 .padding(.vertical, 2)
             }
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressStyle())
         .accessibilityLabel("Route: " + stops.map(\.city).joined(separator: ", then ") + ". Edit route")
     }
 }

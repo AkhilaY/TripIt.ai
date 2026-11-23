@@ -22,7 +22,7 @@ struct TripsSection: View {
                         Image(systemName: "chevron.right").font(Theme.text(.footnote)).foregroundStyle(Theme.tertiary)
                     }
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(PressStyle())
             }
         }
         Section {
@@ -38,7 +38,7 @@ struct TripsSection: View {
                     Image(systemName: "chevron.right").font(Theme.text(.footnote)).foregroundStyle(Theme.tertiary)
                 }
             }
-            .buttonStyle(.plain)
+            .buttonStyle(PressStyle())
         }
         Section {
             if store.trips.isEmpty {

@@ -258,7 +258,7 @@ struct BookingSheet: View {
                         ForEach(tripsToChoose) { Text($0.name).tag($0.id) }
                     }
                 } footer: {
-                    Text("Near home: tickets for a pop-up, a table at a restaurant. On a trip: flights, stays and tours.")
+                    EmptyView()
                 }
                 Section {
                     PhotosPicker(selection: $shots, maxSelectionCount: 6, matching: .images) {

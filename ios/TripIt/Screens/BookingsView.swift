@@ -234,7 +234,7 @@ struct BookingsView: View {
                     Button { router.bookingRequest = Router.BookingRequest(tripId: booking.tripId, booking: booking, title: "Add date and time") } label: {
                         Label("Add date and time", systemImage: "calendar.badge.plus").font(Theme.text(.footnote)).foregroundStyle(Theme.link)
                     }
-                    .buttonStyle(.plain).padding(.top, 6)
+                    .buttonStyle(PressStyle()).padding(.top, 6)
                 }
             }
             if !past.isEmpty {
@@ -453,7 +453,7 @@ private struct AttentionCard: View {
                                 .buttonStyle(PrimaryButtonStyle(compact: true)).fixedSize()
                         }
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(PressStyle())
                     .padding(.top, 4)
                 }
                 Spacer(minLength: 0)
@@ -597,7 +597,7 @@ struct BookingCard: View {
                 }
                 .font(Theme.text(.footnote))
                 .foregroundStyle(Theme.link)
-                .buttonStyle(.plain)
+                .buttonStyle(PressStyle())
             }
             .padding(.top, 12)
         }

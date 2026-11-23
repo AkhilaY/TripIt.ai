@@ -87,7 +87,7 @@ struct NewTripSheet: View {
             } header: {
                 Text("Where to?")
             } footer: {
-                if !cities.isEmpty { Text("Cities you've saved places in.") }
+                EmptyView()
             }
             Section {
                 TextField(city.isEmpty ? "Trip name (optional)" : "\(city) trip", text: $name)
@@ -99,7 +99,7 @@ struct NewTripSheet: View {
                     DatePicker("Starts", selection: $start, displayedComponents: .date)
                 }
             } footer: {
-                Text("With a start date, The Travel Edit checks each stop is open on its day.")
+                EmptyView()
             }
             Section {
                 Button("Next") { next() }

@@ -32,66 +32,66 @@ struct SearchSheet: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                HStack(spacing: 12) {
-                    Image(systemName: "magnifyingglass").font(.system(size: 18, weight: .light)).foregroundStyle(Theme.secondary)
-                    TextField("Places, cities, lists, cuisines", text: $query)
+                HStack(spacing: 10) {
+                    Image(systemName: "magnifyingglass").font(.system(size: 15, weight: .light)).foregroundStyle(Theme.secondary)
+                    TextField("Search your places", text: $query)
                         .font(Theme.text(.body))
                         .focused($focused)
                         .submitLabel(.search)
                         .autocorrectionDisabled()
                     if !query.isEmpty {
-                        Button { query = "" } label: {
-                            Image(systemName: "xmark.circle.fill").foregroundStyle(Theme.tertiary)
-                        }
-                        .accessibilityLabel("Clear")
+                        Button { query = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(Theme.tertiary) }
+                            .accessibilityLabel("Clear")
                     }
                 }
-                .padding(.horizontal, 18)
-                .frame(height: 52)
+                .padding(.horizontal, 16)
+                .frame(height: 46)
                 .background(Theme.cell, in: Capsule())
                 .padding(.horizontal, 20)
-                .padding(.top, 8)
+                .padding(.top, 4)
 
-                List {
-                    if !cities.isEmpty {
-                        Section {
-                            ForEach(cities, id: \.self) { city in row(.city(name: city), symbol: "building.2", title: city, detail: count(city)) }
-                        } header: { header("Cities") }
-                    }
-                    if !trips.isEmpty {
-                        Section {
-                            ForEach(trips) { trip in row(.trip(id: trip.id), symbol: "airplane", title: trip.name, detail: Fmt.plural(trip.placeCount, "place")) }
-                        } header: { header("Trips") }
-                    }
-                    if !folders.isEmpty {
-                        Section {
-                            ForEach(folders) { folder in row(.folder(id: folder.id), symbol: "folder", title: folder.name, detail: Fmt.plural(folder.placeCount, "place")) }
-                        } header: { header("Lists") }
-                    }
-                    Section {
-                        if places.isEmpty {
-                            Text(q.isEmpty ? "Nothing saved yet." : "Nothing matches “\(query)”.")
-                                .font(Theme.text(.subheadline)).foregroundStyle(Theme.secondary)
-                                .listRowSeparator(.hidden)
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        if q.isEmpty && !places.isEmpty {
+                            Text("Recent").font(Theme.text(.footnote)).foregroundStyle(Theme.secondary).padding(.bottom, 4)
+                        }
+                        ForEach(cities, id: \.self) { city in
+                            row(.city(name: city), title: city, detail: count(city)) { CityScene(city: city) }
+                        }
+                        ForEach(trips) { trip in
+                            row(.trip(id: trip.id), title: trip.name, detail: trip.dateRange ?? Fmt.plural(trip.placeCount, "place")) {
+                                TripCover(trip: trip, size: 48)
+                            }
+                        }
+                        ForEach(folders) { folder in
+                            row(.folder(id: folder.id), title: folder.name, detail: Fmt.plural(folder.placeCount, "place")) {
+                                RemoteImage(url: folder.covers.first?.url(width: 150)) { Theme.cell }
+                            }
                         }
                         ForEach(places) { place in
-                            Button { open(.place(id: place.id, tripId: nil)) } label: { PlaceRow(place: place) }
-                                .buttonStyle(.plain)
-                                .listRowInsets(EdgeInsets(top: 10, leading: 20, bottom: 10, trailing: 20))
-                                .listRowSeparatorTint(Theme.border)
+                            Button { open(.place(id: place.id, tripId: nil)) } label: {
+                                PlaceRow(place: place).padding(.vertical, 10)
+                            }
+                            .buttonStyle(PressStyle())
+                            Divider().overlay(Theme.border)
                         }
-                    } header: {
-                        header(q.isEmpty ? "Recently saved" : "Places")
+                        if !q.isEmpty && places.isEmpty && cities.isEmpty && trips.isEmpty && folders.isEmpty {
+                            Text("Nothing matches “\(query)”").font(Theme.text(.subheadline)).foregroundStyle(Theme.secondary).padding(.top, 24)
+                        }
                     }
+                    .padding(.horizontal, 20)
+                    .padding(.top, 16)
+                    .animation(.snappy, value: query)
                 }
-                .listStyle(.plain)
                 .scrollDismissesKeyboard(.immediately)
             }
-            .tripBackground()
-            .navigationTitle("Search")
+            .background(Theme.background.ignoresSafeArea())
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) {
+                    Button { dismiss() } label: { Image(systemName: "xmark").font(.system(size: 14, weight: .light)) }
+                        .accessibilityLabel("Close")
+                }
             }
             .onAppear { focused = true }
         }
@@ -101,25 +101,23 @@ struct SearchSheet: View {
         Fmt.plural(store.saved.filter { $0.city == city }.count, "place")
     }
 
-    private func header(_ text: String) -> some View {
-        Text(text).font(Theme.text(.footnote)).foregroundStyle(Theme.secondary).textCase(nil)
-    }
-
-    private func row(_ route: Route, symbol: String, title: String, detail: String) -> some View {
-        Button { open(route) } label: {
-            HStack(spacing: 14) {
-                SymbolTile(symbol: symbol, size: 44)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title).font(Theme.text(.body)).foregroundStyle(Theme.label)
-                    Text(detail).font(Theme.text(.footnote)).foregroundStyle(Theme.secondary)
+    private func row<Thumb: View>(_ route: Route, title: String, detail: String, @ViewBuilder thumb: () -> Thumb) -> some View {
+        VStack(spacing: 0) {
+            Button { open(route) } label: {
+                HStack(spacing: 14) {
+                    thumb().frame(width: 48, height: 48).clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(title).font(Theme.text(.body)).foregroundStyle(Theme.label).lineLimit(1)
+                        Text(detail).font(Theme.text(.footnote)).foregroundStyle(Theme.secondary).lineLimit(1)
+                    }
+                    Spacer(minLength: 0)
                 }
-                Spacer(minLength: 0)
+                .padding(.vertical, 10)
+                .contentShape(Rectangle())
             }
-            .contentShape(Rectangle())
+            .buttonStyle(PressStyle())
+            Divider().overlay(Theme.border)
         }
-        .buttonStyle(.plain)
-        .listRowInsets(EdgeInsets(top: 8, leading: 20, bottom: 8, trailing: 20))
-        .listRowSeparatorTint(Theme.border)
     }
 
     private func open(_ route: Route) {

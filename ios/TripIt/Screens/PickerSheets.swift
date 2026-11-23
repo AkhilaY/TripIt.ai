@@ -106,7 +106,7 @@ struct PlaceChecklist: View {
                         PlaceRow(place: place)
                     }
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(PressStyle())
             }
         }
     }
@@ -189,7 +189,7 @@ struct FolderPickerSheet: View {
                         }
                     }
                 } footer: {
-                    Text(single != nil ? "A place can be in as many folders as you like." : "Adds \(Fmt.plural(placeIds.count, "place")) to the folder you choose.")
+                    EmptyView()
                 }
             }
             .tripBackground()
@@ -256,7 +256,7 @@ struct TripPickerSheet: View {
                         }
                     }
                 } footer: {
-                    Text("Places join a trip unscheduled. Put them on a day from the trip's Plan.")
+                    EmptyView()
                 }
             }
             .tripBackground()

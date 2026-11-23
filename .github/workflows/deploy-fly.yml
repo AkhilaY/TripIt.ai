@@ -96,6 +96,7 @@ jobs:
           BACKUP_ENDPOINT: ${{ secrets.BACKUP_ENDPOINT }}
           BACKUP_ACCESS_KEY_ID: ${{ secrets.BACKUP_ACCESS_KEY_ID }}
           BACKUP_SECRET_ACCESS_KEY: ${{ secrets.BACKUP_SECRET_ACCESS_KEY }}
+          SUPPORT_EMAIL: ${{ secrets.SUPPORT_EMAIL }}
         run: |
           {
             printf 'ANTHROPIC_API_KEY=%s\n' "$ANTHROPIC_API_KEY"
@@ -122,6 +123,8 @@ jobs:
             [ -z "$BACKUP_ENDPOINT" ] || printf 'BACKUP_ENDPOINT=%s\n' "$BACKUP_ENDPOINT"
             [ -z "$BACKUP_ACCESS_KEY_ID" ] || printf 'BACKUP_ACCESS_KEY_ID=%s\n' "$BACKUP_ACCESS_KEY_ID"
             [ -z "$BACKUP_SECRET_ACCESS_KEY" ] || printf 'BACKUP_SECRET_ACCESS_KEY=%s\n' "$BACKUP_SECRET_ACCESS_KEY"
+            # The contact shown on /privacy, /terms and /support.
+            [ -z "$SUPPORT_EMAIL" ] || printf 'SUPPORT_EMAIL=%s\n' "$SUPPORT_EMAIL"
           } | flyctl secrets import --stage --app "$APP"
 
       - name: Deploy

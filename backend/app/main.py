@@ -114,6 +114,7 @@ from .menus import MENU_CATEGORIES, MenuService, SafeFetcher
 from .needs import NeedsService
 from .packing import PackingService
 from .photos import PhotoStore, fetch_bytes as fetch_photo_bytes
+from . import modelcheck
 from .appstore import AppStoreError, account_token, plus_until, verify_jws
 from .plans import PLANS, PlanOut, out_of_saves, plan_for, upgrade_message
 from .packing import parse_lines
@@ -719,6 +720,42 @@ async def admin_usage(request: Request, days: int = 30) -> dict:
     """AI spend by day, feature and person, Google Maps calls, and the budgets and limits in force."""
     _admin(request)
     return _usage(request).report(min(max(days, 1), 120))
+
+
+class ModelCheckRequest(BaseModel):
+    count: int = Field(default=20, ge=1, le=60)
+    arms: str = Field(default="", max_length=300)  # "model:frames model:frames ...", the first is the baseline
+
+
+@app.post("/v1/admin/model-check", status_code=202, dependencies=[Auth])
+async def start_model_check(body: ModelCheckRequest, request: Request) -> dict:
+    """Starts comparing models for reading posts on recent saves (owner only; costs real money). Follow it with GET."""
+    _admin(request)
+    state = request.app.state
+    current = getattr(state, "model_check", None)
+    if current and current["running"]:
+        raise HTTPException(status_code=409, detail="A comparison is already running")
+    lines: list[str] = []
+    state.model_check = check = {"running": True, "lines": lines}
+
+    async def run() -> None:
+        try:
+            await modelcheck.compare(get_settings(), _db(request), body.count, modelcheck.parse_arms(body.arms), lines.append)
+        except Exception as e:
+            log.exception("Model comparison failed")
+            lines.append(f"Stopped: {type(e).__name__}")
+        finally:
+            check["running"] = False
+
+    check["task"] = asyncio.create_task(run())
+    return {"started": True}
+
+
+@app.get("/v1/admin/model-check", dependencies=[Auth])
+async def model_check_progress(request: Request, since: int = 0) -> dict:
+    _admin(request)
+    check = getattr(request.app.state, "model_check", None) or {"running": False, "lines": []}
+    return {"running": check["running"], "lines": check["lines"][max(0, since):], "total": len(check["lines"])}
 
 
 @app.put("/v1/admin/usage/limits", dependencies=[Auth])

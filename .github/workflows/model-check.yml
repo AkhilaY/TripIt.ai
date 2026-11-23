@@ -1,8 +1,8 @@
 name: Compare models for reading posts
 
-# Runs recent real saves through several models (and frame counts) on the server and compares the places found
-# and the cost, before changing which model reads posts. Prints only counts and costs. Costs real money
-# (about $0.10-0.20 per post across all arms). Run it from the Actions tab.
+# Runs recent real saves through several models (and frame counts) inside the server and compares the places
+# found and the cost, before changing which model reads posts. Prints only counts and costs. Costs real money
+# (about $5 for 20 posts and the default arms). Run it from the Actions tab; it also runs when this file changes.
 on:
   workflow_dispatch:
     inputs:
@@ -12,43 +12,47 @@ on:
       arms:
         description: model:frames to compare, the first is the baseline
         default: "claude-opus-5-5:24 claude-opus-5-5:12 claude-sonnet-5-5:12 claude-haiku-5-5:12"
-  # Also when the comparison script changes (GitHub only lets a workflow be started by hand once it has run).
   push:
     paths:
-      - ".github/diagnose/model_check.py"
+      - ".github/workflows/model-check.yml"
 
 jobs:
-  fly:
+  compare:
     name: Compare on the server
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    permissions:
+      actions: read
+      contents: read
     env:
-      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
       APP: ${{ vars.FLY_APP_NAME }}
+      KEY: ${{ secrets.APP_API_KEY }}
       COUNT: ${{ github.event.inputs.count || '20' }}
       ARMS: ${{ github.event.inputs.arms || 'claude-opus-5-5:24 claude-opus-5-5:12 claude-sonnet-5-5:12 claude-haiku-5-5:12' }}
     steps:
-      - uses: actions/checkout@v4
-      - name: Install flyctl
+      - name: Wait for any server deploy to finish
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          curl -fsSL https://fly.io/install.sh | sh
-          echo "$HOME/.fly/bin" >> "$GITHUB_PATH"
-      - name: Wake the server
-        run: curl -fsS -m 60 "https://$APP.fly.dev/health" || true
-      - name: Start the comparison on the server (in the background, so a dropped connection doesn't stop it)
+          for i in $(seq 1 60); do
+            busy=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow deploy-fly.yml --limit 5 --json status \
+                   --jq '[.[] | select(.status != "completed")] | length')
+            [ "$busy" = "0" ] && exit 0
+            echo "Deploy still running ($i)"; sleep 20
+          done
+      - name: Start the comparison
         run: |
-          case "$COUNT $ARMS" in *[!a-z0-9.:\ -]*) echo "Unexpected characters in the inputs"; exit 1;; esac
-          B64=$(base64 -w0 .github/diagnose/model_check.py)
-          flyctl ssh console --app "$APP" -C "sh -c 'echo $B64 | base64 -d > /tmp/model_check.py && rm -f /tmp/model_check.log && cd /app && (setsid nohup python /tmp/model_check.py $COUNT $ARMS > /tmp/model_check.log 2>/dev/null &) && echo started'"
+          body=$(jq -n --arg arms "$ARMS" --argjson count "$COUNT" '{count: $count, arms: $arms}')
+          curl -fsS -m 60 -X POST "https://$APP.fly.dev/v1/admin/model-check" \
+            -H "X-API-Key: $KEY" -H "Content-Type: application/json" -d "$body"
       - name: Follow it until it finishes
         run: |
           shown=0
-          for i in $(seq 1 160); do
+          for i in $(seq 1 170); do
             sleep 30
-            out=$(flyctl ssh console --app "$APP" -C "sh -c 'cat /tmp/model_check.log; echo; pgrep -f model_check.py >/dev/null && echo __RUNNING__ || echo __DONE__'" 2>/dev/null || true)
-            body=$(printf '%s\n' "$out" | grep -v '__RUNNING__\|__DONE__' | grep -v '^\[download\]')
-            total=$(printf '%s\n' "$body" | wc -l)
-            if [ "$total" -gt "$shown" ]; then printf '%s\n' "$body" | tail -n +$((shown + 1)); shown=$total; fi
-            case "$out" in *__DONE__*) exit 0;; esac
+            got=$(curl -fsS -m 30 "https://$APP.fly.dev/v1/admin/model-check?since=$shown" -H "X-API-Key: $KEY" || echo '{}')
+            printf '%s' "$got" | jq -r '.lines[]?'
+            shown=$(printf '%s' "$got" | jq -r ".total // $shown")
+            [ "$(printf '%s' "$got" | jq -r '.running // true')" = "false" ] && exit 0
           done
-          echo "Still running after 80 minutes; see /tmp/model_check.log on the server"
+          echo "Still running after 85 minutes"

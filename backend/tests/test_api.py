@@ -3553,3 +3553,22 @@ def test_usage_report_gives_cost_per_save(client):
     assert r.status_code == 200, r.text
     video = next(r for r in r.json()["per_save"] if r["kind"] == "video")
     assert video["saves"] == 1 and video["ai"] == pytest.approx(0.12) and video["google"] == pytest.approx(0.14)
+
+
+def test_model_check_runs_as_an_owner_task(client, monkeypatch):
+    from app import modelcheck
+
+    async def fake(settings, db, count, arms, say):
+        say(f"{count} posts, {len(arms)} arms, first {arms[0][0]}")
+
+    monkeypatch.setattr(modelcheck, "compare", fake)
+    owner = signup(client, "a@x.com", "secret")
+    r = client.post("/v1/admin/model-check", json={"count": 5, "arms": "claude-haiku-5-5:12 bad"}, headers=owner)
+    assert r.status_code == 202
+    for _ in range(50):
+        got = client.get("/v1/admin/model-check", headers=owner).json()
+        if not got["running"]:
+            break
+        time.sleep(0.02)
+    assert got["lines"] == ["5 posts, 1 arms, first claude-haiku-5-5"]
+    assert modelcheck.same("Joe's Pizza", "Joe’s Pizza Broadway") and not modelcheck.same("Sey Coffee", "Devoción")

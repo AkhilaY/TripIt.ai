@@ -18,16 +18,30 @@ jobs:
   fly:
     name: Re-run recent saves on the server
     runs-on: ubuntu-latest
+    # Its own queue: sharing the deploy's would let GitHub cancel a waiting deploy (only one can wait per queue).
     concurrency:
-      group: deploy-fly  # after any deploy that's running, so it checks the new code
-      cancel-in-progress: false
+      group: saves-check
+      cancel-in-progress: true
     timeout-minutes: 75
     env:
       FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
       APP: ${{ vars.FLY_APP_NAME }}
       COUNT: ${{ github.event.inputs.count || '40' }}
+    permissions:
+      actions: read
+      contents: read
     steps:
       - uses: actions/checkout@v4
+      - name: Wait for the server deploy to finish, so the new code is checked
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for i in $(seq 1 60); do
+            busy=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow deploy-fly.yml --limit 5 --json status \
+                   --jq '[.[] | select(.status != "completed")] | length')
+            [ "$busy" = "0" ] && exit 0
+            echo "Deploy still running ($i)"; sleep 20
+          done
       - name: Install flyctl
         run: |
           curl -fsSL https://fly.io/install.sh | sh

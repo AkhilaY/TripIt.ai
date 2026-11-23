@@ -250,7 +250,7 @@ struct FilterChip: View {
                 Text(label).font(Theme.text(.subheadline))
                 if let count { Text("\(count)").font(Theme.text(.caption)).opacity(0.6) }
             }
-            .padding(.horizontal, 16).frame(minHeight: 40)
+            .padding(.horizontal, 14).frame(minHeight: 36)
             .foregroundStyle(isOn ? Theme.accentInk : Theme.label)
             .background(isOn ? Theme.accent : Theme.background, in: Capsule())
             .overlay(Capsule().strokeBorder(Theme.chipBorder, lineWidth: isOn ? 0 : 1))

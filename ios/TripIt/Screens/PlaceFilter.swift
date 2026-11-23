@@ -97,7 +97,6 @@ struct PlaceFilterBar: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             FlowLayout(spacing: 8) {
-                if showSort { sortMenu }
                 FilterChip(label: "Starred", dot: Theme.label, isOn: filter.starred) { filter.starred.toggle() }
                 groupChips
                 moreMenu
@@ -144,30 +143,6 @@ struct PlaceFilterBar: View {
             .sorted { $0.count != $1.count ? $0.count > $1.count : $0.city < $1.city }
     }
 
-    private var sortMenu: some View {
-        Menu {
-            Picker("Sort", selection: $sort) {
-                ForEach(PlaceSort.allCases) { option in
-                    Text(option.label).tag(option)
-                }
-            }
-        } label: {
-            HStack(spacing: 6) {
-                Image(systemName: "arrow.up.arrow.down").font(.system(size: 12, weight: .light))
-                Text(sort.label).font(Theme.text(.subheadline))
-            }
-            .foregroundStyle(Theme.label)
-            .padding(.horizontal, 16).frame(height: 40)
-            .background(Theme.background, in: Capsule())
-            .overlay(Capsule().strokeBorder(Theme.chipBorder))
-            .fixedSize()
-        }
-        .fixedSize()
-        .onChange(of: sort) { _, value in
-            if value == .closest { Location.shared.request() }
-        }
-    }
-
     private var groupChips: some View {
         let counts = groupCounts
         let shown: [PlaceGroup] = PlaceGroup.allCases.filter { counts[$0] != nil }
@@ -197,8 +172,15 @@ struct PlaceFilterBar: View {
 
     private var moreMenu: some View {
         let cities = cityCounts
-        let label = filter.moreCount > 0 ? "Filters · \(filter.moreCount)" : "More filters"
+        let changed = filter.moreCount + (showSort && sort != .popular ? 1 : 0)
+        let label = changed > 0 ? "Sort & filter · \(changed)" : showSort ? "Sort & filter" : "More filters"
         return Menu {
+            if showSort {
+                Picker("Sort by", selection: $sort) {
+                    ForEach(PlaceSort.allCases) { option in Text(option.label).tag(option) }
+                }
+                .pickerStyle(.inline)
+            }
             Toggle("Not in a trip yet", isOn: $filter.unplanned)
             if cities.count > 1 {
                 Section("Cities") {
@@ -211,7 +193,11 @@ struct PlaceFilterBar: View {
                 Button("Clear filters", role: .destructive) { filter = PlaceFilter(query: filter.query) }
             }
         } label: {
-            FilterChipLabel(text: label, isOn: filter.moreCount > 0)
+            FilterChipLabel(text: label, isOn: changed > 0)
+        }
+        .fixedSize()
+        .onChange(of: sort) { _, value in
+            if value == .closest { Location.shared.request() }
         }
     }
 }
@@ -230,7 +216,7 @@ private struct FilterChipLabel: View {
             Text(text).font(Theme.text(.subheadline))
             Image(systemName: "chevron.down").font(.system(size: 11, weight: .light))
         }
-        .padding(.horizontal, 16).frame(height: 40)
+        .padding(.horizontal, 14).frame(height: 36)
         .foregroundStyle(isOn ? Theme.accentInk : Theme.label)
         .background(isOn ? Theme.accent : Theme.background, in: Capsule())
         .overlay(Capsule().strokeBorder(Theme.chipBorder, lineWidth: isOn ? 0 : 1))

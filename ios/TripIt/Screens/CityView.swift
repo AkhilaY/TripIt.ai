@@ -31,14 +31,11 @@ struct CityView: View {
                 .listRowInsets(EdgeInsets(top: 8, leading: 20, bottom: 12, trailing: 20))
                 if let trip {
                     // A plain button, not a NavigationLink: in a List that adds a second chevron next to the row's own.
-                    VStack(alignment: .leading, spacing: 6) {
-                        Eyebrow(text: "Planned trip", color: Theme.secondary)
-                        Button { router.push(.trip(id: trip.id)) } label: { TripRow(trip: trip) }
-                            .buttonStyle(.plain)
-                    }
-                    .listRowBackground(Color.clear)
-                    .listRowSeparator(.hidden)
-                    .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+                    Button { router.push(.trip(id: trip.id)) } label: { TripRow(trip: trip) }
+                        .buttonStyle(.plain)
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                        .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 4, trailing: 20))
                 } else if !isHome, !all.isEmpty {
                     Button { sheet = .newTrip(all.map(\.id), nil) } label: {
                         Label("Plan a trip to \(city)", systemImage: "airplane")
@@ -84,6 +81,7 @@ struct CityView: View {
         .navigationTitle(isHome ? "Around \(city)" : city)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            ToolbarItem(placement: .principal) { Text("") }  // the page's own big title says it; no second one up here
             Button { router.addRequest = Router.AddRequest(tripId: trip?.id, city: city) } label: { Image(systemName: "plus") }
                 .accessibilityLabel("Add a place in \(city)")
             Button { router.push(.map) } label: { Image(systemName: "map") }.accessibilityLabel("Map")

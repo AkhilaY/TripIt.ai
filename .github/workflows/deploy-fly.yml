@@ -134,7 +134,9 @@ jobs:
         if: steps.check.outputs.ready == 'true'
         run: |
           sed -i "s/^app = .*/app = \"$APP\"/; s/^primary_region = .*/primary_region = \"$REGION\"/" fly.toml
-          flyctl deploy --remote-only --ha=false --app "$APP" --wait-timeout 10m
+          # Fly's remote builder sometimes drops mid-build ("context canceled", "EOF"); then build here instead.
+          flyctl deploy --remote-only --ha=false --app "$APP" --wait-timeout 10m \
+            || { echo "Remote build failed; building on this runner"; flyctl deploy --local-only --ha=false --app "$APP" --wait-timeout 10m; }
 
       - name: Check it's up
         if: steps.check.outputs.ready == 'true'

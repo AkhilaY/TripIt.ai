@@ -43,13 +43,15 @@ jobs:
       - name: Start the comparison
         run: |
           body=$(jq -n --arg arms "$ARMS" --argjson count "$COUNT" '{count: $count, arms: $arms}')
-          curl -fsS -m 60 -X POST "https://$APP.fly.dev/v1/admin/model-check" \
-            -H "X-API-Key: $KEY" -H "Content-Type: application/json" -d "$body"
+          code=$(curl -sS -m 60 -o /tmp/start.json -w '%{http_code}' -X POST "https://$APP.fly.dev/v1/admin/model-check" \
+            -H "X-API-Key: $KEY" -H "Content-Type: application/json" -d "$body")
+          if [ "$code" = "409" ]; then echo "A comparison is already running on the server; following it."
+          elif [ "$code" != "202" ]; then echo "Couldn't start it ($code)"; cat /tmp/start.json; exit 1; fi
       - name: Follow it until it finishes
         run: |
           shown=0
           for i in $(seq 1 170); do
-            sleep 30
+            [ "$i" = 1 ] || sleep 30
             got=$(curl -fsS -m 30 "https://$APP.fly.dev/v1/admin/model-check?since=$shown" -H "X-API-Key: $KEY" || echo '{}')
             printf '%s' "$got" | jq -r '.lines[]?'
             shown=$(printf '%s' "$got" | jq -r ".total // $shown")

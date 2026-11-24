@@ -116,9 +116,9 @@ struct WelcomeScenery<Content: View>: View {
                 GeometryReader { geo in
                     ZStack {
                         // The outgoing scene stays in place underneath, so the crossfade never inserts a view mid-fade.
-                        scene(previous, age: local + period, size: geo.size)
+                        scene(previous, age: local + period, size: geo.size, moving: elapsed >= period && local < fade)
                             .opacity(elapsed >= period && local < fade ? 1 : 0)
-                        scene(current, age: local, size: geo.size)
+                        scene(current, age: local, size: geo.size, moving: true)
                             .opacity(elapsed >= period ? min(1, local / fade) : 1)
                         LinearGradient(gradient: gradient, startPoint: .top, endPoint: .bottom)
                     }
@@ -132,10 +132,14 @@ struct WelcomeScenery<Content: View>: View {
     }
 
     /// One scene, zooming in slowly (a little over 1.1× across its time on screen).
-    @ViewBuilder private func scene(_ index: Int, age: Double, size: CGSize) -> some View {
+    @ViewBuilder private func scene(_ index: Int, age: Double, size: CGSize, moving: Bool) -> some View {
         let zoom = 1.03 + 0.08 * min(1, age / (period + fade))
         Group {
-            if world.indices.contains(index) { WorldSceneImage(scene: world[index]) } else { Color.black }
+            if world.indices.contains(index) {
+                WorldSceneImage(scene: world[index], moving: moving, paused: paused)
+            } else {
+                Color.black
+            }
         }
         .frame(width: size.width, height: size.height)
         .scaleEffect(reduceMotion ? 1.03 : zoom)

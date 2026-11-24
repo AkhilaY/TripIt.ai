@@ -256,6 +256,14 @@ struct WorldScene: Identifiable, Hashable {
     let names: [String]  // city or region names that pick this scene
     let base: UInt32  // colour shown for the split second before it's drawn
     let draw: (Painter) -> Void
+    /// Scenes drawn from a script (SceneScripts) also have moving parts for the Home header.
+    var steps: [SceneScript.Step]? = nil
+
+    /// A scene drawn from its script.
+    static func scripted(id: String, place: String, names: [String], base: UInt32, script: String) -> WorldScene {
+        let steps = SceneScript.steps(script)
+        return WorldScene(id: id, place: place, names: names, base: base, draw: { SceneScript.draw(steps, $0) }, steps: steps)
+    }
 
     static func == (a: WorldScene, b: WorldScene) -> Bool { a.id == b.id }
     func hash(into hasher: inout Hasher) { hasher.combine(id) }
@@ -264,13 +272,18 @@ struct WorldScene: Identifiable, Hashable {
 /// A scene drawn to fill its frame.
 struct WorldSceneCanvas: View {
     let scene: WorldScene
+    var forMotion = false  // leave out what the motion layer draws moving (birds)
     var body: some View {
         Canvas { ctx, size in
             let s = max(size.width / Painter.W, size.height / Painter.H)
             var c = ctx
             c.translateBy(x: (size.width - Painter.W * s) / 2, y: (size.height - Painter.H * s) / 2)
             c.scaleBy(x: s, y: s)
-            scene.draw(Painter(ctx: c))
+            if forMotion, let steps = scene.steps {
+                SceneScript.draw(steps, Painter(ctx: c), leavingOutBirds: true)
+            } else {
+                scene.draw(Painter(ctx: c))
+            }
         }
     }
 }
@@ -279,12 +292,20 @@ struct WorldSceneCanvas: View {
 /// straight away wherever it's needed: no blank frame, no fade, and nothing redrawn as the header stretches.
 struct WorldSceneImage: View {
     let scene: WorldScene
+    /// Bring the scene to life (Home's header): lights twinkle, water shimmers, birds fly.
+    var moving = false
+    var paused = false
+
     var body: some View {
+        let animate = moving && scene.steps != nil
         Color(hex: scene.base)
             .overlay {
-                if let image = SceneCache.image(scene) {
+                if let image = SceneCache.image(scene, forMotion: animate) {
                     Image(uiImage: image).resizable().scaledToFill()
                 }
+            }
+            .overlay {
+                if animate, let steps = scene.steps { SceneMotionView(steps: steps, paused: paused) }
             }
             .clipped()
             .accessibilityHidden(true)
@@ -300,10 +321,11 @@ enum SceneCache {
     }()
 
     /// The scene drawn at its design size (a little wider than a phone), sharp at the screen's scale.
-    static func image(_ scene: WorldScene) -> UIImage? {
-        let key = scene.id as NSString
+    static func image(_ scene: WorldScene, forMotion: Bool = false) -> UIImage? {
+        let key = (forMotion ? scene.id + "-still" : scene.id) as NSString
         if let hit = cache.object(forKey: key) { return hit }
-        let renderer = ImageRenderer(content: WorldSceneCanvas(scene: scene).frame(width: Painter.W * 1.12, height: Painter.H * 1.12))
+        let renderer = ImageRenderer(content: WorldSceneCanvas(scene: scene, forMotion: forMotion)
+            .frame(width: Painter.W * 1.12, height: Painter.H * 1.12))
         renderer.scale = UIScreen.main.scale
         guard let image = renderer.uiImage else { return nil }
         let bytes = Int(image.size.width * image.size.height * image.scale * image.scale * 4)

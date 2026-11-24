@@ -99,27 +99,7 @@ enum WorldScenes {
         p.grain()
     }
 
-    static let amalfi = WorldScene(id: "amalfi", place: "Positano, Amalfi Coast", names: ["amalfi", "positano", "sorrento", "capri", "naples"], base: 0xE8B48F) { p in
-        p.sky([(0, 0x5C86B6), (0.55, 0xB8CFDE), (0.85, 0xF2D2B0), (1, 0xF6C28F)])
-        p.glow(80, 160, 120, 0xFFF0D6, 0.7)
-        p.water(300, top: 0x5E9FBF, bottom: 0x1F4E6E, seed: "amw", glints: 60)
-        p.fill("M150 460 L150 160 Q210 120 280 150 Q350 190 390 220 L390 460 Z", 0x6E7D4E)
-        var r = Seeded("amalfi")
-        let colours: [UInt32] = [0xF2C38A, 0xE89A7A, 0xF6E2C0, 0xD97A5C, 0xF3D18A]
-        for i in 0..<70 {
-            let x = 160 + r.next() * 220
-            let y = 170 + (x - 160) * 0.2 + r.next() * 150
-            p.rect(x, y, 12 + r.next() * 10, 9 + r.next() * 8, colours[i % 5])
-            if r.next() < 0.5 { p.rect(x + 4, y + 3, 2.5, 3, 0x6B4A3A) }
-        }
-        p.fill("M262 168 Q272 150 282 168 Z", 0x3E7D5E)
-        p.rect(262, 168, 20, 12, 0xF6E2C0)
-        p.fill("M30 380 Q70 392 110 380 L104 388 L36 388 Z", 0xF6F2EA)
-        p.rect(60, 366, 1.2, 14, 0x3A2A2A)
-        p.fill("M61 366 L76 378 L61 378 Z", 0xF6F2EA)
-        p.birds(4, 40, 100, spread: 90, 0x3A4A5A, seed: "amb")
-        p.grain()
-    }
+    static let amalfi = WorldScene.scripted(id: "amalfi", place: "Positano, Amalfi Coast", names: ["amalfi", "positano", "sorrento", "capri", "naples"], base: 0x9CC3DC, script: SceneScripts.amalfi)
 
     static let venice = WorldScene(id: "venice", place: "Grand Canal, Venice", names: ["venice", "venezia"], base: 0xD9A070) { p in
         p.sky([(0, 0x5E78A8), (0.6, 0xE3B9A4), (1, 0xF2D5B8)])
@@ -297,19 +277,7 @@ enum WorldScenes {
         p.grain()
     }
 
-    static let dubai = WorldScene(id: "dubai", place: "Burj Khalifa, Dubai", names: ["dubai", "abu dhabi", "doha", "uae", "qatar"], base: 0xA2688A) { p in
-        p.sky([(0, 0x1E1A3A), (0.45, 0x5A3D6E), (0.8, 0xC67C88), (1, 0xF0B48A)])
-        p.stars(40, maxY: 140, seed: "dus")
-        p.glow(80, 300, 130, 0xFFC890, 0.6)
-        p.skyline(base: 330, minH: 40, maxH: 120, minW: 14, maxW: 26, 0x2A1E3A, lights: 0xFFE0A0, seed: "dub", density: 0.4)
-        p.fill("M245 330 L245 230 L250 200 L252 150 L255 100 L257 60 L258 30 L259 60 L261 100 L264 150 L266 200 L271 230 L271 330 Z", 0x2A1E3A)
-        p.windows(246, 150, 24, 180, 0xFFE0A0, seed: "burj", density: 0.45)
-        p.glow(258, 30, 10, 0xFF6A6A, 0.8)
-        p.water(330, top: 0x3A2A4E, bottom: 0x100C1E, seed: "dubw", shimmer: 0xFFE0A0, glints: 60)
-        p.fill("M0 460 L0 400 Q100 370 200 400 Q300 430 390 395 L390 460 Z", 0xC89A6E)
-        p.fill("M0 460 L0 430 Q120 410 240 440 Q320 455 390 430 L390 460 Z", 0xA87A52)
-        p.grain()
-    }
+    static let dubai = WorldScene.scripted(id: "dubai", place: "Burj Khalifa, Dubai", names: ["dubai", "abu dhabi", "doha", "uae", "qatar"], base: 0x7A5A86, script: SceneScripts.dubai)
 
     static let istanbul = WorldScene(id: "istanbul", place: "Blue Mosque, Istanbul", names: ["istanbul", "turkey", "ankara"], base: 0xB98A9A) { p in
         p.sky([(0, 0x34406E), (0.55, 0xB98A9A), (0.85, 0xEFB28E), (1, 0xF6CFA0)])
@@ -409,85 +377,9 @@ enum WorldScenes {
 
     // MARK: - Europe
 
-    static let paris = WorldScene(id: "paris", place: "The Seine at dusk, Paris", names: ["paris", "france"], base: 0x8C7BA6) { p in
-        p.sky([(0, 0x2F3866), (0.5, 0x8C7BA6), (0.85, 0xE7AFA4), (1, 0xF2C9A8)])
-        p.glow(120, 270, 150, 0xFFD6B0, 0.6)
-        p.stars(30, maxY: 120, seed: "ps")
-        p.fill("M262 120 L265 175 L276 230 L292 300 L280 300 Q262 270 244 300 L232 300 L248 230 L259 175 Z", 0x2B2842)
-        p.rect(246, 228, 32, 4, 0x2B2842)
-        p.rect(253, 172, 18, 3, 0x2B2842)
-        p.glow(262, 118, 14, 0xFFE3A0, 0.9)
-        let roofs: (Painter) -> Void = { q in
-            var r = Seeded("par")
-            var x: CGFloat = -5
-            while x < Painter.W {
-                let w = 30 + r.next() * 26, h = 50 + r.next() * 30
-                q.rect(x, 330 - h, w, h, 0x3E3A5C)
-                q.fill("M\(x) \(330 - h) L\(x + 6) \(318 - h) L\(x + w - 6) \(318 - h) L\(x + w) \(330 - h) Z", 0x2E2B48)
-                q.windows(x, 332 - h, w, h - 2, 0xFFD999, seed: "p\(Int(x))", density: 0.3)
-                q.rect(x + 6, 312 - h, 4, 8, 0x2E2B48)
-                q.rect(x + w - 10, 312 - h, 4, 8, 0x2E2B48)
-                x += w + 1
-            }
-        }
-        roofs(p)
-        p.water(330, top: 0x4A4A72, bottom: 0x1E1D33, seed: "seine", shimmer: 0xFFD999, glints: 90)
-        p.reflect(330, opacity: 0.3, roofs)
-        p.fill("M0 340 Q195 300 390 340 L390 346 Q195 308 0 346 Z", 0x2B2842)
-        for x: CGFloat in [60, 130, 195, 260, 330] { p.rect(x, 322, 5, 22, 0x2B2842) }
-        p.grain()
-    }
+    static let paris = WorldScene.scripted(id: "paris", place: "The Eiffel Tower, Paris", names: ["paris", "france"], base: 0x4A4270, script: SceneScripts.paris)
 
-    static let london = WorldScene(id: "london", place: "Westminster, London", names: ["london", "england", "uk"], base: 0x9CA1A6) { p in
-        p.sky([(0, 0x4A5468), (0.55, 0x9CA1A6), (0.85, 0xD9B8A0), (1, 0xE8C9A8)])
-        p.glow(300, 230, 110, 0xFFE0B8, 0.6)
-        p.haze(200, 100, 0xC9C6BE, 0.5)
-        let westminster: (Painter) -> Void = { q in
-            q.rect(0, 250, 230, 60, 0x3A3E48)
-            var x: CGFloat = 4
-            while x < 226 { q.fill("M\(x) 250 L\(x + 3) 238 L\(x + 6) 250 Z", 0x3A3E48); q.rect(x + 1, 262, 3, 10, 0xFFD58A, 0.7); x += 10 }
-            q.rect(232, 130, 34, 180, 0x3A3E48)
-            q.fill("M230 132 L249 90 L268 132 Z", 0x3A3E48)
-            q.rect(248, 70, 2, 22, 0x3A3E48)
-            q.disc(249, 156, 11, 0xF6E6B8)
-            q.stroke("M249 156 L249 149 M249 156 L254 158", 0x3A3E48, width: 1.2)
-            // The Eye on the far bank: a spoked wheel with its pods, held up by an A-frame
-            let cx: CGFloat = 328, cy: CGFloat = 220, r: CGFloat = 58
-            q.rect(276, 300, 114, 10, 0x3A3E48)
-            q.stroke("M\(cx) \(cy) L\(cx - 26) 302 M\(cx) \(cy) L\(cx + 22) 302", 0x3A3E48, width: 3)
-            var spokes = Path()
-            for i in 0..<16 {
-                let a = Double(i) * .pi / 8
-                spokes.move(to: CGPoint(x: cx, y: cy))
-                spokes.addLine(to: CGPoint(x: cx + r * CGFloat(cos(a)), y: cy + r * CGFloat(sin(a))))
-            }
-            q.ctx.stroke(spokes, with: .color(Painter.color(0x3A3E48, 0.55)), lineWidth: 0.6)
-            for radius in [r, r - 5] {
-                q.ctx.stroke(Path(ellipseIn: CGRect(x: cx - radius, y: cy - radius, width: radius * 2, height: radius * 2)), with: .color(Painter.color(0x3A3E48, 0.9)), lineWidth: 1.4)
-            }
-            for i in 0..<32 {
-                let a = Double(i) * .pi / 16
-                let px = cx + (r + 3) * CGFloat(cos(a)), py = cy + (r + 3) * CGFloat(sin(a))
-                q.fill(Path(roundedRect: CGRect(x: px - 2.6, y: py - 1.8, width: 5.2, height: 3.6), cornerRadius: 1.6), 0x3A3E48)
-            }
-            q.disc(cx, cy, 4, 0x3A3E48)
-        }
-        westminster(p)
-        p.water(310, top: 0x5E6670, bottom: 0x252A33, seed: "thames", shimmer: 0xFFD58A, glints: 70)
-        p.reflect(310, opacity: 0.25, westminster)
-        // Westminster Bridge: a low deck on stone arches, with its lamps lit
-        p.rect(0, 352, Painter.W, 7, 0x3A3E48)
-        p.rect(0, 349, Painter.W, 1.5, 0x3A3E48)
-        var arch: CGFloat = -20
-        while arch < Painter.W {
-            p.fill("M\(arch) 359 L\(arch + 60) 359 L\(arch + 60) 380 Q\(arch + 30) 362 \(arch) 380 Z", 0x3A3E48)
-            p.rect(arch + 26, 336, 1.5, 14, 0x3A3E48)
-            p.disc(arch + 26.75, 335, 2.2, 0xFFD58A)
-            p.glow(arch + 26.75, 335, 10, 0xFFD58A, 0.35)
-            arch += 60
-        }
-        p.grain()
-    }
+    static let london = WorldScene.scripted(id: "london", place: "Westminster, London", names: ["london", "england", "uk"], base: 0x7E8498, script: SceneScripts.london)
 
     static let amsterdam = WorldScene(id: "amsterdam", place: "Canal houses, Amsterdam", names: ["amsterdam", "netherlands", "rotterdam"], base: 0x8A9AB8) { p in
         p.sky([(0, 0x3E4E7A), (0.6, 0xA9B4CC), (1, 0xEFD8C0)])
@@ -704,28 +596,7 @@ enum WorldScenes {
 
     // MARK: - Americas
 
-    static let newYork = WorldScene(id: "newyork", place: "Brooklyn Bridge, New York", names: ["new york", "nyc", "brooklyn", "manhattan", "queens", "chicago", "boston", "atlanta", "philadelphia"], base: 0x4A3F72) { p in
-        p.sky([(0, 0x151A3A), (0.5, 0x4A3F72), (0.85, 0xC77D7A), (1, 0xF0A889)])
-        p.stars(40, maxY: 150, seed: "nys")
-        p.haze(220, 90, 0xC77D7A, 0.4)
-        let city: (Painter) -> Void = { q in
-            q.skyline(base: 300, minH: 60, maxH: 210, minW: 12, maxW: 32, 0x1B2140, lights: 0xFFD27A, seed: "ny", density: 0.35)
-            q.fill("M262 300 L262 120 L270 110 L270 70 L272 40 L274 70 L274 110 L282 120 L282 300 Z", 0x1B2140)
-            q.windows(262, 120, 20, 180, 0xFFD27A, seed: "one", density: 0.4)
-        }
-        city(p)
-        p.water(300, top: 0x30305A, bottom: 0x10122A, seed: "eastriver", shimmer: 0xFFD27A, glints: 90)
-        p.reflect(300, opacity: 0.25, city)
-        p.stroke("M-10 360 Q80 340 200 360 Q300 380 400 360", 0x3A2A2A, width: 3)
-        for i in 0..<12 {
-            let fi = CGFloat(i)
-            p.stroke("M77 252 L\(-20 + fi * 9) 360", 0x3A2A2A, width: 0.6)
-            p.stroke("M77 252 L\(110 + fi * 12) 360", 0x3A2A2A, width: 0.6)
-        }
-        p.rect(60, 250, 34, 150, 0x3A2A2A)
-        p.fill("M65 300 L65 270 Q71 262 77 270 L77 300 Z M78 300 L78 270 Q84 262 90 270 L90 300 Z", 0xC98B6B, 0.6)
-        p.grain()
-    }
+    static let newYork = WorldScene.scripted(id: "newyork", place: "Brooklyn Bridge, New York", names: ["new york", "nyc", "brooklyn", "manhattan", "queens", "chicago", "boston", "atlanta", "philadelphia"], base: 0x23284E, script: SceneScripts.newyork)
 
     static let sanFrancisco = WorldScene(id: "sanfrancisco", place: "Golden Gate, San Francisco", names: ["san francisco", "sf", "california", "los angeles", "seattle", "portland"], base: 0xE39A7A) { p in
         p.sky([(0, 0x4E6A9E), (0.55, 0xD6A6A0), (0.85, 0xF2B88E), (1, 0xF6D0A0)])

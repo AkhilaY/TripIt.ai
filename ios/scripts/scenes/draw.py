@@ -19,6 +19,17 @@ class S:
     def mirror(s,axis,o):
         s.add(f'<g transform="translate(0 {axis*2}) scale(1 -1)" opacity="{o}">'); s.op('M',axis,o); s.mirroring=True
     def unmirror(s): s.add('</g>'); s.op('m'); s.mirroring=False
+    def gpath(s,d,stops,x1=0,y1=0,x2=0,y2=1,o=1):
+        """A shape filled with a linear gradient between two points (in scene units)."""
+        g=nid('gp')
+        s.defs.append(f'<linearGradient id="{g}" gradientUnits="userSpaceOnUse" x1="{x1}" y1="{y1}" x2="{x2}" y2="{y2}">'+''.join(f'<stop offset="{so}" stop-color="{c}"/>' for so,c in stops)+'</linearGradient>')
+        s.add(f'<path d="{d}" fill="url(#{g})" opacity="{o}"/>')
+        s.op('H',len(stops),x1,y1,x2,y2,o,*[x for so,c in stops for x in (so,_c(c))],d)
+    def cloud(s,x,y,w,c,o=1):
+        """A soft cloud with a flat base; drifts in the app."""
+        parts=[(0.28,0,.28,.05),(0.52,-.035,.34,.075),(0.76,.005,.24,.045),(0.46,.03,.42,.04),(0.66,-.06,.16,.04)]
+        s.add(f'<g opacity="{o}">'+''.join(f'<ellipse cx="{x+w*px:.1f}" cy="{y+w*py:.1f}" rx="{w*rx:.1f}" ry="{w*ry:.1f}" fill="{c}"/>' for px,py,rx,ry in parts)+'</g>')
+        s.op('K',x,y,w,_c(c),o)
     def twinkle(s,x,y,r,c,o=1):
         s.add(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="{r}" fill="{c}" opacity="{o}"/>'); s.op('C' if s.mirroring else 'Y',x,y,r,_c(c),o)
     def sky(s, stops):

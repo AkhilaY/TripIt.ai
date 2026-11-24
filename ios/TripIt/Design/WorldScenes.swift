@@ -6,7 +6,7 @@ enum WorldScenes {
     static let all: [WorldScene] = [
         kyoto, santorini, venice, agra, cappadocia, hongKong, iceland, rio, paris, marrakech, newYork, alps,
         tokyo, london, dubai, jaipur, bali, capeTown, amalfi, sydney, rome, barcelona, istanbul, cairo,
-        lisbon, amsterdam, prague, bangkok, singapore, sanFrancisco, machuPicchu, maldives,
+        lisbon, amsterdam, prague, bangkok, singapore, sanFrancisco, machuPicchu, maldives, monaco,
     ]
 
     /// The scene for a city, if it's one of the drawn places.
@@ -76,28 +76,7 @@ enum WorldScenes {
 
     // MARK: - Mediterranean
 
-    static let santorini = WorldScene(id: "santorini", place: "Oia, Santorini", names: ["santorini", "oia", "mykonos", "greece", "athens"], base: 0xC78BA0) { p in
-        p.sky([(0, 0x3B4F86), (0.5, 0xC78BA0), (0.8, 0xF2B391), (1, 0xF8D7A8)])
-        p.glow(300, 290, 140, 0xFFD49A, 0.9)
-        p.disc(300, 300, 22, 0xFFE9C6)
-        p.water(300, top: 0xC7889B, bottom: 0x2D3F6B, seed: "sea", shimmer: 0xFFE3B8, glints: 70)
-        p.fill("M0 460 L0 200 Q60 190 120 230 Q200 280 240 330 L260 460 Z", 0x7A4B4A)
-        var r = Seeded("oia")
-        let walls: [UInt32] = [0xFBF5EC, 0xF3E7D8, 0xEADCCB]
-        for i in 0..<60 {
-            let x = r.next() * 300
-            let y = 230 + (x / 300) * 120 + r.next() * 70
-            let w = 14 + r.next() * 16, h = 10 + r.next() * 10
-            p.fill(Path(roundedRect: CGRect(x: x, y: y, width: w, height: h), cornerRadius: 1.5), walls[i % 3])
-            if r.next() < 0.4 { p.rect(x + w / 2 - 1.5, y + h - 5, 3, 4, 0xF4B860) }
-        }
-        WorldScenes.dome(p, x: 70, y: 238, s: 1.4)
-        WorldScenes.dome(p, x: 150, y: 280, s: 1.1)
-        WorldScenes.dome(p, x: 36, y: 300, s: 1)
-        p.fill("M318 360 L336 360 L333 365 L321 365 Z M327 345 L335 356 L327 356 Z", 0x1E2540)
-        p.birds(5, 200, 110, spread: 90, 0x3B2F45, seed: "sb")
-        p.grain()
-    }
+    static let santorini = WorldScene.scripted(id: "santorini", place: "Oia, Santorini", names: ["santorini", "oia", "mykonos", "greece", "athens", "fira"], base: 0x8E79A8, script: SceneScripts.santorini)
 
     static let amalfi = WorldScene.scripted(id: "amalfi", place: "Positano, Amalfi Coast", names: ["amalfi", "positano", "sorrento", "capri", "naples"], base: 0x9CC3DC, script: SceneScripts.amalfi)
 
@@ -135,31 +114,7 @@ enum WorldScenes {
         p.grain()
     }
 
-    static let rome = WorldScene(id: "rome", place: "The Colosseum, Rome", names: ["rome", "roma", "vatican", "italy"], base: 0xE8B48F) { p in
-        p.sky([(0, 0x6A7FB0), (0.55, 0xE3B39A), (1, 0xF6D2A8)])
-        p.glow(300, 200, 140, 0xFFE2B8, 0.8)
-        p.ridge(330, 40, steps: 6, 0xB98E7A, seed: "r1")
-        // Colosseum: four tiers of arches, the top one broken away on the right
-        p.fill("M40 340 L40 200 Q195 180 350 200 L350 260 L300 250 L290 225 L260 230 L250 205 L230 210 L200 196 L40 196 Z", 0xD9A47A)
-        for tier in 0..<3 {
-            let y = 330 - CGFloat(tier) * 42
-            var x: CGFloat = 50
-            while x < 330 - CGFloat(tier) * 20 {
-                p.fill("M\(x) \(y) L\(x) \(y - 22) Q\(x + 8) \(y - 34) \(x + 16) \(y - 22) L\(x + 16) \(y) Z", 0x7A4A36, 0.85)
-                x += 24
-            }
-        }
-        p.rect(40, 340, 310, 6, 0xB98058)
-        var r = Seeded("pines")
-        for i in 0..<5 {
-            let x = CGFloat(i) * 90 - 20 + r.next() * 20
-            p.rect(x + 18, 350, 3, 60, 0x3A2A22)
-            p.fill("M\(x) 356 Q\(x + 20) 326 \(x + 42) 356 Q\(x + 20) 364 \(x) 356 Z", 0x3E5A3A)
-        }
-        p.rect(0, 400, Painter.W, 60, 0x5E4A3A)
-        p.birds(6, 220, 100, spread: 100, 0x5A3A3A, seed: "rb")
-        p.grain()
-    }
+    static let rome = WorldScene.scripted(id: "rome", place: "The Colosseum, Rome", names: ["rome", "roma", "vatican", "italy"], base: 0x9EC0DE, script: SceneScripts.colosseum)
 
     static let barcelona = WorldScene(id: "barcelona", place: "Sagrada Família, Barcelona", names: ["barcelona", "spain", "madrid"], base: 0xE8A57E) { p in
         p.sky([(0, 0x3E5A92), (0.5, 0xC897A0), (0.85, 0xF2B48A), (1, 0xF7CF9A)])
@@ -305,29 +260,7 @@ enum WorldScenes {
         p.grain()
     }
 
-    static let cairo = WorldScene(id: "cairo", place: "The Pyramids, Giza", names: ["cairo", "giza", "egypt", "luxor"], base: 0xE6B07E) { p in
-        p.sky([(0, 0x5C7EB0), (0.55, 0xEBC39A), (1, 0xF6D8A8)])
-        p.glow(300, 230, 150, 0xFFE8C0, 0.85)
-        p.disc(300, 230, 20, 0xFFF0D0)
-        p.haze(280, 60, 0xF6D8A8, 0.7)
-        p.fill("M60 330 L160 190 L260 330 Z", 0xC98E5A)
-        p.fill("M160 190 L260 330 L200 330 Z", 0xA8724A)
-        p.fill("M230 330 L300 240 L370 330 Z", 0xC98E5A)
-        p.fill("M300 240 L370 330 L330 330 Z", 0xA8724A)
-        p.fill("M10 330 L50 285 L90 330 Z", 0xB88252)
-        p.fill("M0 460 L0 330 Q200 316 390 334 L390 460 Z", 0xE0B07A)
-        p.fill("M0 460 L0 380 Q110 352 230 374 Q320 390 390 366 L390 460 Z", 0xD49E68)
-        p.stroke("M0 380 Q110 352 230 374 Q320 390 390 366", 0xF2CC96, width: 1)
-        // Date palms at the edge of the plateau
-        for (x, h) in [(CGFloat(28), CGFloat(70)), (52, 54), (356, 62)] {
-            let top = 340 - h
-            p.stroke("M\(x) 340 Q\(x + 4) \(top + h / 2) \(x + 1) \(top)", 0x5A4030, width: 2.4)
-            for (dx, dy) in [(-16.0, 8.0), (-12.0, -6.0), (0.0, -10.0), (12.0, -6.0), (16.0, 8.0)] {
-                p.stroke("M\(x + 1) \(top) Q\(x + 1 + CGFloat(dx) / 2) \(top + CGFloat(dy) - 6) \(x + 1 + CGFloat(dx)) \(top + CGFloat(dy))", 0x4A5A3A, width: 2)
-            }
-        }
-        p.grain()
-    }
+    static let cairo = WorldScene.scripted(id: "cairo", place: "The Pyramids and the Sphinx, Giza", names: ["cairo", "giza", "egypt", "luxor"], base: 0xE3B884, script: SceneScripts.giza)
 
     static let marrakech = WorldScene(id: "marrakech", place: "Jemaa el-Fnaa, Marrakech", names: ["marrakech", "morocco", "fez", "fes"], base: 0xB3577A) { p in
         p.sky([(0, 0x3B2A55), (0.5, 0xB3577A), (0.85, 0xF08A5D), (1, 0xF7B26A)])
@@ -598,29 +531,9 @@ enum WorldScenes {
 
     static let newYork = WorldScene.scripted(id: "newyork", place: "Brooklyn Bridge, New York", names: ["new york", "nyc", "brooklyn", "manhattan", "queens", "chicago", "boston", "atlanta", "philadelphia"], base: 0x23284E, script: SceneScripts.newyork)
 
-    static let sanFrancisco = WorldScene(id: "sanfrancisco", place: "Golden Gate, San Francisco", names: ["san francisco", "sf", "california", "los angeles", "seattle", "portland"], base: 0xE39A7A) { p in
-        p.sky([(0, 0x4E6A9E), (0.55, 0xD6A6A0), (0.85, 0xF2B88E), (1, 0xF6D0A0)])
-        p.glow(80, 260, 120, 0xFFDCB0, 0.7)
-        p.ridge(290, 50, steps: 5, 0x6A6A86, seed: "marin", rough: 0.6)
-        p.haze(230, 90, 0xF2E2D6, 0.75)
-        p.water(300, top: 0x5A7A9A, bottom: 0x1E3A56, seed: "bay", glints: 60)
-        let towerX: [CGFloat] = [110, 290]
-        for x in towerX {
-            p.rect(x - 6, 140, 4, 200, 0xC2452E)
-            p.rect(x + 2, 140, 4, 200, 0xC2452E)
-            for y: CGFloat in [160, 210, 260] { p.rect(x - 6, y, 12, 4, 0xC2452E) }
-        }
-        p.stroke("M-10 300 L110 142 Q200 260 290 142 L400 300", 0xC2452E, width: 2)
-        p.rect(0, 296, Painter.W, 6, 0xA8382A)
-        for i in 0..<30 {
-            let x = 113 + CGFloat(i) * 6
-            let t = (x - 200) / 90
-            let top = 142 + 59 * (1 - t * t)  // where the main cable hangs at this point
-            p.stroke("M\(x) 296 L\(x) \(top)", 0xC2452E, width: 0.5, 0.7)
-        }
-        p.birds(5, 200, 90, spread: 90, 0x3A3A4A, seed: "sfb")
-        p.grain()
-    }
+    static let sanFrancisco = WorldScene.scripted(id: "sanfrancisco", place: "The Golden Gate, San Francisco", names: ["san francisco", "sf", "california", "los angeles", "seattle", "portland"], base: 0x8B7FA6, script: SceneScripts.goldengate)
+
+    static let monaco = WorldScene.scripted(id: "monaco", place: "The Grand Prix, Monaco", names: ["monaco", "monte carlo", "monte-carlo", "nice", "cannes", "french riviera", "cote d'azur", "côte d'azur", "antibes"], base: 0x6FA6D4, script: SceneScripts.monaco)
 
     static let rio = WorldScene(id: "rio", place: "Sugarloaf, Rio de Janeiro", names: ["rio", "brazil", "sao paulo", "buenos aires"], base: 0x86C3DA) { p in
         p.sky([(0, 0x3A8EC2), (0.5, 0x86C3DA), (0.85, 0xF4D3A2), (1, 0xF6B98A)])

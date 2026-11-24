@@ -10,7 +10,8 @@ import SwiftUI
 ///   O x y r c w o  ring                 V y c c  water gradient      M axis o … m  reflection
 ///   T x y w h c o  a light that twinkles     Y x y r c o  a point of light that twinkles
 ///   X x y r c o  a star                      Q x y w h c o  a glint on the water
-///   B x y k c  a bird                        N  grain
+///   B x y k c  a bird                        K x y w c o  a cloud that drifts
+///   H n x1 y1 x2 y2 o (s c)×n d  a path filled with a linear gradient     N  grain
 enum SceneScript {
     enum Step {
         case sky([(Double, UInt32)])
@@ -28,6 +29,8 @@ enum SceneScript {
         case star(CGFloat, CGFloat, CGFloat, Double)
         case glint(CGRect, UInt32, Double)
         case bird(CGFloat, CGFloat, CGFloat, UInt32)
+        case cloud(CGFloat, CGFloat, CGFloat, UInt32, Double)
+        case gradientPath(Path, [(Double, UInt32)], CGPoint, CGPoint, Double)
         case grain
     }
 
@@ -71,6 +74,13 @@ enum SceneScript {
             case "X": out.append(.star(n(1), n(2), n(3), d(5)))
             case "Q": out.append(.glint(CGRect(x: n(1), y: n(2), width: n(3), height: n(4)), c(5), d(6)))
             case "B": out.append(.bird(n(1), n(2), n(3), c(4)))
+            case "K": out.append(.cloud(n(1), n(2), n(3), c(4), d(5)))
+            case "H":
+                let count = Int(d(1))
+                var stops: [(Double, UInt32)] = []
+                for k in 0..<count { stops.append((d(7 + k * 2), c(8 + k * 2))) }
+                out.append(.gradientPath(SVGPath.parse(rest(7 + count * 2)), stops,
+                                         CGPoint(x: n(2), y: n(3)), CGPoint(x: n(4), y: n(5)), d(6)))
             case "N": out.append(.grain)
             default: break
             }
@@ -78,7 +88,7 @@ enum SceneScript {
         return out
     }
 
-    /// The still picture. With `leavingOutBirds`, birds are left for the motion layer to fly.
+    /// The still picture. With `leavingOutBirds`, birds and clouds are left for the motion layer to move.
     static func draw(_ steps: [Step], _ p: Painter, leavingOutBirds: Bool = false) {
         let ctx = p.ctx
         for step in steps {
@@ -104,8 +114,28 @@ enum SceneScript {
             case let .light(rect, hex, o), let .glint(rect, hex, o): ctx.fill(Path(rect), with: .color(Painter.color(hex, o)))
             case let .star(x, y, r, o): p.disc(x, y, r, 0xFFFFFF, o)
             case let .bird(x, y, k, hex): if !leavingOutBirds { bird(ctx, x, y, k, hex, flap: 1) }
+            case let .cloud(x, y, w, hex, o): if !leavingOutBirds { cloud(ctx, x, y, w, hex, o) }
+            case let .gradientPath(path, stops, start, end, o):
+                let gradient = Gradient(stops: stops.map { Gradient.Stop(color: Painter.color($0.1, o), location: $0.0) })
+                ctx.fill(path, with: .linearGradient(gradient, startPoint: start, endPoint: end))
             case .grain: p.grain()
             }
+        }
+    }
+
+    /// A long soft cloud with a flat base: overlapping ellipses drawn as one translucent shape.
+    static func cloud(_ ctx: GraphicsContext, _ x: CGFloat, _ y: CGFloat, _ w: CGFloat, _ hex: UInt32, _ o: Double) {
+        let parts: [(CGFloat, CGFloat, CGFloat, CGFloat)] = [(0.28, 0, 0.28, 0.05), (0.52, -0.035, 0.34, 0.075),
+                                                            (0.76, 0.005, 0.24, 0.045), (0.46, 0.03, 0.42, 0.04),
+                                                            (0.66, -0.06, 0.16, 0.04)]
+        var path = Path()
+        for (px, py, rx, ry) in parts {
+            path.addEllipse(in: CGRect(x: x + w * px - w * rx, y: y + w * py - w * ry, width: w * rx * 2, height: w * ry * 2))
+        }
+        ctx.drawLayer { layer in
+            var c = layer
+            c.opacity = o
+            c.fill(path, with: .color(Painter.color(hex)))
         }
     }
 
@@ -146,6 +176,12 @@ enum SceneScript {
                 let drift = CGFloat(sin(t * 0.5 + phase)) * 7
                 let shine = 0.5 + 0.5 * sin(t * 1.1 + phase * 2)
                 ctx.fill(Path(rect.offsetBy(dx: drift, dy: 0)), with: .color(Painter.color(hex, o * shine)))
+            case let .cloud(x, y, w, hex, o):
+                // Clouds drift slowly to the right, coming back in from the left.
+                let span = Painter.W + w
+                var cx = (x + CGFloat(t * 2.2 + phase * 30)).truncatingRemainder(dividingBy: span)
+                if cx > Painter.W { cx -= span }
+                cloud(ctx, cx, y, w, hex, o)
             case let .bird(x, y, k, hex):
                 // Birds glide slowly across and wrap around, flapping now and then.
                 let span = Painter.W + 80

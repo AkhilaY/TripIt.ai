@@ -5,6 +5,8 @@ from types import SimpleNamespace
 
 import httpx
 import pytest
+from app import cityphotos
+from app.cityphotos import CityPhotos
 from fastapi.testclient import TestClient
 
 from app import pipeline as pipeline_module
@@ -186,6 +188,7 @@ def client(monkeypatch, tmp_path):
     app.state.pipeline.on_finished = lambda job: notify_import(app, job)
     app.state.router = Router(db, settings)
     app.state.photos = photo_store
+    app.state.city_photos = CityPhotos(db, "")
     app.state.push = Push(db, tmp_path / "vapid.pem", client=httpx.AsyncClient(transport=httpx.MockTransport(push_handler)))
     app.state.curator = Curator(db, claude, geocoder=geocoder, photo_url=lambda ref: f"/v1/discover/photo?ref={ref}")
 
@@ -3583,3 +3586,75 @@ def test_missing_place_added_to_a_posts_results(client):
     assert client.post("/v1/places", json={"name": "X", "city": "New York", "reel_id": "nope"}, headers=H).status_code == 404
     owner = signup(client, "a@x.com", "secret")
     assert client.get("/v1/admin/usage", headers=owner).json()["missed_places"] == 1
+
+
+# ---------- Trip documents and city photos ----------
+
+
+def test_trip_document_text_and_calendar_with_bookings(client, monkeypatch):
+    import app.main as main
+
+    async def no_image(url):  # no network in tests
+        return None
+
+    async def no_bytes(*args, **kwargs):
+        return None
+    monkeypatch.setattr(main, "_image_data", no_image)
+    monkeypatch.setattr(main, "fetch_photo_bytes", no_bytes)
+    trip_id = import_reel(client)["trip_id"]
+    client.post(f"/v1/trips/{trip_id}/plan", json={"days": 2, "start_date": "2026-11-06"}, headers=H)
+    for body in ({"kind": "flight", "title": "Delta DL 132", "start_at": "2026-11-05T17:40", "end_at": "2026-11-06T08:15",
+                  "origin": "ATL", "destination": "JFK", "confirmation": "HX7K2P"},
+                 {"kind": "hotel", "title": "The Hoxton", "start_at": "2026-11-06T15:00", "end_at": "2026-11-08", "confirmation": "8441"},
+                 {"kind": "reservation", "title": "Lucali", "start_at": "2026-11-06T19:30", "party_size": 2}):
+        assert client.post(f"/v1/trips/{trip_id}/bookings", json=body, headers=H).status_code == 201
+
+    designed = client.get(f"/v1/trips/{trip_id}/document", headers=H)
+    assert designed.status_code == 200 and designed.headers["content-type"] == "application/pdf"
+    assert designed.content.startswith(b"%PDF") and 'filename="New York.pdf"' in designed.headers["content-disposition"]
+    printable = client.get(f"/v1/trips/{trip_id}/document?style=printable&size=A4", headers=H)
+    assert printable.status_code == 200 and printable.content.startswith(b"%PDF")
+    assert client.get(f"/v1/trips/{trip_id}/document?style=fancy", headers=H).status_code == 422
+
+    text = client.get(f"/v1/trips/{trip_id}/text", headers=H).json()
+    assert text["markdown"].startswith("# New York") and "Ref **HX7K2P**" in text["markdown"]
+    assert "- [ ] " in text["markdown"] and "<h2>Bookings</h2>" in text["html"] and "<b>Delta DL 132</b>" in text["html"]
+
+    cal = client.get(client.post(f"/v1/trips/{trip_id}/export-link?format=ics", headers=H).json()["url"]).text
+    assert "SUMMARY:Flight: Delta DL 132 (ATL → JFK)" in cal and "DTSTART:20261105T174000" in cal
+    assert "DTSTART;VALUE=DATE:20261106" in cal and "DTEND;VALUE=DATE:20261108" in cal  # the stay, check-in to check-out
+    assert "SUMMARY:Table: Lucali for 2" in cal and "Ref HX7K2P" in cal
+
+    owner = signup(client, "me@x.com", "secret")  # takes over the trip; the owner has Plus
+    assert client.get(f"/v1/trips/{trip_id}/text", headers=owner).status_code == 200
+    monkeypatch.setattr(main, "_plan", lambda request, user: SimpleNamespace(plan="free"))
+    refused = client.get(f"/v1/trips/{trip_id}/document", headers=owner)
+    assert refused.status_code == 402 and "Plus" in refused.json()["detail"]
+    assert client.get(f"/v1/trips/{trip_id}/text", headers=owner).status_code == 402
+
+
+def test_calendar_export_of_bookings_without_an_itinerary(client):
+    trip_id = import_reel(client)["trip_id"]
+    client.post(f"/v1/trips/{trip_id}/bookings", json={"kind": "tour", "title": "Statue of Liberty", "start_at": "2026-11-07"}, headers=H)
+    cal = client.get(client.post(f"/v1/trips/{trip_id}/export-link?format=ics", headers=H).json()["url"]).text
+    assert cal.count("BEGIN:VEVENT") == 1 and "DTSTART;VALUE=DATE:20261107" in cal
+
+
+def test_city_photos_hand_picked_then_searched_once(client, monkeypatch):
+    assert client.get("/v1/city-photo?city=Kyoto", headers=H).json()["name"] == "Roméo A."
+    assert client.get("/v1/city-photo?city=Lucerne&country=Switzerland", headers=H).json()["username"] == "alexispresa"
+    assert client.get("/v1/city-photo?city=Rome", headers=H).json()["username"] == "spencerdavis"
+    assert cityphotos.curated("Ome") is None and cityphotos.curated("Atlanta") is None  # whole names, not near ones
+    assert client.get("/v1/city-photo?city=Interlaken", headers=H).json() is None  # no Unsplash key: nothing found
+
+    calls = []
+
+    async def search(self, query):
+        calls.append(query)
+        return {"photo": "photo-1", "name": "A", "username": "a"} if "Interlaken" in query else None
+    monkeypatch.setattr(CityPhotos, "_search", search)
+    client.app.state.city_photos.key = "k"
+    for _ in range(2):
+        assert client.get("/v1/city-photo?city=Interlaken&country=Switzerland", headers=H).json()["photo"] == "photo-1"
+        assert client.get("/v1/city-photo?city=Nowhere", headers=H).json() is None
+    assert calls == ["Interlaken Switzerland", "Nowhere"]  # each searched once, kept, misses too

@@ -1,0 +1,43 @@
+{
+  "scenes": {
+    "kyoto": ["photo-1624253321171-1be53e12f5f4", "Roméo A.", "gronemo"],
+    "tokyo": ["photo-1565618754154-c8011e5df2a6", "Ifan Nuriyana", "ifannuriyana"],
+    "santorini": ["photo-1533104816931-20fa691ff6ca", "Ryan Spencer", "zombience"],
+    "amalfi": ["photo-1581416271259-abec87515f51", "Reiseuhu", "reiseuhu"],
+    "venice": ["photo-1523906921802-b5d2d899e93b", "Damiano Baschiera", "damiano_baschiera"],
+    "rome": ["photo-1555992828-ca4dbe41d294", "Spencer Davis", "spencerdavis"],
+    "barcelona": ["photo-1579282240050-352db0a14c21", "Theodor Vasile", "theodorrr"],
+    "lisbon": ["photo-1754995679551-1b9ad336d0d0", "Ana-Maria Stancu", "anastancu"],
+    "agra": ["photo-1585506942812-e72b29cef752", "sanin sn", "s_a_n_in"],
+    "jaipur": ["photo-1524230507669-5ff97982bb5e", "Annie Spratt", "anniespratt"],
+    "dubai": ["photo-1608991156162-3c55b3cf05d3", "Mohammad Amin", "aminjl"],
+    "istanbul": ["photo-1466442929976-97f336a657be", "Daniel Burka", "dburka"],
+    "cairo": ["photo-1568322445389-f64ac2515020", "Alex Azabache", "alexazabache"],
+    "marrakech": ["photo-1570133435536-7ececf000ef6", "Alex Azabache", "alexazabache"],
+    "cappadocia": ["photo-1559783510-c448bd7d686b", "Tony Lee", "tli427"],
+    "paris": ["photo-1549144511-f099e773c147", "cyril mzn", "cyril_mzn"],
+    "london": ["photo-1454793147212-9e7e57e89a4f", "enrico bet", "henry_be"],
+    "amsterdam": ["photo-1517736996303-4eec4a66bb17", "Robin Benzrihem", "robinoode"],
+    "prague": ["photo-1658448358148-e5740977244c", "Ilia Bronskiy", "idbronskiy"],
+    "alps": ["photo-1672348480923-63d9c39c0f4f", "Michael Lammli", "michaellammli"],
+    "iceland": ["photo-1544638627-725124bda50d", "Kamil Kalbarczyk", "kamilkalb"],
+    "hongkong": ["photo-1576788369575-4ab045b9287e", "Sébastien Goldberg", "sebastiengoldberg"],
+    "singapore": ["photo-1628221680019-f28a2716e727", "Keming Tan", "kemingt"],
+    "bangkok": ["photo-1612161330631-9186c513de7f", "Joshua Rawson-Harris", "joshrh19"],
+    "bali": ["photo-1559628233-eb1b1a45564b", "Silas Baisch", "silasbaisch"],
+    "maldives": ["photo-1514282401047-d79a71a590e8", "Ishan @seefromthesky", "seefromthesky"],
+    "newyork": ["photo-1610879264747-c94eec8f5276", "Ismail Merad", "ismail_fwcr"],
+    "sanfrancisco": ["photo-1516473344662-e3a32406ecad", "Gordon Mak", "gcmak"],
+    "monaco": ["photo-1774762488100-e84a4e8b77cb", "Bai", "oscarbai"],
+    "rio": ["photo-1619101986791-6207d001131e", "Rodrigo Sümmer", "rodsimmer"],
+    "machupicchu": ["photo-1567597243073-2d274aabecec", "Seiji Seiji", "seijiseiji"],
+    "capetown": ["photo-1580644906000-67d680c978aa", "Tobias Reich", "electerious"],
+    "sydney": ["photo-1549180030-48bf079fb38a", "Kay", "kewal"]
+  },
+  "cities": {
+    "zurich": ["photo-1600532862492-d0eb74ab7b53", "Alex Dudar", "alexdudar"],
+    "lucerne": ["photo-1717004271316-2253c536e372", "Alexis Presa", "alexispresa"],
+    "luzern": ["photo-1717004271316-2253c536e372", "Alexis Presa", "alexispresa"]
+  },
+  "bundled": ["alps", "jaipur", "amalfi", "paris", "kyoto", "santorini"]
+}

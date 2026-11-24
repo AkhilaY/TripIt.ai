@@ -97,6 +97,7 @@ jobs:
           BACKUP_ACCESS_KEY_ID: ${{ secrets.BACKUP_ACCESS_KEY_ID }}
           BACKUP_SECRET_ACCESS_KEY: ${{ secrets.BACKUP_SECRET_ACCESS_KEY }}
           SUPPORT_EMAIL: ${{ secrets.SUPPORT_EMAIL }}
+          UNSPLASH_ACCESS_KEY: ${{ secrets.UNSPLASH_ACCESS_KEY }}
         run: |
           {
             printf 'ANTHROPIC_API_KEY=%s\n' "$ANTHROPIC_API_KEY"
@@ -125,6 +126,8 @@ jobs:
             [ -z "$BACKUP_SECRET_ACCESS_KEY" ] || printf 'BACKUP_SECRET_ACCESS_KEY=%s\n' "$BACKUP_SECRET_ACCESS_KEY"
             # The contact shown on /privacy, /terms and /support.
             [ -z "$SUPPORT_EMAIL" ] || printf 'SUPPORT_EMAIL=%s\n' "$SUPPORT_EMAIL"
+            # City photos for the app (unsplash.com/developers).
+            [ -z "$UNSPLASH_ACCESS_KEY" ] || printf 'UNSPLASH_ACCESS_KEY=%s\n' "$UNSPLASH_ACCESS_KEY"
           } | flyctl secrets import --stage --app "$APP"
 
       - name: Deploy

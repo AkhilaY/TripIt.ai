@@ -50,6 +50,11 @@ final class API: @unchecked Sendable {
         try decode(await send("PUT", path, body: body))
     }
 
+    /// A file the server makes, such as a trip's PDF.
+    func data(_ path: String) async throws -> Data {
+        try await send("GET", path)
+    }
+
     /// For calls whose answer isn't needed (or is 204 No Content).
     func call(_ method: String, _ path: String, _ body: [String: Any?]? = nil) async throws {
         _ = try await send(method, path, body: body)

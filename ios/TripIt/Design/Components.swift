@@ -29,6 +29,21 @@ actor ImageLoader {
         url.flatMap { memory.object(forKey: $0 as NSURL) }
     }
 
+    /// A photo downloaded on an earlier run, read straight from the phone's cache. Each address is looked for once a
+    /// run, so a photo that isn't there costs nothing the next time the screen is drawn.
+    @discardableResult
+    static func fromDisk(_ url: URL?) -> UIImage? {
+        guard let url else { return nil }
+        if let hit = memory.object(forKey: url as NSURL) { return hit }
+        guard checked.object(forKey: url as NSURL) == nil else { return nil }
+        checked.setObject(NSNumber(value: true), forKey: url as NSURL)
+        guard let data = session.configuration.urlCache?.cachedResponse(for: URLRequest(url: url))?.data,
+              let image = UIImage(data: data) else { return nil }
+        memory.setObject(image, forKey: url as NSURL, cost: Int(image.size.width * image.size.height * image.scale * image.scale * 4))
+        return image
+    }
+    private static let checked = NSCache<NSURL, NSNumber>()
+
     func image(_ url: URL) async -> UIImage? {
         if let hit = Self.cached(url) { return hit }
         if let task = running[url] { return await task.value }

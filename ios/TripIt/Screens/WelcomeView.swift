@@ -26,12 +26,17 @@ struct WelcomeView: View {
 
     private func content(current: Int, textOpacity: Double) -> some View {
         VStack(spacing: 0) {
-            Text(WelcomeSceneryStyle.scenes[current].place)
-                .font(Theme.text(.footnote)).kerning(0.8)
-                .foregroundStyle(.white.opacity(0.88))
-                .opacity(textOpacity)
-                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(WelcomeSceneryStyle.scenes[current].place)
+                    .font(Theme.text(.footnote)).kerning(0.8)
+                    .foregroundStyle(.white.opacity(0.88))
+                if let photo = WelcomeSceneryStyle.scenes[current].photo {
+                    Text(photo.credit).font(Theme.text(.caption2)).foregroundStyle(.white.opacity(0.6))
+                }
+            }
+            .opacity(textOpacity)
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .accessibilityHidden(true)
 
             Spacer(minLength: 0)
 

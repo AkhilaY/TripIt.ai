@@ -17,10 +17,24 @@ enum WorldScenes {
     }
 
     /// Scenes for Home: these cities' first (in order, no repeats), then the others in an order that turns over daily.
+    /// The featured place that is this city (Kyoto; Lucerne for "Lake Lucerne"), not just one in its country.
+    static func exact(_ city: String) -> WorldScene? {
+        let key = PlaceFilter.normalize(city)
+        guard key.count >= 3 else { return nil }
+        return all.first { scene in
+            scene.names.first == key
+                || PlaceFilter.normalize(scene.place).split(whereSeparator: { !$0.isLetter }).contains { String($0) == key }
+        }
+    }
+
+    @MainActor
     static func forHome(cities: [String], count: Int = 8, now: Date = Date()) -> [WorldScene] {
         var picked: [WorldScene] = []
         for city in cities {
-            if let s = find(city), !picked.contains(s) { picked.append(s) }
+            // The city itself: its featured place, or its own photo once there is one. Not a neighbour's (Atlanta
+            // isn't shown as New York).
+            let scene = exact(city) ?? CityPhotoBook.shared.photo(for: city).map { WorldScene.city(city, photo: $0) }
+            if let s = scene, !picked.contains(s) { picked.append(s) }
         }
         let day = Calendar.current.ordinality(of: .day, in: .era, for: now) ?? 0
         let rest = all.filter { !picked.contains($0) }

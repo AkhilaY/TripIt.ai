@@ -120,6 +120,7 @@ class Settings(BaseSettings):
 
     # Shown on the privacy, terms and support pages (/privacy, /terms, /support) as the way to reach you.
     support_email: str = ""
+    unsplash_access_key: str = ""  # city photos (unsplash.com/developers)
     legal_updated: str = "November 23, 2026"
 
     apns_key: str = ""

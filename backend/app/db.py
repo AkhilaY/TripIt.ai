@@ -271,6 +271,14 @@ CREATE TABLE IF NOT EXISTS briefings (
     PRIMARY KEY (trip_id, day, on_date)
 );
 
+CREATE TABLE IF NOT EXISTS city_photos (
+    key TEXT PRIMARY KEY,  -- "city|country", folded
+    photo TEXT,            -- Unsplash's "photo-…" address; NULL when no good photo was found
+    name TEXT,
+    username TEXT,
+    fetched_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS route_cache (
     key TEXT PRIMARY KEY,
     duration_s INTEGER,
@@ -1115,6 +1123,15 @@ class Database:
             (user_id, since, JobStatus.failed.value),
         )
         return rows[0]["n"]
+
+    def city_photo(self, key: str) -> Optional[sqlite3.Row]:
+        rows = self._rows("SELECT * FROM city_photos WHERE key = ?", (key,))
+        return rows[0] if rows else None
+
+    def save_city_photo(self, key: str, found: Optional[dict]) -> None:
+        f = found or {}
+        self._exec("INSERT OR REPLACE INTO city_photos (key, photo, name, username, fetched_at) VALUES (?, ?, ?, ?, ?)",
+                   (key, f.get("photo"), f.get("name"), f.get("username"), datetime.now(timezone.utc).isoformat()))
 
     def user_plan(self, user_id: str, now: Optional[str] = None) -> str:
         """"plus" while a subscription runs (or with no end date, when set by the owner), else "free"."""

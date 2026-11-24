@@ -1,11 +1,11 @@
 """Trip exports: an .ics calendar of the itinerary and a .kml file for Google My Maps / Google Earth."""
 
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 from urllib.parse import quote
 from xml.sax.saxutils import escape
 
-from .models import Place, TripDetail
+from .models import Booking, Place, TripDetail
 
 # Start time and length (minutes) used for a time-of-day slot when a stop has no exact time.
 SLOTS = {"morning": (9, 0, 120), "lunch": (12, 30, 90), "afternoon": (14, 30, 150), "dinner": (19, 0, 120), "evening": (21, 0, 120)}
@@ -94,7 +94,13 @@ def ics(trip: TripDetail, now: Optional[datetime] = None) -> str:
     stamp = (now or datetime.now(timezone.utc)).strftime("%Y%m%dT%H%M%SZ")
     lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//TripIt//Itinerary//EN", "CALSCALE:GREGORIAN",
              f"X-WR-CALNAME:{_ics_text(trip.name)}"]
-    for p, start, end in schedule(trip):
+    try:
+        stops = schedule(trip)
+    except ExportError:
+        if not trip.bookings:
+            raise
+        stops = []  # no itinerary yet: the flights, stays and tables still go in
+    for p, start, end in stops:
         location = p.address or ", ".join(x for x in (p.resolved_name or p.name, p.city) if x)
         lines += [
             "BEGIN:VEVENT",
@@ -110,8 +116,45 @@ def ics(trip: TripDetail, now: Optional[datetime] = None) -> str:
         if p.latitude is not None:
             lines.append(f"GEO:{p.latitude:.6f};{p.longitude:.6f}")
         lines.append("END:VEVENT")
+    for b in trip.bookings:
+        lines += _booking_event(b, stamp)
     lines.append("END:VCALENDAR")
     return "\r\n".join(_fold(line) for line in lines) + "\r\n"
+
+
+BOOKING_LABELS = {"flight": "Flight", "hotel": "Stay", "reservation": "Table", "tour": "Tour", "car": "Car"}
+
+
+def _booking_event(b: Booking, stamp: str) -> list[str]:
+    """A flight, table or tour at its time; a stay as all-day, from check-in to check-out."""
+    if not b.start_at:
+        return []
+    summary = f"{BOOKING_LABELS.get(b.kind, 'Booking')}: {b.title}"
+    if b.kind == "flight" and (b.origin or b.destination):
+        summary += f" ({b.origin or '?'} → {b.destination or '?'})"
+    elif b.kind == "reservation" and b.party_size:
+        summary += f" for {b.party_size}"
+    lines = ["BEGIN:VEVENT", f"UID:booking-{b.id}@tripit", f"DTSTAMP:{stamp}"]
+    try:
+        if b.kind == "hotel" or len(b.start_at) <= 10:
+            start = date.fromisoformat(b.start_at[:10])
+            end = date.fromisoformat(b.end_at[:10]) if b.end_at else start
+            lines += [f"DTSTART;VALUE=DATE:{start:%Y%m%d}", f"DTEND;VALUE=DATE:{max(end, start + timedelta(days=1)):%Y%m%d}"]
+        else:
+            start = datetime.fromisoformat(b.start_at[:16])
+            end = datetime.fromisoformat(b.end_at[:16]) if b.end_at and len(b.end_at) > 10 else None
+            if not end or end <= start:
+                end = start + timedelta(hours=3 if b.kind == "flight" else 2)
+            lines += [f"DTSTART:{start:%Y%m%dT%H%M%S}", f"DTEND:{end:%Y%m%dT%H%M%S}"]
+    except ValueError:
+        return []
+    lines.append(f"SUMMARY:{_ics_text(summary)}")
+    if b.address:
+        lines.append(f"LOCATION:{_ics_text(b.address)}")
+    details = "\n".join(x for x in (f"Ref {b.confirmation}" if b.confirmation else None, b.notes) if x)
+    if details:
+        lines.append(f"DESCRIPTION:{_ics_text(details)}")
+    return lines + ["END:VEVENT"]
 
 
 def _placemark(p: Place) -> str:

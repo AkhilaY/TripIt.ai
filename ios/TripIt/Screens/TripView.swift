@@ -109,6 +109,7 @@ struct TripView: View {
                 Section {
                     Button { router.push(.bookings(tripId: trip.id)) } label: { Label("Bookings", systemImage: "ticket") }
                     Button { router.push(.packing(tripId: trip.id)) } label: { Label("Packing list", systemImage: "suitcase") }
+                    Button { export() } label: { Label("Export trip", systemImage: "square.and.arrow.up.on.square") }
                     if Features.isOn("events") {
                         Button { router.push(.events(tripId: trip.id)) } label: { Label("What's on", systemImage: "music.mic") }
                     }
@@ -149,6 +150,15 @@ struct TripView: View {
         } catch { store.fail(error) }
     }
 
+    /// PDF, Notes, Notion and calendar exports are part of Plus.
+    private func export() {
+        if store.plan?.isPlus == true {
+            sheet = .export
+        } else {
+            store.paywall = PaywallRequest(link: nil, message: "Export your trips to a PDF, Notes, Notion or your calendar with Plus.")
+        }
+    }
+
     private func stopSharing(_ trip: TripDetail) async {
         do {
             try await API.shared.call("DELETE", "/v1/trips/\(trip.id)/share")
@@ -169,7 +179,7 @@ struct TripView: View {
 }
 
 enum TripSheet: String, Identifiable {
-    case plan, tidy, details, route, people
+    case plan, tidy, details, route, people, export
     var id: String { rawValue }
 
     @MainActor @ViewBuilder func view(trip: TripDetail) -> some View {
@@ -179,6 +189,7 @@ enum TripSheet: String, Identifiable {
         case .details: TripDetailsSheet(trip: trip)
         case .route: RouteSheet(trip: trip)
         case .people: PeopleSheet(trip: trip)
+        case .export: ExportSheet(trip: trip)
         }
     }
 }

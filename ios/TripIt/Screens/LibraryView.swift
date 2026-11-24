@@ -405,7 +405,7 @@ struct CityTile: View {
             Color.clear
                 .frame(height: pictureHeight)
                 .overlay {
-                    ChainImage(urls: city.coverURLs(width: 400)) { CityScene(city: city.name) }
+                    CityCover(city: city.name, country: city.country, fallback: city.coverURLs(width: 400))
                 }
                 .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                 .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
@@ -445,7 +445,7 @@ struct CityRow: View {
     var body: some View {
         HStack(spacing: 14) {
             Color.clear.frame(width: 56, height: 56)
-                .overlay { ChainImage(urls: city.coverURLs(width: 160)) { CityScene(city: city.name) } }
+                .overlay { CityCover(city: city.name, country: city.country, fallback: city.coverURLs(width: 160)) }
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             VStack(alignment: .leading, spacing: 2) {
                 Text(city.name + (showCountry && !city.country.isEmpty ? ", \(city.country)" : ""))

@@ -258,6 +258,16 @@ struct WorldScene: Identifiable, Hashable {
     let draw: (Painter) -> Void
     /// Scenes drawn from a script (SceneScripts) also have moving parts for the Home header.
     var steps: [SceneScript.Step]? = nil
+    /// A city's own photo, for a city with no featured place (see `city(_:photo:)`).
+    var cityPhoto: ScenePhoto? = nil
+
+    /// What's shown: the place's hand-picked photo (every featured place has one), or the city's.
+    var photo: ScenePhoto? { cityPhoto ?? ScenePhotos.scenes[id] }
+
+    /// A city of yours with no featured place (Zurich, Atlanta), shown in the Home header by its own photo.
+    static func city(_ name: String, photo: ScenePhoto) -> WorldScene {
+        WorldScene(id: "city-" + CityPhotoBook.key(name), place: name, names: [], base: 0x6F6A66, draw: { _ in }, cityPhoto: photo)
+    }
 
     /// A scene drawn from its script.
     static func scripted(id: String, place: String, names: [String], base: UInt32, script: String) -> WorldScene {
@@ -298,6 +308,20 @@ struct WorldSceneImage: View {
     @State private var drawn: UIImage?
 
     var body: some View {
+        if let photo = scene.photo {
+            ZStack {
+                Color(hex: scene.base)
+                PhotoFill(photo: photo, large: true, bundled: ScenePhotos.bundled.contains(scene.id) ? "Photo-\(scene.id)" : nil)
+            }
+            .clipped()
+            .contentShape(Rectangle())
+            .accessibilityHidden(true)
+        } else {
+            drawing
+        }
+    }
+
+    @ViewBuilder private var drawing: some View {
         let animate = moving && scene.steps != nil
         // Already drawn: shown at once. Not yet: its colour now, the picture as soon as it's drawn (in turn, in the
         // background, so a screen full of cards stays responsive).
@@ -387,6 +411,10 @@ enum SceneCache {
     /// Draws these ahead of time, a little at a time, so a crossfade never waits on one.
     static func prepare(_ scenes: [WorldScene]) async {
         for scene in scenes {
+            if let photo = scene.photo {  // a photo: fetched ahead instead, so the crossfade never waits on it
+                if !ScenePhotos.bundled.contains(scene.id), let url = photo.large { _ = await ImageLoader.shared.image(url) }
+                continue
+            }
             _ = image(scene, forMotion: scene.steps != nil)  // the header shows the moving version
             try? await Task.sleep(for: .milliseconds(60))
         }

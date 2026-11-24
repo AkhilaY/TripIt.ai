@@ -33,6 +33,8 @@ from .lounges import LoungeService
 from . import tripcheck
 from .schedule import day_times
 from .exports import ExportError, ics, kml, schedule
+from . import cityphotos, tripdoc
+from .cityphotos import CityPhotos
 from .geocode import GooglePlacesGeocoder, NoGeocoder, clean_website, make_geocoder
 from .jobs import JobStore
 from .library import Library
@@ -144,6 +146,7 @@ def build_services(app: FastAPI, settings: Settings) -> None:
                                   team_id=settings.apple_team_id or settings.apns_team_id, key_id=settings.apple_signin_key_id,
                                   private_key=settings.apple_signin_key)
     app.state.photos = photos
+    app.state.city_photos = CityPhotos(db, settings.unsplash_access_key)
     app.state.store = JobStore(db)
     app.state.claude = ClaudeService(settings)
     app.state.claude.usage = usage = Usage(db, settings)
@@ -1694,7 +1697,8 @@ async def export_link(
         try:
             schedule(trip)
         except ExportError as e:
-            raise HTTPException(status_code=422, detail=str(e))
+            if not trip.bookings:  # flights, stays and tables still go in without a planned itinerary
+                raise HTTPException(status_code=422, detail=str(e))
     elif not any(p.latitude is not None for p in trip.places):
         raise HTTPException(status_code=422, detail="None of this trip's places are on the map yet")
     exp = int(time.time()) + 3600
@@ -1717,6 +1721,111 @@ async def shared_export(token: str, fmt: str, request: Request) -> Response:
     if fmt not in ("ics", "kml"):
         raise HTTPException(status_code=404, detail="Not found")
     return _export_response(_shared_or_404(request, token), fmt)
+
+
+# ---------- Trip documents and city photos ----------
+
+
+def _require_plus(request: Request) -> None:
+    user = getattr(request.state, "user", None)  # None: the server key, which is the owner's
+    if user is not None and _plan(request, user).plan != "plus":
+        raise HTTPException(status_code=402, detail="Exporting a trip is part of Plus.")
+
+
+async def _image_data(url: str) -> Optional[str]:
+    """A picture as a data: address, so the PDF never waits on the network while it's laid out."""
+    try:
+        async with httpx.AsyncClient(timeout=12, follow_redirects=True) as client:
+            r = await client.get(url)
+    except httpx.HTTPError:
+        return None
+    if r.status_code != 200 or not r.headers.get("content-type", "").startswith("image/"):
+        return None
+    return f"data:{r.headers['content-type'].split(';')[0]};base64,{base64.b64encode(r.content).decode()}"
+
+
+async def _stop_photos(request: Request, trip: TripDetail, limit: int = 40) -> dict[str, str]:
+    """The first photo of each planned stop, small, as data: addresses (kept photos first; at most `limit` fetched)."""
+    settings, store, db = get_settings(), request.app.state.photos, _db(request)
+    width = store.cache_width(400)
+    gate = asyncio.Semaphore(6)
+
+    async def one(place_id: str) -> tuple[str, Optional[bytes]]:
+        refs = db.photo_refs(place_id)
+        if not refs:
+            return place_id, None
+        photo = refs[0]
+        if photo["source"] == "reel":
+            path = store.path(photo["ref"])
+            return place_id, path.read_bytes() if path else None
+        if photo["source"] == "google":
+            cached = store.cached_path(photo["ref"], width)
+            if cached.is_file():
+                return place_id, cached.read_bytes()
+        async with gate:
+            data = await fetch_photo_bytes(photo, store, settings.google_maps_api_key, width=width,
+                                           count_google=lambda kind: _count_google(request, kind))
+        if data and photo["source"] == "google":
+            try:
+                store.cached_path(photo["ref"], width).write_bytes(data)
+            except OSError:
+                pass
+        return place_id, data
+
+    ids = [p.id for d in range(1, trip.day_count + 1) for p in trip.day_places(d)][:limit]
+    found = await asyncio.gather(*(one(i) for i in ids))
+    return {i: f"data:image/jpeg;base64,{base64.b64encode(b).decode()}" for i, b in found if b}
+
+
+async def _trip_doc(request: Request, trip: TripDetail, size: str, with_photos: bool) -> tripdoc.Doc:
+    cover = credit = None
+    photos: dict[str, str] = {}
+    if with_photos:
+        found = await request.app.state.city_photos.get(trip.city, trip.country)
+        if found and (cover := await _image_data(cityphotos.image_url(found["photo"], 1700, 1500))):
+            credit = f"{found['name']} / Unsplash"
+        photos = await _stop_photos(request, trip)
+    doc = tripdoc.from_trip(trip, photo=lambda p: photos.get(p.id), cover=cover, cover_credit=credit, size=size)
+    groups: dict[str, list[str]] = {}
+    for item in (_db(request).get_packing(trip.id) or {}).get("items", []):
+        group = {"daybag": "Day bag"}.get(item.get("group"), (item.get("group") or "other").capitalize())
+        groups.setdefault(group, []).append(item.get("text", ""))
+    doc.packing = [(g, items) for g, items in groups.items() if items]
+    return doc
+
+
+@app.get("/v1/trips/{trip_id}/document", dependencies=[Auth])
+async def trip_document(
+    trip_id: str, request: Request,
+    style: str = Query(default="designed", pattern="^(designed|printable)$"),
+    size: str = Query(default="Letter", pattern="^(Letter|A4)$"),
+) -> Response:
+    """The whole trip as a PDF (Plus): designed (a cover, the bookings, a page per day with photos and notes) or
+    printable (two or three dense, ink-friendly pages)."""
+    _require_plus(request)
+    trip = _trip_or_404(request, trip_id)
+    doc = await _trip_doc(request, trip, size, with_photos=style == "designed")
+    data = await asyncio.to_thread(tripdoc.pdf, doc, style)
+    ascii_name = re.sub(r"[^A-Za-z0-9 _-]", "", trip.name).strip() or "trip"
+    return Response(data, media_type="application/pdf", headers={
+        "Content-Disposition": f'attachment; filename="{ascii_name}.pdf"; filename*=UTF-8\'\'{quote(trip.name)}.pdf'})
+
+
+@app.get("/v1/trips/{trip_id}/text", dependencies=[Auth])
+async def trip_text(trip_id: str, request: Request) -> dict:
+    """The whole trip as text (Plus): rich text that pastes into Apple Notes, and Markdown that Notion turns into
+    headings and to-dos."""
+    _require_plus(request)
+    doc = await _trip_doc(request, _trip_or_404(request, trip_id), "Letter", with_photos=False)
+    return {"markdown": tripdoc.markdown(doc), "html": tripdoc.clip_html(doc)}
+
+
+@app.get("/v1/city-photo", dependencies=[Auth])
+async def city_photo(
+    request: Request, city: str = Query(min_length=1, max_length=80), country: str = Query(default="", max_length=60),
+) -> Optional[dict]:
+    """A photo for a city's card and the Home header: hand-picked, or found on Unsplash the first time and kept."""
+    return await request.app.state.city_photos.get(city, country)
 
 
 # ---------- Taste profile, edits, concierge, briefings ----------

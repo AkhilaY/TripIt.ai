@@ -1,17 +1,19 @@
 import SwiftUI
 
-/// A stand-in picture for a city with no photo, in the login screen's style: a soft sky, layered silhouettes and a
-/// few lights. Well-known cities get their landmark; anywhere else gets a landscape that fits. Drawn on the phone,
-/// so it shows instantly, and the same city always looks the same. The sky follows the time of day.
+/// A city's photo (hand-picked, or found on Unsplash by the server). Until one arrives, or where there's none, a soft
+/// plain colour: no drawn stand-in.
 struct CityScene: View {
     let city: String
+    var country = ""
 
     var body: some View {
-        if let drawn = WorldScenes.find(city) {
-            WorldSceneImage(scene: drawn)
-        } else {
-            landscape
+        ZStack {
+            LinearGradient(colors: [Color(hex: 0xA39E99), Color(hex: 0x6F6A66)], startPoint: .top, endPoint: .bottom)
+            if let photo = CityPhotoBook.shared.photo(for: city) {
+                PhotoFill(photo: photo)
+            }
         }
+        .task(id: city) { await CityPhotoBook.shared.load(city: city, country: country) }
     }
 
     /// Anywhere without a drawn scene: a simple landscape that fits it.

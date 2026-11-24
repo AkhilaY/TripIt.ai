@@ -98,27 +98,45 @@ struct HomeView: View {
                     .foregroundStyle(.white)
                     .lineLimit(2).minimumScaleFactor(0.8)
                     .accessibilityAddTraits(.isHeader)
-                Text(scenes[current].place)
-                    .font(Theme.text(.footnote)).kerning(0.6)
-                    .foregroundStyle(.white.opacity(0.78))
-                    .opacity(textOpacity)
-                    .padding(.top, 6)
-                    .accessibilityHidden(true)
+                HStack(alignment: .firstTextBaseline) {
+                    Text(scenes[current].place)
+                        .font(Theme.text(.footnote)).kerning(0.6)
+                        .foregroundStyle(.white.opacity(0.78))
+                    Spacer(minLength: 8)
+                    if let photo = scenes[current].photo {
+                        Text(photo.credit).font(Theme.text(.caption2)).foregroundStyle(.white.opacity(0.6)).lineLimit(1)
+                    }
+                }
+                .opacity(textOpacity)
+                .padding(.top, 6)
+                .accessibilityHidden(true)
             }
             .padding(.horizontal, 20).padding(.top, top + 2).padding(.bottom, 26)
         }
         .frame(height: 360 + top + pull)
+        .task(id: photoCities) {  // your cities' own photos, for the header (each asked for once)
+            for city in photoCities { await CityPhotoBook.shared.load(city: city) }
+        }
         .clipShape(UnevenRoundedRectangle(bottomLeadingRadius: 28, bottomTrailingRadius: 28, style: .continuous))
         .padding(.top, -pull)  // grows upward into the pull, so nothing white shows above it
     }
 
-    /// Drawn places for the header: your next trip's cities and home first, then others, a new order each day.
+    /// Photos for the header: your next trip's cities and home first, then featured places, a new order each day.
     private var headerScenes: [WorldScene] {
         var cities: [String] = []
         if let active = store.activeTrip { cities += active.trip.cities }
         for trip in store.upcomingTrips.prefix(2) { cities += trip.cities + [trip.name] }
         if let home = store.home?.city { cities.append(home) }
         return WorldScenes.forHome(cities: cities)
+    }
+
+    /// The real cities among those (not trip names, which can be anything).
+    private var photoCities: [String] {
+        var cities: [String] = []
+        if let active = store.activeTrip { cities += active.trip.cities }
+        for trip in store.upcomingTrips.prefix(2) { cities += trip.cities }
+        if let home = store.home?.city { cities.append(home) }
+        return cities
     }
 
     /// Where you are: today's stop during a trip, otherwise home.

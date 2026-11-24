@@ -724,6 +724,7 @@ async def admin_usage(request: Request, days: int = 30) -> dict:
 
 class ModelCheckRequest(BaseModel):
     count: int = Field(default=20, ge=1, le=60)
+    skip: int = Field(default=0, ge=0, le=200)  # leave out the most recent posts (to redo part of an earlier run)
     arms: str = Field(default="", max_length=300)  # "model:frames[:effort] ...", the first is the baseline; "hybrid" too
 
 
@@ -740,7 +741,7 @@ async def start_model_check(body: ModelCheckRequest, request: Request) -> dict:
 
     async def run() -> None:
         try:
-            await modelcheck.compare(get_settings(), _db(request), body.count, modelcheck.parse_arms(body.arms), lines.append)
+            await modelcheck.compare(get_settings(), _db(request), body.count, modelcheck.parse_arms(body.arms), lines.append, skip=body.skip)
         except Exception as e:
             log.exception("Model comparison failed")
             lines.append(f"Stopped: {type(e).__name__}")

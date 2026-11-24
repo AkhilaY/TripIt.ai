@@ -9,6 +9,9 @@ on:
       count:
         description: How many recent posts
         default: "20"
+      skip:
+        description: Leave out this many of the most recent posts
+        default: "0"
       arms:
         description: model:frames:effort to compare (or hybrid:frames:effort), the first is the baseline
         default: "claude-opus-5-5:24:medium claude-sonnet-5-5:12:medium claude-sonnet-5-5:12:high hybrid:12:high"
@@ -25,6 +28,7 @@ jobs:
       APP: ${{ vars.FLY_APP_NAME }}
       KEY: ${{ secrets.APP_API_KEY }}
       COUNT: ${{ github.event.inputs.count || '20' }}
+      SKIP: ${{ github.event.inputs.skip || '0' }}
       ARMS: ${{ github.event.inputs.arms || 'claude-opus-5-5:24:medium claude-sonnet-5-5:12:medium claude-sonnet-5-5:12:high hybrid:12:high' }}
     steps:
       - name: Wait for any server deploy to finish
@@ -39,7 +43,7 @@ jobs:
           done
       - name: Start the comparison
         run: |
-          body=$(jq -n --arg arms "$ARMS" --argjson count "$COUNT" '{count: $count, arms: $arms}')
+          body=$(jq -n --arg arms "$ARMS" --argjson count "$COUNT" --argjson skip "$SKIP" '{count: $count, skip: $skip, arms: $arms}')
           code=$(curl -sS -m 60 -o /tmp/start.json -w '%{http_code}' -X POST "https://$APP.fly.dev/v1/admin/model-check" \
             -H "X-API-Key: $KEY" -H "Content-Type: application/json" -d "$body")
           if [ "$code" = "409" ]; then echo "A comparison is already running on the server; following it."

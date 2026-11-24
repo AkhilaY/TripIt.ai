@@ -3558,7 +3558,7 @@ def test_usage_report_gives_cost_per_save(client):
 def test_model_check_runs_as_an_owner_task(client, monkeypatch):
     from app import modelcheck
 
-    async def fake(settings, db, count, arms, say):
+    async def fake(settings, db, count, arms, say, skip=0):
         say(f"{count} posts, {len(arms)} arms, first {arms[0][0]}")
 
     monkeypatch.setattr(modelcheck, "compare", fake)

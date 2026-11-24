@@ -88,19 +88,19 @@ class Meter:
                       + u("cache_read_input_tokens") * p_read + u("cache_creation_input_tokens") * p_write) / 1e6
 
 
-async def compare(settings: Settings, db: Database, count: int, arms: list[tuple[str, int, str]], say) -> None:
+async def compare(settings: Settings, db: Database, count: int, arms: list[tuple[str, int, str]], say, skip: int = 0) -> None:
     """Runs the comparison, calling say(line) as it goes. Per post: places found, and against the first arm (the
     baseline), how many of its places were missed (-) and how many new ones were found (+). Names are compared,
     never printed."""
     urls = [r["url"] for r in db._rows(
-        "SELECT url FROM jobs WHERE url NOT LIKE 'upload:%' AND status = 'done' GROUP BY url ORDER BY MAX(created_at) DESC LIMIT ?",
-        (count,))]
-    say(f"{len(urls)} recent posts; arms: {', '.join(label(a) for a in arms)}; baseline {label(arms[0])}")
+        "SELECT url FROM jobs WHERE url NOT LIKE 'upload:%' AND status = 'done' GROUP BY url ORDER BY MAX(created_at) DESC LIMIT ? OFFSET ?",
+        (count, skip))]
+    say(f"{len(urls)} recent posts (after skipping {skip}); arms: {', '.join(label(a) for a in arms)}; baseline {label(arms[0])}")
     totals = {arm: {"found": 0, "missed": 0, "extra": 0, "cost": 0.0, "secs": 0.0, "errors": 0, "posts": 0,
                     "missed_posts": 0} for arm in arms}
     base_total = 0
     widest = max(f for _, f, _ in arms)
-    for n, url in enumerate(urls, 1):
+    for n, url in enumerate(urls, skip + 1):
         with tempfile.TemporaryDirectory(prefix="model-") as tmp:
             work = Path(tmp)
             try:

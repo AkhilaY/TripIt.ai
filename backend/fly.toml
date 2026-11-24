@@ -9,6 +9,9 @@ kill_timeout = 30
 [env]
   PORT = "8080"
   DATABASE_PATH = "/data/tripit.db"
+  # Reading posts runs on Sonnet with 12 frames (compared against Opus on real saves: about 60% cheaper).
+  IMPORT_MODEL = "claude-sonnet-5-5"
+  MAX_FRAMES = "12"
   # Left out of the first App Store version; the apps hide them. Remove one to bring it back.
   FEATURES_OFF = "events,concierge,menus,lounges,chatgpt,booking_needs,discover"
 

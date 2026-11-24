@@ -37,11 +37,11 @@ struct AddPlaceSheet: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    Text(request.city.map { "Save a place in \($0)" } ?? "Save a place")
+                    Text(request.reelId != nil ? "Add a place from this post" : request.city.map { "Save a place in \($0)" } ?? "Save a place")
                         .font(Theme.serif(28)).foregroundStyle(Theme.label)
                         .padding(.top, 4)
                     field.padding(.top, 18)
-                    if kind == .empty {
+                    if kind == .empty && request.reelId == nil {
                         HStack(spacing: 10) {
                             PasteButton(payloadType: String.self) { strings in
                                 if let first = strings.first { text = first }
@@ -232,7 +232,8 @@ struct AddPlaceSheet: View {
         busy = true
         do {
             let result: AddPlaceResult = try await API.shared.post("/v1/places",
-                                                                   ["candidate_id": candidate.candidateId, "trip_id": tripId, "folder_id": request.folderId])
+                                                                   ["candidate_id": candidate.candidateId, "trip_id": tripId, "folder_id": request.folderId,
+                                                                    "reel_id": request.reelId])
             await store.add(result)
             if let tripId { _ = try? await store.loadTrip(tripId) }
             dismiss()
@@ -244,7 +245,7 @@ struct AddPlaceSheet: View {
         busy = true
         do {
             let result: AddPlaceResult = try await API.shared.post("/v1/places", [
-                "name": name, "trip_id": tripId, "folder_id": request.folderId,
+                "name": name, "trip_id": tripId, "folder_id": request.folderId, "reel_id": request.reelId,
                 "city": tripId == nil ? city.trimmingCharacters(in: .whitespaces) : nil,
             ])
             await store.add(result)

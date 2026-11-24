@@ -156,6 +156,13 @@ class Usage:
         except Exception:
             log.exception("Couldn't record Google usage")
 
+    def record_missed(self) -> None:
+        """Someone added a place by hand to a post's results: one the reading missed."""
+        try:
+            self.db.add_usage(_now().date().isoformat(), CURRENT_USER.get() or "", "missed_place")
+        except Exception:
+            log.exception("Couldn't record a missed place")
+
     def _alert(self) -> None:
         """An error-level log (which Sentry emails) the first time spend passes 50%, 80% and 100% of the month's budget."""
         budget = self.config()["monthly_budget_usd"]
@@ -181,6 +188,8 @@ class Usage:
         since = min(month_start, (now.date() - timedelta(days=days - 1)).isoformat())
         rows = self.db.usage_rows(since)
         emails = self.db.user_emails()
+        missed = sum(r["calls"] for r in rows if r["feature"] == "missed_place" and r["day"] >= (now.date() - timedelta(days=days - 1)).isoformat())
+        rows = [r for r in rows if r["feature"] != "missed_place"]
         ai = [r for r in rows if not r["feature"].startswith("google:")]
         google = [r for r in rows if r["feature"].startswith("google:")]
 
@@ -225,5 +234,6 @@ class Usage:
             "people": sorted(people.values(), key=lambda p: p["cost_month"], reverse=True),
             "google": sorted(kinds.values(), key=lambda k: k["cost"], reverse=True),
             "google_cost": round(sum(k["cost"] for k in kinds.values()), 4),
+            "missed_places": missed,
             "per_save": self.db.save_costs((now.date() - timedelta(days=days - 1)).isoformat()),
         }

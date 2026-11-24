@@ -836,6 +836,7 @@ class AddPlaceRequest(BaseModel):
     category: PlaceCategory = PlaceCategory.other
     trip_id: Optional[str] = None  # also add it to this trip
     folder_id: Optional[str] = None  # also file it in this folder
+    reel_id: Optional[str] = None  # a place the post mentioned that wasn't found: count it as from that post
 
 
 class AddFromLinkRequest(BaseModel):

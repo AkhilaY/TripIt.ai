@@ -1899,6 +1899,8 @@ async def add_place(body: AddPlaceRequest, request: Request, response: Response)
         raise HTTPException(status_code=404, detail="Trip not found")
     if body.folder_id:
         _folder_or_404(request, body.folder_id)
+    if body.reel_id and _db(request).get_reel(body.reel_id) is None:
+        raise HTTPException(status_code=404, detail="Post not found")
     if body.candidate_id:
         match = await library.geocoder.details(body.candidate_id)
         if match is None:
@@ -1909,6 +1911,10 @@ async def add_place(body: AddPlaceRequest, request: Request, response: Response)
                                                    folder_id=body.folder_id)
     else:
         raise HTTPException(status_code=422, detail="Search for a place or enter its name")
+    if body.reel_id:
+        _db(request).add_mention(place.id, body.reel_id)
+        place = _db(request).get_place(place.id) or place
+        _usage(request).record_missed()  # a place reading the post missed: shown on the Usage page
     if not created:
         response.status_code = 200
     return AddPlaceResult(place=place, created=created)

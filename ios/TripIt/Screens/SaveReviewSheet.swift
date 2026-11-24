@@ -17,6 +17,7 @@ struct SaveReviewSheet: View {
     @State private var busy = false
     @State private var newList = false
     @State private var newListName = ""
+    @State private var addingMissing: Router.AddRequest?
 
     private var places: [Place] {
         guard let reel = job.reelId else { return [] }
@@ -57,6 +58,7 @@ struct SaveReviewSheet: View {
                     }
                     if let trip, !allHome { tripToggle(trip).padding(.top, 16) }
                     ForEach(groups) { group in groupSection(group) }
+                    missing.padding(.top, places.isEmpty ? 18 : 12)
                     filing.padding(.top, 20)
                     listChips.padding(.top, 18)
                 }
@@ -85,6 +87,11 @@ struct SaveReviewSheet: View {
                 }
             }
             .navigationBarTitleDisplayMode(.inline)
+            .sheet(item: $addingMissing) { request in
+                AddPlaceSheet(request: request)
+                    .environment(store).environment(router)
+                    .presentationDragIndicator(.visible)
+            }
             .alert("New list", isPresented: $newList) {
                 TextField("e.g. Date night", text: $newListName)
                 Button("Cancel", role: .cancel) {}
@@ -96,6 +103,32 @@ struct SaveReviewSheet: View {
                 }
             }
         }
+    }
+
+    // MARK: A place we missed
+
+    /// The post mentioned somewhere that wasn't found: search for it (or type its name) and it joins these places.
+    private var missing: some View {
+        Button {
+            addingMissing = Router.AddRequest(city: groups.first?.name.isEmpty == false ? groups.first?.name : nil, reelId: job.reelId)
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "plus.circle")
+                    .font(.system(size: 22, weight: .light)).foregroundStyle(Theme.label)
+                    .frame(width: 22)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(places.isEmpty ? "Add a place from this post" : "Missing a place? Add it")
+                        .font(Theme.text(.subheadline)).foregroundStyle(Theme.label)
+                    Text("Search by name and it joins the places from this post")
+                        .font(Theme.text(.caption)).foregroundStyle(Theme.secondary)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.vertical, 8)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(PressStyle())
+        .disabled(job.reelId == nil)
     }
 
     // MARK: Header

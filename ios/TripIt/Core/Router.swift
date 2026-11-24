@@ -72,6 +72,7 @@ final class Router {
         var tripId: String?
         var folderId: String?
         var city: String?  // search around this city (a city page)
+        var reelId: String?  // a place a saved post mentioned that wasn't found: it joins that post's places
     }
 
     func push(_ route: Route) {

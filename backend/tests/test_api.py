@@ -3572,3 +3572,14 @@ def test_model_check_runs_as_an_owner_task(client, monkeypatch):
         time.sleep(0.02)
     assert got["lines"] == ["5 posts, 1 arms, first claude-haiku-5-5"]
     assert modelcheck.same("Joe's Pizza", "Joe’s Pizza Broadway") and not modelcheck.same("Sey Coffee", "Devoción")
+
+
+def test_missing_place_added_to_a_posts_results(client):
+    job = import_reel(client, trip=False)
+    owner_reel = job["reel_id"]
+    r = client.post("/v1/places", json={"name": "Di Fara", "city": "New York", "reel_id": owner_reel}, headers=H)
+    assert r.status_code in (200, 201), r.text
+    assert owner_reel in r.json()["place"]["reel_ids"]
+    assert client.post("/v1/places", json={"name": "X", "city": "New York", "reel_id": "nope"}, headers=H).status_code == 404
+    owner = signup(client, "a@x.com", "secret")
+    assert client.get("/v1/admin/usage", headers=owner).json()["missed_places"] == 1

@@ -5,6 +5,7 @@ import SwiftUI
 /// slow zoom and hold still for Reduce Motion. `WelcomeScenery` is shared with Home's header.
 struct WelcomeView: View {
     @State private var signIn: SignInMode?
+    @State private var jump: Int?
 
     enum SignInMode: String, Identifiable {
         case logIn, signUp
@@ -13,7 +14,7 @@ struct WelcomeView: View {
 
     var body: some View {
         // Still while the sign-in sheet covers it, so it isn't redrawing every frame unseen.
-        WelcomeScenery(paused: signIn != nil, world: WelcomeSceneryStyle.scenes) { current, textOpacity in
+        WelcomeScenery(paused: signIn != nil, swipeable: true, jump: $jump, world: WelcomeSceneryStyle.scenes) { current, textOpacity in
             content(current: current, textOpacity: textOpacity)
         }
         .background(Color.black)
@@ -70,14 +71,19 @@ struct WelcomeView: View {
 
             HStack(spacing: 8) {
                 ForEach(0..<WelcomeSceneryStyle.scenes.count, id: \.self) { i in
-                    Capsule()
-                        .fill(i == current ? Color.white : Color.white.opacity(0.45))
-                        .frame(width: i == current ? 24 : 7, height: 7)
+                    Button { jump = i } label: {
+                        Capsule()
+                            .fill(i == current ? Color.white : Color.white.opacity(0.45))
+                            .frame(width: i == current ? 24 : 7, height: 7)
+                            .frame(minWidth: 18, minHeight: 44)  // easier to tap than the dot itself
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Place \(i + 1) of \(WelcomeSceneryStyle.scenes.count)")
                 }
             }
             .animation(.easeInOut(duration: 0.4), value: current)
-            .padding(.top, 26)
-            .accessibilityHidden(true)
+            .padding(.top, 8)
 
             VStack(spacing: 12) {
                 Button("Log In") { signIn = .logIn }
@@ -99,6 +105,8 @@ struct WelcomeScenery<Content: View>: View {
     var paused = false
     var fullBleed = true  // the welcome screen runs under the status bar; Home's box doesn't
     var gradient: Gradient = WelcomeSceneryStyle.welcome
+    var swipeable = false  // the welcome screen: swipe between places
+    var jump: Binding<Int?>? = nil  // set to a scene's number to show it now (the welcome screen's dots)
     let world: [WorldScene]  // the drawn places to show, in order
     @ViewBuilder var content: (_ current: Int, _ textOpacity: Double) -> Content
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -132,8 +140,29 @@ struct WelcomeScenery<Content: View>: View {
                 .accessibilityHidden(true)
                 content(current, textOpacity)
             }
+            .contentShape(Rectangle())
+            .simultaneousGesture(DragGesture(minimumDistance: 24).onEnded { drag in
+                let dx = drag.translation.width
+                guard abs(dx) > 40, abs(dx) > abs(drag.translation.height) else { return }
+                go(to: current + (dx < 0 ? 1 : -1), now: context.date)
+            }, including: swipeable ? .all : .subviews)
         }
         .task(id: world.map(\.id)) { await SceneCache.prepare(world) }
+        .onChange(of: jump?.wrappedValue) { _, index in
+            guard let index, let jump else { return }
+            go(to: index, now: Date())
+            jump.wrappedValue = nil
+        }
+    }
+
+    /// Shows this scene now, for a full turn, then carries on from it.
+    private func go(to index: Int, now: Date) {
+        let count = max(1, world.count)
+        let loops = Int(max(0, now.timeIntervalSince(start)) / period) / count
+        let target = loops * count + ((index % count) + count) % count
+        withAnimation(.easeInOut(duration: 0.3)) {
+            start = now.addingTimeInterval(-(Double(target) * period + fade))  // past the crossfade: a clean cut
+        }
     }
 
     /// One scene, zooming in slowly (a little over 1.1× across its time on screen).

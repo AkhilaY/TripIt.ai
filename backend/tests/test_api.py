@@ -3658,3 +3658,16 @@ def test_city_photos_hand_picked_then_searched_once(client, monkeypatch):
         assert client.get("/v1/city-photo?city=Interlaken&country=Switzerland", headers=H).json()["photo"] == "photo-1"
         assert client.get("/v1/city-photo?city=Nowhere", headers=H).json() is None
     assert calls == ["Interlaken Switzerland", "Nowhere"]  # each searched once, kept, misses too
+
+
+async def test_place_photos_are_searched_once(tmp_path, monkeypatch):
+    photos = CityPhotos(Database(str(tmp_path / "t.db")), "k")
+    calls = []
+
+    async def search(self, query):
+        calls.append(query)
+        return {"photo": "photo-2", "name": "B", "username": "b"}
+    monkeypatch.setattr(CityPhotos, "_search", search)
+    for _ in range(2):
+        assert (await photos.place("Rigi Kulm", "Lucerne"))["photo"] == "photo-2"
+    assert calls == ["Rigi Kulm Lucerne"]

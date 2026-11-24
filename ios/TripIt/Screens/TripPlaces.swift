@@ -229,7 +229,7 @@ struct EditCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             ZStack(alignment: .topLeading) {
-                ChainImage(urls: edit.coverCandidates.compactMap { $0.url(width: 600) }) {
+                ChainImage(urls: edit.coverURLs(width: 600)) {
                     CityScene(city: edit.entries.first?.city ?? "")
                 }
                 .frame(width: 220, height: 160)

@@ -54,16 +54,22 @@ class CityPhotos:
         """{"photo", "name", "username"} for this city, or None when there's no good one (yet)."""
         if hit := curated(city):
             return hit
-        key = f"{norm(city)}|{norm(country)}"
+        return await self._lookup(f"{norm(city)}|{norm(country)}", " ".join(x for x in (city, country) if x))
+
+    async def place(self, name: str, city: str = "") -> Optional[dict]:
+        """A photo of a particular place (an edit's best-known one), searched once and kept like a city's."""
+        return await self._lookup(f"place:{norm(name)}|{norm(city)}", " ".join(x for x in (name, city) if x))
+
+    async def _lookup(self, key: str, query: str) -> Optional[dict]:
         row = self.db.city_photo(key)
         if row:
             if row["photo"]:
                 return {"photo": row["photo"], "name": row["name"], "username": row["username"]}
             if datetime.fromisoformat(row["fetched_at"]) > datetime.now(timezone.utc) - RETRY_AFTER:
                 return None
-        if not self.key or not norm(city):
+        if not self.key or not norm(query):
             return None
-        found = await self._search(" ".join(x for x in (city, country) if x))
+        found = await self._search(query)
         if found is _BUSY:
             return None  # over Unsplash's hourly limit: nothing is saved, so it's tried again next time
         self.db.save_city_photo(key, found)

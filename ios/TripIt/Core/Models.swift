@@ -7,6 +7,9 @@ struct PlacePhoto: Codable, Hashable {
     var source: String
     var url: String
     var attribution: String?
+
+    /// A suggested place's Google photo (not saved): Google's link can stop working after a while.
+    var expires: Bool { url.contains("/v1/discover/photo") }
 }
 
 struct TimeRange: Codable, Hashable {
@@ -415,6 +418,17 @@ struct EditItem: Codable, Identifiable, Hashable {
 }
 
 extension TripEdit {
+    /// Cover photos to try in order: ones the server keeps (saved places), then the Unsplash photo of its best-known
+    /// place, then Google links for places you haven't saved (those can stop working).
+    func coverURLs(width: Int) -> [URL] {
+        let kept = coverCandidates.filter { !$0.expires }.compactMap { $0.url(width: width) }
+        let expiring = coverCandidates.filter(\.expires).compactMap { $0.url(width: width) }
+        return kept + [scenePhoto.flatMap { width > 800 ? $0.large : $0.card }].compactMap { $0 } + expiring
+    }
+
+    /// The Unsplash photo when it's the one shown first, so its photographer is named.
+    var creditedScene: ScenePhoto? { coverCandidates.contains { !$0.expires } ? nil : scenePhoto }
+
     /// Photos to try for the cover, best first: the cover, then saved places' photos (kept on the server), then the
     /// rest (a Google link for a place that isn't saved can expire).
     var coverCandidates: [PlacePhoto] {
@@ -431,6 +445,7 @@ struct TripEdit: Codable, Identifiable, Hashable {
     var dek: String
     var entries: [EditItem]
     var coverPhoto: PlacePhoto?
+    var scenePhoto: ScenePhoto?  // Unsplash photo of its best-known place
     var folderId: String?
     var newCount: Int
 }

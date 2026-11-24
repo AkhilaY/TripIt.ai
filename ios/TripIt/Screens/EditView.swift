@@ -46,11 +46,16 @@ struct EditView: View {
     private func content(_ edit: TripEdit) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                if let cover = edit.coverPhoto {
-                    RemoteImage(url: cover.url(width: 1200)) { Theme.raised }
+                let cover = edit.coverURLs(width: 1200)
+                if !cover.isEmpty {
+                    ChainImage(urls: cover) { Theme.raised }
                         .frame(height: 230)
                         .frame(maxWidth: .infinity)
                         .clipped()
+                    if let scene = edit.creditedScene {
+                        Text(scene.credit).font(Theme.text(.caption2)).foregroundStyle(Theme.tertiary)
+                            .frame(maxWidth: .infinity, alignment: .trailing).padding(.horizontal, 20).padding(.top, 6)
+                    }
                 }
                 VStack(alignment: .leading, spacing: 8) {
                     Text(edit.title).font(Theme.serif(30)).foregroundStyle(Theme.label)

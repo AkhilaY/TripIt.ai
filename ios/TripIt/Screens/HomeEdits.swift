@@ -12,6 +12,7 @@ struct HomeEdit: Identifiable, Hashable {
     let cover: PlacePhoto?
     var city = ""  // for the drawn stand-in while (or if) there's no photo
     var fallbacks: [PlacePhoto] = []  // tried in turn if the cover doesn't load
+    var urls: [URL]?  // a trip edit's photos in the order to try (see TripEdit.coverURLs)
     var tripId: String?
     var tripEditId: String?
 
@@ -112,7 +113,8 @@ enum HomeEdits {
         edits.edits.prefix(2).map { edit in
             HomeEdit(id: "trip-\(trip.id)-\(edit.id)", caption: "\(trip.name) · \(Fmt.plural(edit.entries.count, "place"))",
                      title: edit.title, note: edit.dek, placeIds: [], cover: edit.coverCandidates.first, city: trip.city,
-                     fallbacks: Array(edit.coverCandidates.dropFirst()), tripId: trip.id, tripEditId: edit.id)
+                     fallbacks: Array(edit.coverCandidates.dropFirst()), urls: edit.coverURLs(width: 800),
+                     tripId: trip.id, tripEditId: edit.id)
         }
     }
 }
@@ -129,7 +131,7 @@ struct HomeEditCard: View {
             Color.clear
                 .frame(width: width, height: height)
                 .overlay {
-                    ChainImage(urls: ([edit.cover].compactMap { $0 } + edit.fallbacks).compactMap { $0.url(width: 800) }) {
+                    ChainImage(urls: edit.urls ?? ([edit.cover].compactMap { $0 } + edit.fallbacks).compactMap { $0.url(width: 800) }) {
                         CityScene(city: edit.city.isEmpty ? (fallback?.city ?? "") : edit.city)
                     }
                 }

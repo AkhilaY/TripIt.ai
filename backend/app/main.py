@@ -1234,17 +1234,28 @@ async def discover_photo(request: Request, settings: Annotated[Settings, Depends
     """A photo for a recommendation (not saved yet). Authorized by the signature in the link."""
     if not ref.startswith("places/") or not request.app.state.photos.check("discover", 0, ref, sig):
         raise HTTPException(status_code=403, detail="Bad photo link")
+    store = request.app.state.photos
+    width = store.cache_width(w)
+    cached = store.cached_path(ref, width)
+    if cached.is_file():  # kept from the first time: Google's photo links stop working after a while
+        return FileResponse(cached, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=2592000, immutable"})
     if not settings.google_maps_api_key:
         raise HTTPException(status_code=404, detail="Photo not available")
     _count_google(request, "photo")
     try:
         async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
             r = await client.get(f"https://places.googleapis.com/v1/{ref}/media",
-                                 params={"maxWidthPx": min(max(w, 100), 1200), "key": settings.google_maps_api_key})
+                                 params={"maxWidthPx": width, "key": settings.google_maps_api_key})
     except httpx.HTTPError:
         raise HTTPException(status_code=502, detail="Couldn't load photo")
-    if r.status_code != 200:
+    if r.status_code != 200 or not r.headers.get("content-type", "").startswith("image/"):
         raise HTTPException(status_code=404, detail="Photo no longer available")
+    try:
+        tmp = cached.with_suffix(".part")
+        tmp.write_bytes(r.content)
+        tmp.replace(cached)
+    except OSError:
+        pass
     return Response(r.content, media_type=r.headers.get("content-type", "image/jpeg"), headers={"Cache-Control": "private, max-age=86400"})
 
 
@@ -1855,13 +1866,23 @@ async def all_edits(request: Request) -> list[TripEdits]:
         detail = _db(request).get_trip_detail(trip.id)
         edits = _curator(request).edits(detail)
         if edits.edits:
-            out.append(edits)
+            out.append(await _with_scene_photos(request, edits))
     return out
 
 
 @app.get("/v1/trips/{trip_id}/edits", response_model=TripEdits, dependencies=[Auth])
 async def trip_edits(trip_id: str, request: Request) -> TripEdits:
-    return _curator(request).edits(_trip_or_404(request, trip_id))
+    return await _with_scene_photos(request, _curator(request).edits(_trip_or_404(request, trip_id)))
+
+
+async def _with_scene_photos(request: Request, edits: TripEdits) -> TripEdits:
+    """Each edit gets a photo of its best-known place, for when its own photos (Google's links for places you haven't
+    saved expire) don't load."""
+    for edit in edits.edits:
+        if edit.entries:
+            top = max(edit.entries, key=lambda e: e.rating_count or 0)
+            edit.scene_photo = await request.app.state.city_photos.place(top.name, top.city or "")
+    return edits
 
 
 @app.post("/v1/trips/{trip_id}/edits", response_model=TripEdits, dependencies=[Auth])
@@ -1874,13 +1895,13 @@ async def curate_trip(trip_id: str, request: Request, wait: bool = False) -> Tri
     if len(curator._pool(trip)) < 3:
         raise HTTPException(status_code=422, detail="Save at least three places to curate edits")
     if wait:
-        return await curator.curate(trip)
+        return await _with_scene_photos(request, await curator.curate(trip))
     if trip_id not in curator.refreshing:
         curator.refreshing.add(trip_id)
         task = asyncio.create_task(curator.curate(trip))
         request.app.state.tasks.add(task)
         task.add_done_callback(request.app.state.tasks.discard)
-    return curator.edits(trip)
+    return await _with_scene_photos(request, curator.edits(trip))
 
 
 @app.post("/v1/trips/{trip_id}/edits/{edit_id}/entries/{entry_id}/save", response_model=Place, dependencies=[Auth])

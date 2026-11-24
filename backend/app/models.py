@@ -985,6 +985,7 @@ class TripEdit(BaseModel):
     dek: str
     entries: list[EditItem] = []
     cover_photo: Optional[PlacePhoto] = None
+    scene_photo: Optional[dict] = None  # Unsplash photo of its best-known place ({photo, name, username})
     folder_id: Optional[str] = None  # set once the whole edit is saved to the Library
     new_count: int = 0  # places in it that aren't in your saved places yet
 

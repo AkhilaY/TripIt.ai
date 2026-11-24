@@ -267,6 +267,7 @@ private struct UsageReport: Codable {
     var google: [Google]
     var googleCost: Double
     var perSave: [PerSave]?
+    var missedPlaces: Int?
 
     /// A budget or limit. The decoder turns snake_case keys into camelCase, dictionary keys included, so both are tried.
     func value(_ key: String) -> Double? {
@@ -338,7 +339,8 @@ struct UsageView: View {
                     } header: {
                         Text("Cost per save, last 30 days")
                     } footer: {
-                        Text("Average for saves that finished. Google at list price, before its free monthly allowance.")
+                        Text("Average for saves that finished. Google at list price, before its free monthly allowance."
+                             + (r.missedPlaces.map { " \($0 == 1 ? "1 place was" : "\($0) places were") added by hand to a post's results (places the reading missed)." } ?? ""))
                     }
                 }
                 Section("By day") {

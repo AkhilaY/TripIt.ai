@@ -2,7 +2,7 @@ name: Compare models for reading posts
 
 # Runs recent real saves through several models (and frame counts) inside the server and compares the places
 # found and the cost, before changing which model reads posts. Prints only counts and costs. Costs real money
-# (about $5 for 20 posts and the default arms). Run it from the Actions tab only.
+# (about $7 for 20 posts and the default arms). Run it from the Actions tab only.
 on:
   workflow_dispatch:
     inputs:
@@ -10,8 +10,8 @@ on:
         description: How many recent posts
         default: "20"
       arms:
-        description: model:frames to compare, the first is the baseline
-        default: "claude-opus-5-5:24 claude-opus-5-5:12 claude-sonnet-5-5:12 claude-haiku-5-5:12"
+        description: model:frames:effort to compare (or hybrid:frames:effort), the first is the baseline
+        default: "claude-opus-5-5:24:medium claude-sonnet-5-5:12:medium claude-sonnet-5-5:12:high hybrid:12:high"
 
 jobs:
   compare:
@@ -25,7 +25,7 @@ jobs:
       APP: ${{ vars.FLY_APP_NAME }}
       KEY: ${{ secrets.APP_API_KEY }}
       COUNT: ${{ github.event.inputs.count || '20' }}
-      ARMS: ${{ github.event.inputs.arms || 'claude-opus-5-5:24 claude-opus-5-5:12 claude-sonnet-5-5:12 claude-haiku-5-5:12' }}
+      ARMS: ${{ github.event.inputs.arms || 'claude-opus-5-5:24:medium claude-sonnet-5-5:12:medium claude-sonnet-5-5:12:high hybrid:12:high' }}
     steps:
       - name: Wait for any server deploy to finish
         env:

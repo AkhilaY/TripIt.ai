@@ -724,7 +724,7 @@ async def admin_usage(request: Request, days: int = 30) -> dict:
 
 class ModelCheckRequest(BaseModel):
     count: int = Field(default=20, ge=1, le=60)
-    arms: str = Field(default="", max_length=300)  # "model:frames model:frames ...", the first is the baseline
+    arms: str = Field(default="", max_length=300)  # "model:frames[:effort] ...", the first is the baseline; "hybrid" too
 
 
 @app.post("/v1/admin/model-check", status_code=202, dependencies=[Auth])

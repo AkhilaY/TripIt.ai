@@ -2,7 +2,7 @@ name: Compare models for reading posts
 
 # Runs recent real saves through several models (and frame counts) inside the server and compares the places
 # found and the cost, before changing which model reads posts. Prints only counts and costs. Costs real money
-# (about $5 for 20 posts and the default arms). Run it from the Actions tab; it also runs when this file changes.
+# (about $5 for 20 posts and the default arms). Run it from the Actions tab only.
 on:
   workflow_dispatch:
     inputs:
@@ -12,9 +12,6 @@ on:
       arms:
         description: model:frames to compare, the first is the baseline
         default: "claude-opus-5-5:24 claude-opus-5-5:12 claude-sonnet-5-5:12 claude-haiku-5-5:12"
-  push:
-    paths:
-      - ".github/workflows/model-check.yml"
 
 jobs:
   compare:
@@ -55,6 +52,6 @@ jobs:
             got=$(curl -fsS -m 30 "https://$APP.fly.dev/v1/admin/model-check?since=$shown" -H "X-API-Key: $KEY" || echo '{}')
             printf '%s' "$got" | jq -r '.lines[]?'
             shown=$(printf '%s' "$got" | jq -r ".total // $shown")
-            [ "$(printf '%s' "$got" | jq -r '.running // true')" = "false" ] && exit 0
+            [ "$(printf '%s' "$got" | jq -r 'if .running == false then "done" else "running" end')" = "done" ] && exit 0
           done
           echo "Still running after 85 minutes"

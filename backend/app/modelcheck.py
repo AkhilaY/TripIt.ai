@@ -81,10 +81,14 @@ async def compare(settings: Settings, db: Database, count: int, arms: list[tuple
                 continue
             transcript, video_frames = None, []
             if reel.video_path:
-                audio = await asyncio.to_thread(extract_audio, reel.video_path, work)
-                transcript = await asyncio.to_thread(transcribe, audio, settings) if audio else None
-                video_frames = await asyncio.to_thread(
-                    extract_frames, reel.video_path, work, settings.model_copy(update={"max_frames": widest}))
+                try:  # a very long or odd video can time out in ffmpeg; skip it rather than stop the comparison
+                    audio = await asyncio.to_thread(extract_audio, reel.video_path, work)
+                    transcript = await asyncio.to_thread(transcribe, audio, settings) if audio else None
+                    video_frames = await asyncio.to_thread(
+                        extract_frames, reel.video_path, work, settings.model_copy(update={"max_frames": widest}))
+                except Exception as e:
+                    say(f"post {n}: couldn't read the video ({type(e).__name__}), skipped")
+                    continue
             slides = [(f"Slide {i}", p) for i, p in enumerate(reel.image_paths, 1)]
             baseline: list[str] = []
             line = [f"post {n} ({reel.metadata.platform}):"]

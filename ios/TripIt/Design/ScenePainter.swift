@@ -295,13 +295,17 @@ struct WorldSceneImage: View {
     /// Bring the scene to life (Home's header): lights twinkle, water shimmers, birds fly.
     var moving = false
     var paused = false
+    @State private var drawn: UIImage?
 
     var body: some View {
         let animate = moving && scene.steps != nil
+        // Already drawn: shown at once. Not yet: its colour now, the picture as soon as it's drawn (in turn, in the
+        // background, so a screen full of cards stays responsive).
+        let image = SceneCache.cached(scene, forMotion: animate) ?? drawn
         Color(hex: scene.base)
             .overlay {
-                if let image = SceneCache.image(scene, forMotion: animate) {
-                    Image(uiImage: image).resizable().scaledToFill()
+                if let image {
+                    Image(uiImage: image).resizable().scaledToFill().transition(.opacity)
                 }
             }
             .overlay {
@@ -309,6 +313,12 @@ struct WorldSceneImage: View {
             }
             .clipped()
             .accessibilityHidden(true)
+            .task(id: "\(scene.id)-\(animate)") {
+                guard SceneCache.cached(scene, forMotion: animate) == nil else { return }
+                if let made = await SceneCache.draw(scene, forMotion: animate) {
+                    withAnimation(.easeOut(duration: 0.25)) { drawn = made }
+                }
+            }
     }
 }
 
@@ -321,22 +331,37 @@ enum SceneCache {
     }()
 
     /// The scene drawn at its design size (a little wider than a phone), sharp at the screen's scale.
+    private static func key(_ scene: WorldScene, _ forMotion: Bool) -> NSString {
+        (forMotion ? scene.id + "-still" : scene.id) as NSString
+    }
+
+    static func cached(_ scene: WorldScene, forMotion: Bool = false) -> UIImage? {
+        cache.object(forKey: key(scene, forMotion))
+    }
+
+    /// Draws a scene that isn't cached yet, letting the screen update between scenes.
+    static func draw(_ scene: WorldScene, forMotion: Bool = false) async -> UIImage? {
+        await Task.yield()
+        guard !Task.isCancelled else { return nil }
+        return image(scene, forMotion: forMotion)
+    }
+
     static func image(_ scene: WorldScene, forMotion: Bool = false) -> UIImage? {
-        let key = (forMotion ? scene.id + "-still" : scene.id) as NSString
-        if let hit = cache.object(forKey: key) { return hit }
+        let cacheKey = key(scene, forMotion)
+        if let hit = cache.object(forKey: cacheKey) { return hit }
         let renderer = ImageRenderer(content: WorldSceneCanvas(scene: scene, forMotion: forMotion)
             .frame(width: Painter.W * 1.12, height: Painter.H * 1.12))
         renderer.scale = UIScreen.main.scale
         guard let image = renderer.uiImage else { return nil }
         let bytes = Int(image.size.width * image.size.height * image.scale * image.scale * 4)
-        cache.setObject(image, forKey: key, cost: bytes)
+        cache.setObject(image, forKey: cacheKey, cost: bytes)
         return image
     }
 
     /// Draws these ahead of time, a little at a time, so a crossfade never waits on one.
     static func prepare(_ scenes: [WorldScene]) async {
         for scene in scenes {
-            _ = image(scene)
+            _ = image(scene, forMotion: scene.steps != nil)  // the header shows the moving version
             try? await Task.sleep(for: .milliseconds(60))
         }
     }

@@ -41,8 +41,9 @@ final class CityPhotoBook {
         guard key.count >= 2, photo(for: city) == nil, !asked.contains(key), SessionStore.token != nil else { return }
         asked.insert(key)
         let enc = { (s: String) in s.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? "" }
-        guard let result = try? await API.shared.get("/v1/city-photo?city=\(enc(city))&country=\(enc(country))", as: ScenePhoto?.self),
-              let result else { return }
+        // try? flattens the optional: nil when there's no photo or the request failed.
+        guard let result = try? await API.shared.get("/v1/city-photo?city=\(enc(city))&country=\(enc(country))", as: ScenePhoto?.self)
+        else { return }
         found[key] = result
         DiskCache.save("city-photos", found)
     }

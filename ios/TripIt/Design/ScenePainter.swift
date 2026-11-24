@@ -312,6 +312,7 @@ struct WorldSceneImage: View {
                 if animate, let steps = scene.steps { SceneMotionView(steps: steps, paused: paused) }
             }
             .clipped()
+            .contentShape(Rectangle())  // the drawing overflows its frame; taps must stay inside it
             .accessibilityHidden(true)
             .task(id: "\(scene.id)-\(animate)") {
                 guard SceneCache.cached(scene, forMotion: animate) == nil else { return }

@@ -398,6 +398,7 @@ struct CityTile: View {
                     ChainImage(urls: coverURLs) { CityScene(city: city.name) }
                 }
                 .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             Text(city.name).font(Theme.serif(19)).foregroundStyle(Theme.label).lineLimit(1).padding(.top, 10)
             HStack(spacing: 0) {
                 Text(Fmt.plural(city.places.count, "place") + " · ").foregroundStyle(Theme.secondary)
@@ -411,6 +412,7 @@ struct CityTile: View {
             }
             .font(Theme.text(.footnote)).lineLimit(1)
         }
+        .contentShape(Rectangle())
     }
 }
 

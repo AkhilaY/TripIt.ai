@@ -67,9 +67,12 @@ struct RemoteImage<Placeholder: View>: View {
         ZStack {
             placeholder()
             if let image {
-                Image(uiImage: image).resizable().scaledToFill().transition(.opacity)
+                // Inside a frame-sized overlay, so the filled picture never makes this view bigger than its frame.
+                Color.clear.overlay { Image(uiImage: image).resizable().scaledToFill() }.transition(.opacity)
             }
         }
+        .clipped()
+        .contentShape(Rectangle())  // a filled picture overflows its frame; taps must stay inside it
         .task(id: url) {
             guard let url, ImageLoader.cached(url) == nil,
                   let found = await ImageLoader.shared.image(url) else { return }
@@ -89,9 +92,12 @@ struct ChainImage<Placeholder: View>: View {
         ZStack {
             placeholder()
             if let image {
-                Image(uiImage: image).resizable().scaledToFill().transition(.opacity)
+                // Inside a frame-sized overlay, so the filled picture never makes this view bigger than its frame.
+                Color.clear.overlay { Image(uiImage: image).resizable().scaledToFill() }.transition(.opacity)
             }
         }
+        .clipped()
+        .contentShape(Rectangle())  // a filled picture overflows its frame; taps must stay inside it
         .task(id: urls) {
             guard !urls.contains(where: { ImageLoader.cached($0) != nil }) else { return }
             for url in urls {

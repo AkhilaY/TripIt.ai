@@ -20,7 +20,6 @@ struct LibraryView: View {
     @Environment(Router.self) private var router
     @AppStorage("library.visit") private var visit: VisitFilter = .all
     @State private var query = ""
-    @State private var allCities = false
     @State private var sheet: LibrarySheet?
     @State private var newFolder = false
     @State private var folderName = ""
@@ -211,12 +210,15 @@ struct LibraryView: View {
         if !groups.isEmpty {
             SectionHeading(title: "Cities") {
                 if groups.count > 4 {
-                    Button { withAnimation { allCities.toggle() } } label: {
+                    // Its own page: a long grid of cities reads better there than unfolded in the Library.
+                    Button { router.push(.cities) } label: {
                         HStack(spacing: 4) {
-                            Text(allCities ? "Show fewer" : "See all \(groups.count)")
-                            Image(systemName: allCities ? "chevron.up" : "chevron.down").font(Theme.text(.caption2))
+                            Text("See all \(groups.count)")
+                            Image(systemName: "chevron.right").font(Theme.text(.caption2))
                         }
-                        .font(Theme.text(.footnote)).foregroundStyle(Theme.link).frame(minHeight: 36)
+                        .font(Theme.text(.footnote)).foregroundStyle(Theme.link)
+                        .frame(minWidth: 44, minHeight: 44)
+                        .contentShape(Rectangle())
                     }
                     .buttonStyle(PressStyle())
                 } else {
@@ -224,7 +226,7 @@ struct LibraryView: View {
                 }
             }
             .padding(.top, 36)
-            let visible = allCities ? groups : Array(groups.prefix(4))
+            let visible = Array(groups.prefix(4))
             LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], alignment: .leading, spacing: 16) {
                 ForEach(visible) { city in
                     NavigationLink(value: Route.city(name: city.name)) { CityTile(city: city, trip: store.trip(forCity: city.name)) }
@@ -608,3 +610,34 @@ struct JobRow: View {
         return "link"
     }
 }
+
+/// Library → Cities → See all: every city you've saved places in, in the same cards, with Want to go / Been.
+struct AllCitiesView: View {
+    @Environment(Store.self) private var store
+    @AppStorage("library.visit") private var visit: VisitFilter = .all
+
+    var body: some View {
+        let groups = store.cityGroups(visit.apply(store.saved))
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                Text("Cities").font(Theme.serif(34)).foregroundStyle(Theme.label)
+                Text((groups.count == 1 ? "1 city" : "\(groups.count) cities") + " · " + Fmt.plural(groups.reduce(0) { $0 + $1.places.count }, "place"))
+                    .font(Theme.text(.subheadline)).foregroundStyle(Theme.secondary).padding(.top, 4)
+                VisitPicker(visit: $visit, places: store.saved).padding(.top, 16)
+                LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)],
+                          alignment: .leading, spacing: 18) {
+                    ForEach(groups) { city in
+                        NavigationLink(value: Route.city(name: city.name)) { CityTile(city: city, trip: store.trip(forCity: city.name)) }
+                            .buttonStyle(PressStyle())
+                    }
+                }
+                .padding(.top, 18)
+            }
+            .padding(.horizontal, 20).padding(.bottom, 40)
+        }
+        .background(Theme.background.ignoresSafeArea())
+        .navigationTitle("")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+

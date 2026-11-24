@@ -12,6 +12,8 @@ enum Route: Hashable {
     case folder(id: String)
     /// Everything saved in one city (your home city is "Around <city>").
     case city(name: String)
+    /// Every city you've saved places in.
+    case cities
     /// Your saved places on a map.
     case map
     case imports

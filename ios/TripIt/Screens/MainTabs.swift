@@ -270,6 +270,7 @@ struct RouteView: View {
         case .trip(let id): TripView(tripId: id)
         case .folder(let id): FolderView(folderId: id)
         case .city(let name): CityView(city: name)
+        case .cities: AllCitiesView()
         case .map: MapTab()
         case .imports: ImportsView()
         case .reel(let id): ReelPlacesView(reelId: id)

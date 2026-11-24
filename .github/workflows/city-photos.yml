@@ -1,0 +1,31 @@
+name: City photos
+# Lists Unsplash photo candidates for the places the app shows, to pick from by hand. Public data only.
+on:
+  workflow_dispatch:
+    inputs:
+      queries:
+        description: "Searches, separated by semicolons (blank: every place the app draws)"
+        required: false
+        default: ""
+      per:
+        description: "Candidates per search"
+        required: false
+        default: "5"
+  push:
+    branches: [feature/lv-redesign]
+    paths: [.github/workflows/city-photos.yml]
+concurrency:
+  group: city-photos
+  cancel-in-progress: false
+jobs:
+  search:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Search Unsplash
+        run: python3 .github/diagnose/unsplash_candidates.py
+        env:
+          UNSPLASH_ACCESS_KEY: ${{ secrets.UNSPLASH_ACCESS_KEY }}
+          QUERIES: ${{ github.event.inputs.queries }}
+          PER: ${{ github.event.inputs.per || '5' }}

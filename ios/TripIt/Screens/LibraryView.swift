@@ -19,6 +19,8 @@ struct LibraryView: View {
     @Environment(Store.self) private var store
     @Environment(Router.self) private var router
     @AppStorage("library.visit") private var visit: VisitFilter = .all
+    @AppStorage("library.cityLayout") private var cityLayout: CityLayout = .cards
+    @AppStorage("library.citySort") private var citySort: CitySort = .places
     @State private var query = ""
     @State private var sheet: LibrarySheet?
     @State private var newFolder = false
@@ -206,34 +208,49 @@ struct LibraryView: View {
     // MARK: Cities
 
     @ViewBuilder private var cities: some View {
-        let groups = store.cityGroups(shown)
+        let groups = citySort.apply(store.cityGroups(shown))
         if !groups.isEmpty {
             SectionHeading(title: "Cities") {
-                if groups.count > 4 {
-                    // Its own page: a long grid of cities reads better there than unfolded in the Library.
-                    Button { router.push(.cities) } label: {
-                        HStack(spacing: 4) {
-                            Text("See all \(groups.count)")
-                            Image(systemName: "chevron.right").font(Theme.text(.caption2))
+                HStack(spacing: 12) {
+                    LayoutToggle(layout: $cityLayout)
+                    if groups.count > (cityLayout == .list ? 5 : 1) {
+                        Button { router.push(.cities) } label: {
+                            Text("See all").font(Theme.text(.footnote)).foregroundStyle(Theme.link)
+                                .frame(minHeight: 44).contentShape(Rectangle())
                         }
-                        .font(Theme.text(.footnote)).foregroundStyle(Theme.link)
-                        .frame(minWidth: 44, minHeight: 44)
-                        .contentShape(Rectangle())
+                        .buttonStyle(PressStyle())
+                        .accessibilityLabel("See all \(groups.count) cities")
                     }
-                    .buttonStyle(PressStyle())
-                } else {
-                    Text("Sorted for you automatically").font(Theme.text(.caption)).foregroundStyle(Theme.tertiary)
                 }
             }
             .padding(.top, 36)
-            let visible = Array(groups.prefix(4))
-            LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], alignment: .leading, spacing: 16) {
-                ForEach(visible) { city in
-                    NavigationLink(value: Route.city(name: city.name)) { CityTile(city: city, trip: store.trip(forCity: city.name)) }
-                        .buttonStyle(PressStyle())
+            switch cityLayout {
+            case .cards:
+                // Every city, side by side: swipe across them.
+                ScrollView(.horizontal, showsIndicators: false) {
+                    LazyHStack(alignment: .top, spacing: 12) {
+                        ForEach(groups) { city in
+                            NavigationLink(value: Route.city(name: city.name)) {
+                                CityTile(city: city, trip: store.trip(forCity: city.name), pictureHeight: 150).frame(width: 158)
+                            }
+                            .buttonStyle(PressStyle())
+                        }
+                    }
+                    .scrollTargetLayout()
+                    .padding(.horizontal, 20)
+                }
+                .scrollTargetBehavior(.viewAligned)
+                .padding(.horizontal, -20)
+                .padding(.top, 4)
+            case .list:
+                VStack(spacing: 0) {
+                    ForEach(groups.prefix(5)) { city in
+                        NavigationLink(value: Route.city(name: city.name)) { CityRow(city: city, trip: store.trip(forCity: city.name)) }
+                            .buttonStyle(PressStyle())
+                        Divider().overlay(Theme.divider)
+                    }
                 }
             }
-            .padding(.top, 4)
         }
     }
 
@@ -381,38 +398,136 @@ struct TripRow: View {
 struct CityTile: View {
     let city: Store.CityGroup
     let trip: Trip?
-
-    /// Starred places first, then the best-known (most ratings), so the cover is a place worth showing.
-    private var coverURLs: [URL] {
-        city.places.filter { !$0.photos.isEmpty }
-            .sorted { ($0.mustDo ? 1 : 0, $0.ratingCount ?? 0) > ($1.mustDo ? 1 : 0, $1.ratingCount ?? 0) }
-            .prefix(4)
-            .compactMap { $0.photos.first?.url(width: 400) }
-    }
+    var pictureHeight: CGFloat = 110
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             Color.clear
-                .frame(height: 110)
+                .frame(height: pictureHeight)
                 .overlay {
-                    ChainImage(urls: coverURLs) { CityScene(city: city.name) }
+                    ChainImage(urls: city.coverURLs(width: 400)) { CityScene(city: city.name) }
                 }
                 .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                 .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             Text(city.name).font(Theme.serif(19)).foregroundStyle(Theme.label).lineLimit(1).padding(.top, 10)
-            HStack(spacing: 0) {
-                Text(Fmt.plural(city.places.count, "place") + " · ").foregroundStyle(Theme.secondary)
-                if let trip, let start = trip.startDate.flatMap(Fmt.day) {
-                    Text("Trip " + start.formatted(.dateTime.day().month(.abbreviated))).foregroundStyle(Theme.label)
-                } else if trip != nil {
-                    Text("On a trip").foregroundStyle(Theme.label)
-                } else {
-                    Text("No trip yet").foregroundStyle(Theme.secondary)
-                }
-            }
-            .font(Theme.text(.footnote)).lineLimit(1)
+            CityLine(city: city, trip: trip)
         }
         .contentShape(Rectangle())
+    }
+}
+
+/// "12 places · Trip 12 Dec" under a city's name.
+struct CityLine: View {
+    let city: Store.CityGroup
+    let trip: Trip?
+
+    var body: some View {
+        HStack(spacing: 0) {
+            Text(Fmt.plural(city.places.count, "place") + " · ").foregroundStyle(Theme.secondary)
+            if let trip, let start = trip.startDate.flatMap(Fmt.day) {
+                Text("Trip " + start.formatted(.dateTime.day().month(.abbreviated))).foregroundStyle(Theme.label)
+            } else if trip != nil {
+                Text("On a trip").foregroundStyle(Theme.label)
+            } else {
+                Text("No trip yet").foregroundStyle(Theme.secondary)
+            }
+        }
+        .font(Theme.text(.footnote)).lineLimit(1)
+    }
+}
+
+/// A city in the list view: a small picture, its name, and how many places and when the trip is.
+struct CityRow: View {
+    let city: Store.CityGroup
+    let trip: Trip?
+    var showCountry = false
+
+    var body: some View {
+        HStack(spacing: 14) {
+            Color.clear.frame(width: 56, height: 56)
+                .overlay { ChainImage(urls: city.coverURLs(width: 160)) { CityScene(city: city.name) } }
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(city.name + (showCountry && !city.country.isEmpty ? ", \(city.country)" : ""))
+                    .font(Theme.serif(18)).foregroundStyle(Theme.label).lineLimit(1)
+                CityLine(city: city, trip: trip)
+            }
+            Spacer(minLength: 8)
+            Image(systemName: "chevron.right").font(Theme.text(.caption)).foregroundStyle(Theme.tertiary)
+        }
+        .padding(.vertical, 10)
+        .contentShape(Rectangle())
+    }
+}
+
+extension Store.CityGroup {
+    /// Starred places first, then the best-known (most ratings), so the cover is a place worth showing.
+    func coverURLs(width: Int) -> [URL] {
+        places.filter { !$0.photos.isEmpty }
+            .sorted { ($0.mustDo ? 1 : 0, $0.ratingCount ?? 0) > ($1.mustDo ? 1 : 0, $1.ratingCount ?? 0) }
+            .prefix(4)
+            .compactMap { $0.photos.first?.url(width: width) }
+    }
+
+    /// When a place here was last saved.
+    var lastSaved: String { places.map(\.createdAt).max() ?? "" }
+}
+
+/// Cities as cards (swipe across) or as a list; remembered.
+enum CityLayout: String {
+    case cards, list
+}
+
+enum CitySort: String, CaseIterable, Identifiable {
+    case places, recent, name, country
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .places: "Most places"
+        case .recent: "Recent"
+        case .name: "A–Z"
+        case .country: "By country"
+        }
+    }
+
+    func apply(_ groups: [Store.CityGroup]) -> [Store.CityGroup] {
+        switch self {
+        case .places: groups
+        case .recent: groups.sorted { $0.lastSaved > $1.lastSaved }
+        case .name: groups.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        case .country: groups.sorted { ($0.country, $0.name) < ($1.country, $1.name) }
+        }
+    }
+}
+
+/// Two small icons, cards or list.
+struct LayoutToggle: View {
+    @Binding var layout: CityLayout
+
+    var body: some View {
+        HStack(spacing: 2) {
+            option(.cards, "square.grid.2x2", "Cards")
+            option(.list, "list.bullet", "List")
+        }
+        .padding(3)
+        .background(Theme.fill, in: Capsule())
+    }
+
+    private func option(_ value: CityLayout, _ symbol: String, _ name: String) -> some View {
+        Button {
+            withAnimation(.easeOut(duration: 0.2)) { layout = value }
+        } label: {
+            Image(systemName: symbol)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(layout == value ? Theme.accentInk : Theme.secondary)
+                .frame(width: 34, height: 28)
+                .background(layout == value ? Theme.accent : .clear, in: Capsule())
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(name)
+        .accessibilityAddTraits(layout == value ? .isSelected : [])
     }
 }
 
@@ -613,27 +728,35 @@ struct JobRow: View {
     }
 }
 
-/// Library → Cities → See all: every city you've saved places in, in the same cards, with Want to go / Been.
+/// Library → Cities → See all: every city you've saved places in, as cards or a list, sorted how you like.
 struct AllCitiesView: View {
     @Environment(Store.self) private var store
     @AppStorage("library.visit") private var visit: VisitFilter = .all
+    @AppStorage("library.cityLayout") private var layout: CityLayout = .cards
+    @AppStorage("library.citySort") private var sort: CitySort = .places
 
     var body: some View {
-        let groups = store.cityGroups(visit.apply(store.saved))
+        let groups = sort.apply(store.cityGroups(visit.apply(store.saved)))
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                Text("Cities").font(Theme.serif(34)).foregroundStyle(Theme.label)
-                Text((groups.count == 1 ? "1 city" : "\(groups.count) cities") + " · " + Fmt.plural(groups.reduce(0) { $0 + $1.places.count }, "place"))
-                    .font(Theme.text(.subheadline)).foregroundStyle(Theme.secondary).padding(.top, 4)
-                VisitPicker(visit: $visit, places: store.saved).padding(.top, 16)
-                LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)],
-                          alignment: .leading, spacing: 18) {
-                    ForEach(groups) { city in
-                        NavigationLink(value: Route.city(name: city.name)) { CityTile(city: city, trip: store.trip(forCity: city.name)) }
-                            .buttonStyle(PressStyle())
-                    }
+                HStack(alignment: .firstTextBaseline) {
+                    Text("Cities").font(Theme.serif(34)).foregroundStyle(Theme.label)
+                    Spacer()
+                    LayoutToggle(layout: $layout)
                 }
-                .padding(.top, 18)
+                Text((groups.count == 1 ? "1 city" : "\(groups.count) cities") + " · " + Fmt.plural(groups.reduce(0) { $0 + $1.places.count }, "place"))
+                    .font(Theme.text(.subheadline)).foregroundStyle(Theme.secondary).padding(.top, 2)
+                VisitPicker(visit: $visit, places: store.saved).padding(.top, 16)
+                sortChips.padding(.top, 10)
+                if sort == .country {
+                    let countries = Dictionary(grouping: groups) { $0.country.isEmpty ? "Elsewhere" : $0.country }
+                    ForEach(countries.keys.sorted(), id: \.self) { country in
+                        Text(country).font(Theme.serif(22)).foregroundStyle(Theme.label).padding(.top, 26)
+                        cities(countries[country] ?? [])
+                    }
+                } else {
+                    cities(groups).padding(.top, 8)
+                }
             }
             .padding(.horizontal, 20).padding(.bottom, 40)
         }
@@ -641,5 +764,44 @@ struct AllCitiesView: View {
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
     }
-}
 
+    private var sortChips: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(CitySort.allCases) { option in
+                    Button { withAnimation(.easeOut(duration: 0.2)) { sort = option } } label: {
+                        Text(option.label).font(Theme.text(.footnote, weight: sort == option ? .medium : .regular))
+                            .foregroundStyle(sort == option ? Theme.accentInk : Theme.label)
+                            .padding(.horizontal, 14).frame(height: 32)
+                            .background(sort == option ? Theme.accent : Theme.fill, in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private func cities(_ groups: [Store.CityGroup]) -> some View {
+        switch layout {
+        case .cards:
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)],
+                      alignment: .leading, spacing: 18) {
+                ForEach(groups) { city in
+                    NavigationLink(value: Route.city(name: city.name)) { CityTile(city: city, trip: store.trip(forCity: city.name)) }
+                        .buttonStyle(PressStyle())
+                }
+            }
+            .padding(.top, 10)
+        case .list:
+            LazyVStack(spacing: 0) {
+                ForEach(groups) { city in
+                    NavigationLink(value: Route.city(name: city.name)) {
+                        CityRow(city: city, trip: store.trip(forCity: city.name), showCountry: sort != .country)
+                    }
+                    .buttonStyle(PressStyle())
+                    Divider().overlay(Theme.divider)
+                }
+            }
+        }
+    }
+}

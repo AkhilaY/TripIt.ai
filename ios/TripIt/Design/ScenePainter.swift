@@ -337,8 +337,29 @@ enum SceneCache {
     }
 
     static func cached(_ scene: WorldScene, forMotion: Bool = false) -> UIImage? {
-        cache.object(forKey: key(scene, forMotion))
+        let cacheKey = key(scene, forMotion)
+        if let hit = cache.object(forKey: cacheKey) { return hit }
+        // Drawn on an earlier launch: reading it back is far quicker than drawing it again, so the Home header shows
+        // its picture straight away instead of a blank colour while the phone is busy starting up.
+        guard onDisk.contains(cacheKey as String), let data = try? Data(contentsOf: file(cacheKey)),
+              let image = UIImage(data: data, scale: UIScreen.main.scale) else { return nil }
+        cache.setObject(image, forKey: cacheKey, cost: data.count * 8)
+        return image
     }
+
+    /// One folder per build, so a scene redrawn in a new version is never shown from an old file.
+    private static let folder: URL = {
+        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "0"
+        let url = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("scenes-\(build)")
+        try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
+    }()
+
+    private static func file(_ key: NSString) -> URL { folder.appendingPathComponent("\(key).jpg") }
+
+    /// What earlier launches saved, read once, so a scene that was never saved costs no disk read.
+    private static let onDisk: Set<String> = Set(
+        ((try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []).map { ($0 as NSString).deletingPathExtension })
 
     /// Draws a scene that isn't cached yet, letting the screen update between scenes.
     static func draw(_ scene: WorldScene, forMotion: Bool = false) async -> UIImage? {
@@ -356,6 +377,10 @@ enum SceneCache {
         guard let image = renderer.uiImage else { return nil }
         let bytes = Int(image.size.width * image.size.height * image.scale * image.scale * 4)
         cache.setObject(image, forKey: cacheKey, cost: bytes)
+        let target = file(cacheKey)
+        if !FileManager.default.fileExists(atPath: target.path) {
+            Task.detached(priority: .utility) { try? image.jpegData(compressionQuality: 0.85)?.write(to: target, options: .atomic) }
+        }
         return image
     }
 

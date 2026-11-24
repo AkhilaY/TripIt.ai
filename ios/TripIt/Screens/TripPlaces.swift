@@ -116,6 +116,8 @@ struct TripPlaces: View {
             }
         }
         .listStyle(.insetGrouped)
+        .listSectionSpacing(14)  // the default gaps left the invite row floating between big empty bands
+        .contentMargins(.top, 4, for: .scrollContent)
         .tripBackground()
         .animation(.snappy, value: trip.places.map(\.id))
     }

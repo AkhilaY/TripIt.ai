@@ -312,10 +312,11 @@ struct StopRow: View {
     var body: some View {
         let category = Category(place.category)
         HStack(spacing: 12) {
+            // Ink on a light disc (light on dark in dark mode), so the order always reads.
             Text("\(number)")
-                .font(Theme.text(.caption)).foregroundStyle(.white)
+                .font(Theme.text(.caption, weight: .medium)).foregroundStyle(Theme.background)
                 .frame(width: 24, height: 24)
-                .background(category.color, in: Circle())
+                .background(Theme.label, in: Circle())
             PlaceThumb(place: place, size: 52)
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 4) {

@@ -241,8 +241,7 @@ enum PlaceGroup: String, CaseIterable, Identifiable {
 
 /// A restaurant's cuisine, as the server works it out (see backend/app/cuisine.py), with an emoji for its chip.
 enum Cuisine: String, CaseIterable, Identifiable {
-    case pizza, italian, indian, mexican, japanese, chinese, korean, thai, vietnamese, mediterranean, french, latin,
-         spanish, american, seafood, vegan
+    case pizza, italian, indian, mexican, japanese, chinese, korean, thai, vietnamese, southeastAsian = "southeast_asian", filipino, greek, turkish, middleEastern = "middle_eastern", mediterranean, french, spanish, peruvian, brazilian, caribbean, latin, african, american, steakhouse, brunch, seafood, vegan, halal, fusion
     var id: String { rawValue }
 
     var label: String {
@@ -256,13 +255,26 @@ enum Cuisine: String, CaseIterable, Identifiable {
         case .korean: "Korean"
         case .thai: "Thai"
         case .vietnamese: "Vietnamese"
+        case .southeastAsian: "Southeast Asian"
+        case .filipino: "Filipino"
+        case .greek: "Greek"
+        case .turkish: "Turkish"
+        case .middleEastern: "Middle Eastern"
         case .mediterranean: "Mediterranean"
         case .french: "French"
-        case .latin: "Latin"
         case .spanish: "Spanish"
+        case .peruvian: "Peruvian"
+        case .brazilian: "Brazilian"
+        case .caribbean: "Caribbean"
+        case .latin: "Latin American"
+        case .african: "African"
         case .american: "Burgers & BBQ"
+        case .steakhouse: "Steakhouse"
+        case .brunch: "Brunch"
         case .seafood: "Seafood"
         case .vegan: "Vegetarian"
+        case .halal: "Halal"
+        case .fusion: "Fusion"
         }
     }
 
@@ -277,13 +289,26 @@ enum Cuisine: String, CaseIterable, Identifiable {
         case .korean: "🥢"
         case .thai: "🍜"
         case .vietnamese: "🥖"
-        case .mediterranean: "🥙"
+        case .southeastAsian: "🍢"
+        case .filipino: "🍚"
+        case .greek: "🫒"
+        case .turkish: "🥙"
+        case .middleEastern: "🧆"
+        case .mediterranean: "🍋"
         case .french: "🥐"
-        case .latin: "🫓"
         case .spanish: "🥘"
+        case .peruvian: "🐟"
+        case .brazilian: "🥩"
+        case .caribbean: "🌴"
+        case .latin: "🫓"
+        case .african: "🍲"
         case .american: "🍔"
+        case .steakhouse: "🥩"
+        case .brunch: "🥞"
         case .seafood: "🦞"
         case .vegan: "🥗"
+        case .halal: "🍖"
+        case .fusion: "🍱"
         }
     }
 }

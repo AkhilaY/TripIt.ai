@@ -49,7 +49,11 @@ class ExtractedPlace(BaseModel):
     neighborhood: Optional[str] = Field(description="Neighborhood or district, if known.")
     address: Optional[str] = Field(description="Street address only if stated or shown in the video.")
     description: str = Field(description="One or two sentences on why the creator recommends it.")
-    recommended_items: list[str] = Field(description="Specific dishes, drinks or things to do mentioned.")
+    recommended_items: list[str] = Field(description=(
+        "Notes worth remembering from the post about this place, each a short standalone line in plain words, at most "
+        "5: a dish or drink named, what to see or do there, a time or detail that matters. Write the thing itself, "
+        "never an instruction: 'Cacio e pepe', 'Rooftop at sunset', 'Red Carpet Experience, 5–7:30 PM: interviews, "
+        "meet and greet'. Don't start with 'Try', 'Order' or 'Get'. Empty when the post only names the place."))
     price_hint: Optional[str] = Field(description="Price info if mentioned, e.g. '$', '$18 pizza', 'free'.")
     tips: Optional[str] = Field(description="Practical tips: reservations, best time, lines, cash only.")
     source: Literal["caption", "speech", "on_screen", "multiple"] = Field(

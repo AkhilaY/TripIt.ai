@@ -60,10 +60,19 @@ struct CityView: View {
                     .buttonStyle(PressStyle())
                     .plainRow(EdgeInsets(top: 0, leading: 20, bottom: 4, trailing: 20))
             } else if !isHome, !all.isEmpty {
+                // A modest outlined pill sized to its words, so it sits with the chips below rather than shouting.
                 Button { sheet = .newTrip(all.map(\.id), nil) } label: {
-                    Label("Plan a trip to \(city)", systemImage: "airplane")
+                    HStack(spacing: 8) {
+                        Image(systemName: "airplane").font(.system(size: 13, weight: .regular))
+                        Text("Plan a trip").font(Theme.text(.subheadline, weight: .medium))
+                    }
+                    .foregroundStyle(Theme.label)
+                    .padding(.horizontal, 16).frame(height: 38)
+                    .overlay(Capsule().strokeBorder(Theme.chipBorder))
+                    .contentShape(Capsule())
                 }
-                .buttonStyle(PrimaryButtonStyle())
+                .buttonStyle(PressStyle())
+                .accessibilityLabel("Plan a trip to \(city)")
                 .plainRow(EdgeInsets(top: 4, leading: 20, bottom: 4, trailing: 20))
             }
             VisitPicker(visit: $visit, places: all)

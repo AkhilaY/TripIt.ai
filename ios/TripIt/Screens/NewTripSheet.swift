@@ -12,8 +12,11 @@ struct NewTripSheet: View {
     @State private var city = ""
     @State private var name = ""
     @State private var days = 3
-    @State private var hasStart = false
-    @State private var start = Date()
+    @State private var startDate: Date?
+    @State private var endDate: Date?
+    @State private var pickingDates = false
+    private var hasStart: Bool { startDate != nil }
+    private var start: Date { startDate ?? Date() }
     @State private var aiPlans = true
     @State private var fillGaps = true
     @State private var preferences = ""
@@ -51,6 +54,16 @@ struct NewTripSheet: View {
             }
             .overlay { if busy { busyOverlay } }
             .interactiveDismissDisabled(busy)
+            .sheet(isPresented: $pickingDates) {
+                DateRangeSheet(start: $startDate, end: $endDate)
+                    .presentationDragIndicator(.visible)
+            }
+            .onChange(of: [startDate, endDate]) { _, _ in
+                // The number of days follows the dates you picked.
+                if let s = startDate, let e = endDate {
+                    days = min(21, max(1, (Calendar.current.dateComponents([.day], from: s, to: e).day ?? 0) + 1))
+                }
+            }
         }
         .onAppear(perform: setUp)
     }
@@ -91,12 +104,21 @@ struct NewTripSheet: View {
             }
             Section {
                 TextField(city.isEmpty ? "Trip name (optional)" : "\(city) trip", text: $name)
-                Stepper(value: $days, in: 1...21) {
-                    HStack { Text("Days"); Spacer(); Text("\(days)").fontWeight(.semibold) }
+                Button { pickingDates = true } label: {
+                    HStack {
+                        Text("Dates").foregroundStyle(Theme.label)
+                        Spacer()
+                        Text(startDate.map { s in Fmt.range(s, endDate ?? s) } ?? "No dates yet")
+                            .foregroundStyle(startDate == nil ? Theme.secondary : Theme.label)
+                        Image(systemName: "calendar").foregroundStyle(Theme.secondary)
+                    }
                 }
-                Toggle("Start date", isOn: $hasStart.animation())
-                if hasStart {
-                    DatePicker("Starts", selection: $start, displayedComponents: .date)
+                if startDate == nil {
+                    Stepper(value: $days, in: 1...21) {
+                        HStack { Text("Days"); Spacer(); Text("\(days)").fontWeight(.semibold) }
+                    }
+                } else {
+                    HStack { Text("Days"); Spacer(); Text("\(days)").fontWeight(.semibold) }
                 }
             } footer: {
                 EmptyView()

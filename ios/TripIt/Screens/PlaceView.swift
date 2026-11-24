@@ -20,6 +20,7 @@ struct PlaceView: View {
     @State private var allHours = false
     @State private var editingNote = false
     @FocusState private var noteFocused: Bool
+    @State private var noteSaved = false
 
     private var trip: TripDetail? { tripId.flatMap { store.tripDetails[$0] } }
 
@@ -75,6 +76,7 @@ struct PlaceView: View {
                     if p.suggested, let trip { suggestedBanner(p, trip).padding(.top, 16) }
                     visitToggle(p).padding(.top, 18)
                     whySaved(p).padding(.top, 24)
+                    if !p.recommendedItems.isEmpty { fromThePost(p, category).padding(.top, 24) }
                     mainAction(p, category).padding(.top, 20)
                     quietActions(p, category).padding(.top, 12)
                     if category == .event { eventSection(p).padding(.top, 28) }
@@ -92,6 +94,15 @@ struct PlaceView: View {
         .ignoresSafeArea(edges: .top)
         .background(Theme.background.ignoresSafeArea())
         .toolbarBackground(.hidden, for: .navigationBar)
+        .toolbar {
+            // Above the keyboard while writing a note: a way out that also saves it.
+            ToolbarItemGroup(placement: .keyboard) {
+                if noteFocused {
+                    Spacer()
+                    Button("Done") { saveNotes(p); noteFocused = false }.fontWeight(.medium)
+                }
+            }
+        }
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -211,7 +222,7 @@ struct PlaceView: View {
 
     private func whySaved(_ p: Place) -> some View {
         let reel = detail?.reels.first
-        let quote = p.tips ?? p.recommendedItems.first.map { "Order the \($0)." } ?? (p.summary.isEmpty ? nil : p.summary)
+        let quote = p.tips ?? (p.summary.isEmpty ? nil : p.summary)
         return VStack(alignment: .leading, spacing: 12) {
             Text("Why you saved it").font(Theme.serif(19)).foregroundStyle(Theme.label)
             Card(padding: 14) {
@@ -249,7 +260,22 @@ struct PlaceView: View {
                         .lineLimit(1...10)
                         .font(Theme.text(.subheadline))
                         .focused($noteFocused)
-                        .onChange(of: notes) { _, _ in scheduleNotesSave(p) }
+                        .onChange(of: notes) { _, _ in noteSaved = false; scheduleNotesSave(p) }
+                        .onChange(of: noteFocused) { _, focused in if !focused { saveNotes(p) } }
+                    HStack {
+                        if noteFocused {
+                            Text(noteSaved ? "Saved" : "Saves as you type")
+                                .font(Theme.text(.caption)).foregroundStyle(Theme.secondary)
+                                .animation(.easeOut(duration: 0.2), value: noteSaved)
+                            Spacer()
+                            Button("Done") { saveNotes(p); noteFocused = false }
+                                .font(Theme.text(.subheadline, weight: .medium)).foregroundStyle(Theme.label)
+                                .frame(minHeight: 32)
+                        } else if noteSaved {
+                            Text("Saved").font(Theme.text(.caption)).foregroundStyle(Theme.secondary)
+                        }
+                    }
+                    .padding(.top, 6)
                 }
             }
             if !editingNote && notes.isEmpty {
@@ -495,10 +521,23 @@ struct PlaceView: View {
         } catch { store.fail(error) }
     }
 
-    /// Today's hours (tap for the week), tips, and the price and what it's like.
+    /// What the post pointed out about this place, as notes to remember: a dish, a time, a tip, a price. Each
+    /// gets an icon for what it is, read from the words themselves.
+    private func fromThePost(_ p: Place, _ category: Category) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            sectionTitle("From the post")
+            Card {
+                ForEach(Array(p.recommendedItems.enumerated()), id: \.offset) { i, item in
+                    if i > 0 { Divider().overlay(Theme.border).padding(.leading, 48) }
+                    infoRow(PostNote.symbol(for: item, category: category), PostNote.tidy(item), nil).padding(14)
+                }
+            }
+        }
+    }
+
+    /// Today's hours (tap for the week), and the price and what it's like.
     private func goodToKnow(_ p: Place) -> some View {
-        let quoteUsed = p.tips
-        return VStack(alignment: .leading, spacing: 0) {
+        VStack(alignment: .leading, spacing: 0) {
             sectionTitle("Good to know")
             Card {
                 if let hours = p.openingHours, !hours.text.isEmpty {
@@ -531,14 +570,10 @@ struct PlaceView: View {
                 } else {
                     infoRow("clock", "No opening hours found", "Check Google Maps before you go").padding(14)
                 }
-                ForEach(p.recommendedItems.dropFirst(quoteUsed == nil ? 1 : 0), id: \.self) { item in
-                    Divider().overlay(Theme.border).padding(.leading, 48)
-                    infoRow("star", "Try the \(item)", nil).padding(14)
-                }
                 if let price = p.priceHint, !p.summary.isEmpty || price.count > 5 {
                     Divider().overlay(Theme.border).padding(.leading, 48)
                     infoRow("tag", [price, p.summary.isEmpty ? nil : p.summary].compactMap { $0 }.joined(separator: " · "), nil).padding(14)
-                } else if !p.summary.isEmpty, p.tips != nil || !p.recommendedItems.isEmpty {
+                } else if !p.summary.isEmpty, p.tips != nil {
                     Divider().overlay(Theme.border).padding(.leading, 48)
                     infoRow("text.quote", p.summary, nil).padding(14)
                 }
@@ -679,9 +714,13 @@ struct PlaceView: View {
     }
 
     private func saveNotes(_ p: Place) {
+        notesTask?.cancel()
         guard notesLoaded, notes != (place?.userNotes ?? p.userNotes) else { return }
         let text = notes
-        Task { await store.patch(p, ["user_notes": text]) }
+        Task {
+            await store.patch(p, ["user_notes": text])
+            noteSaved = true
+        }
     }
 
     private func clockDate(_ hhmm: String) -> Date? {
@@ -806,3 +845,31 @@ struct ReelThumb: View {
             }
     }
 }
+
+/// A note from a post ("Cacio e pepe", "Red Carpet Experience · 5–7:30 PM: interviews, meet and greet"): an icon for
+/// what kind of note it is, and the old "Try …" wording removed from notes saved before posts were read as notes.
+enum PostNote {
+    static func tidy(_ text: String) -> String {
+        var t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        for prefix in ["Try the ", "Try ", "Order the ", "Get the "] where t.hasPrefix(prefix) {
+            t = String(t.dropFirst(prefix.count))
+            break
+        }
+        return t.prefix(1).uppercased() + t.dropFirst()
+    }
+
+    static func symbol(for text: String, category: Category) -> String {
+        let t = text.lowercased()
+        if t.range(of: #"\d{1,2}(:\d{2})?\s?(am|pm)|\d{1,2}[–-]\d{1,2}(:\d{2})?\s?(am|pm)?|\bsunset|\bsunrise|\bmorning|\bnight\b|\bweekend|\bmonday|\btuesday|\bwednesday|\bthursday|\bfriday|\bsaturday|\bsunday"#,
+                   options: .regularExpression) != nil { return "clock" }
+        if t.range(of: #"[$€£¥₹]|\bfree\b|\bprice|\bcode\b|\bdiscount|\bcash"#, options: .regularExpression) != nil { return "tag" }
+        if t.range(of: #"\bbook\b|\breserv|\bline\b|\bqueue|\bwalk-?in|\bticket"#, options: .regularExpression) != nil { return "calendar" }
+        switch category {
+        case .food, .dessert: return "fork.knife"
+        case .cafe: return "cup.and.saucer"
+        case .drinks, .nightlife: return "wineglass"
+        default: return "sparkle"
+        }
+    }
+}
+

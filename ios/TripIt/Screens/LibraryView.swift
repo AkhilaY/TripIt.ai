@@ -374,22 +374,28 @@ struct TripRow: View {
     }
 }
 
-/// A city in the grid: two photos, its name and whether a trip's planned.
+/// A city in the grid: one picture (the best photo from its places, else its drawn scene), its name and whether a
+/// trip's planned.
 struct CityTile: View {
     let city: Store.CityGroup
     let trip: Trip?
 
+    /// Starred places first, then the best-known (most ratings), so the cover is a place worth showing.
+    private var coverURLs: [URL] {
+        city.places.filter { !$0.photos.isEmpty }
+            .sorted { ($0.mustDo ? 1 : 0, $0.ratingCount ?? 0) > ($1.mustDo ? 1 : 0, $1.ratingCount ?? 0) }
+            .prefix(4)
+            .compactMap { $0.photos.first?.url(width: 400) }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            let photos = Array(city.places.filter { !$0.photos.isEmpty }.prefix(2))
-            HStack(spacing: 2) {
-                if photos.isEmpty {
-                    CityScene(city: city.name).frame(height: 110)
-                } else {
-                    ForEach(photos) { p in PhotoBox(place: p, width: nil, height: 110, radius: 0) }
+            Color.clear
+                .frame(height: 110)
+                .overlay {
+                    ChainImage(urls: coverURLs) { CityScene(city: city.name) }
                 }
-            }
-            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             Text(city.name).font(Theme.serif(19)).foregroundStyle(Theme.label).lineLimit(1).padding(.top, 10)
             HStack(spacing: 0) {
                 Text(Fmt.plural(city.places.count, "place") + " · ").foregroundStyle(Theme.secondary)

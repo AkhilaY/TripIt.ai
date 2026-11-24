@@ -21,114 +21,111 @@ struct ProfileView: View {
     @AppStorage(Appearance.key) private var appearance: Appearance = .light
 
     var body: some View {
-        List {
-            if let me = session.me {
-                Section {
-                    Button { nameText = me.name; editingName = true } label: { HStack(spacing: 14) {
-                        Text(String((me.name.isEmpty ? me.email : me.name).prefix(1)).uppercased())
-                            .font(Theme.serif(26)).foregroundStyle(Theme.accentInk)
-                            .frame(width: 56, height: 56)
-                            .background(Theme.accent, in: Circle())
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(me.name.isEmpty ? "Add your name" : me.name).font(Theme.serif(22)).foregroundStyle(Theme.label)
-                            Text(me.email.isEmpty ? "Signed in with Apple" : me.email).font(Theme.text(.subheadline)).foregroundStyle(Theme.secondary)
-                        }
-                        Spacer()
-                        Image(systemName: "pencil").font(Theme.text(.footnote)).foregroundStyle(Theme.tertiary)
-                    } }
-                    .buttonStyle(PressStyle())
-                    .accessibilityHint("Change your name")
-                    .listRowBackground(Color.clear)
-                }
-            }
-            Section("You") {
-                Button { homeText = home?.city ?? ""; editingHome = true } label: {
-                    row("house.fill", Theme.green, "Home city", home.map { [$0.city, $0.country].filter { !$0.isEmpty }.joined(separator: ", ") } ?? "Discover looks here first")
-                }
-                NavigationLink(value: Route.imports) {
-                    row("tray.full.fill", Theme.blue, "Imports",
-                        store.jobs.contains(where: \.isActive) ? "Working on a post…" : "Posts you've shared and their status", chevron: false)
-                }
-                NavigationLink(value: Route.taste) {
-                    row("sparkles", Theme.gold, "Your travel taste", "Tailors your edits, briefings and concierge", chevron: false)
-                }
-            }
-            Section {
-                Picker("Appearance", selection: $appearance) {
-                    ForEach(Appearance.allCases) { Text($0.label).tag($0) }
-                }
-                .pickerStyle(.segmented)
-                .listRowBackground(Color.clear)
-                .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
-            } header: {
-                Text("Appearance")
-            } footer: {
-                EmptyView()
-            }
-            Section {
-                Toggle(isOn: Binding(get: { notifications == .authorized }, set: { on in
-                    Task {
-                        if on {
-                            if notifications == .denied {
-                                Links.open(URL(string: UIApplication.openSettingsURLString))
-                            } else {
-                                _ = await Push.shared.enable()
-                            }
-                        } else {
-                            Links.open(URL(string: UIApplication.openSettingsURLString))
-                        }
-                        notifications = await Push.shared.status()
+        ScrollView {
+            VStack(alignment: .leading, spacing: 30) {
+                if let me = session.me { identity(me) }
+                group("You") {
+                    Button { homeText = home?.city ?? ""; editingHome = true } label: {
+                        row("house", "Home city", home.map { [$0.city, $0.country].filter { !$0.isEmpty }.joined(separator: ", ") } ?? "Discover looks here first")
                     }
-                })) {
-                    row("bell.fill", Theme.red, "Import notifications", "When a shared post's places are saved")
+                    divider
+                    NavigationLink(value: Route.imports) {
+                        row("tray.full", "Imports", store.jobs.contains(where: \.isActive) ? "Working on a post…" : "Posts you've shared and their status", chevron: true)
+                    }
+                    divider
+                    NavigationLink(value: Route.taste) {
+                        row("sparkles", "Your travel taste", "Tailors your edits, briefings and concierge", chevron: true)
+                    }
                 }
-            } header: {
-                Text("Notifications")
-            } footer: {
-                if notifications == .denied { Text("Notifications are off for Travel Edit. Turn them on in Settings → Notifications → Travel Edit.") }
-            }
-            Section("Account") {
                 if let plan = store.plan, session.me?.isAdmin != true {
-                    Button { paywall = PaywallRequest() } label: {
-                        row("sparkles", Theme.gold, plan.isPlus ? "Travel Edit Plus" : "Free plan", planLine(plan), chevron: true)
+                    group("Plan") {
+                        Button { paywall = PaywallRequest() } label: {
+                            row("infinity", plan.isPlus ? "Travel Edit Plus" : "Free plan", planLine(plan), chevron: true)
+                        }
                     }
                 }
-                if session.me?.hasPassword != false {
-                    Button { changingPassword = true } label: { row("lock.fill", Theme.gray, "Change password", nil) }
-                }
-                if session.me?.isAdmin == true {
-                    NavigationLink(value: Route.people) {
-                        row("person.2.fill", Theme.indigo, "People", "Everyone with an account; reset a forgotten password", chevron: false)
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Appearance").font(Theme.serif(19)).foregroundStyle(Theme.label)
+                    HStack(spacing: 8) {
+                        ForEach(Appearance.allCases) { option in
+                            let on = appearance == option
+                            Button { withAnimation(.easeOut(duration: 0.2)) { appearance = option } } label: {
+                                Text(option.label)
+                                    .font(Theme.text(.subheadline, weight: on ? .medium : .regular))
+                                    .foregroundStyle(on ? Theme.accentInk : Theme.label)
+                                    .frame(maxWidth: .infinity, minHeight: 40)
+                                    .background(on ? Theme.accent : Color.clear, in: Capsule())
+                                    .overlay(Capsule().strokeBorder(on ? Color.clear : Theme.chipBorder))
+                                    .contentShape(Capsule())
+                            }
+                            .buttonStyle(PressStyle())
+                            .accessibilityAddTraits(on ? .isSelected : [])
+                        }
                     }
-                    NavigationLink(value: Route.usage) {
-                        row("dollarsign.circle.fill", Theme.green, "Usage & costs", "AI spend, budgets and daily limits", chevron: false)
+                }
+                group("Notifications", footer: notifications == .denied
+                      ? "Notifications are off for Travel Edit. Turn them on in Settings → Notifications → Travel Edit." : nil) {
+                    HStack(spacing: 14) {
+                        icon("bell")
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Import notifications").font(Theme.text(.body)).foregroundStyle(Theme.label)
+                            Text("When a shared post's places are saved").font(Theme.text(.caption)).foregroundStyle(Theme.secondary)
+                        }
+                        Spacer(minLength: 8)
+                        Toggle("Import notifications", isOn: Binding(get: { notifications == .authorized }, set: { on in
+                            Task {
+                                if on, notifications != .denied {
+                                    _ = await Push.shared.enable()
+                                } else {
+                                    Links.open(URL(string: UIApplication.openSettingsURLString))
+                                }
+                                notifications = await Push.shared.status()
+                            }
+                        }))
+                        .labelsHidden()
+                        .tint(Theme.ok)
                     }
+                    .padding(.horizontal, 16).padding(.vertical, 12)
                 }
-                Button { sendingFeedback = true } label: {
-                    row("bubble.left.and.text.bubble.right.fill", Theme.indigo, "Send feedback", "Something broken, confusing or missing? Tell us")
+                group("Account") {
+                    if session.me?.hasPassword != false {
+                        Button { changingPassword = true } label: { row("lock", "Change password", nil) }
+                        divider
+                    }
+                    if session.me?.isAdmin == true {
+                        NavigationLink(value: Route.people) {
+                            row("person.2", "People", "Everyone with an account; reset a forgotten password", chevron: true)
+                        }
+                        divider
+                        NavigationLink(value: Route.usage) {
+                            row("chart.bar", "Usage & costs", "AI spend, cost per save, budgets and limits", chevron: true)
+                        }
+                        divider
+                    }
+                    Button { sendingFeedback = true } label: {
+                        row("bubble.left", "Send feedback", "Something broken, confusing or missing? Tell us")
+                    }
+                    divider
+                    Button { confirmSignOut = true } label: { row("rectangle.portrait.and.arrow.right", "Sign out", nil) }
                 }
-                Button { confirmSignOut = true } label: {
-                    row("rectangle.portrait.and.arrow.right", Theme.danger, "Sign out", nil)
+                group("About") {
+                    Link(destination: AppConfig.baseURL.appendingPathComponent("support")) { row("questionmark.circle", "Help & support", nil, chevron: true) }
+                    divider
+                    Link(destination: AppConfig.baseURL.appendingPathComponent("privacy")) { row("hand.raised", "Privacy Policy", nil, chevron: true) }
+                    divider
+                    Link(destination: AppConfig.baseURL.appendingPathComponent("terms")) { row("doc.text", "Terms of Use", nil, chevron: true) }
+                }
+                VStack(alignment: .leading, spacing: 10) {
+                    Button("Delete account") { deleting = true }
+                        .font(Theme.text(.subheadline)).foregroundStyle(Theme.danger)
+                        .frame(minHeight: 36)
+                    Text("The Travel Edit \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "")")
+                        .font(Theme.text(.caption)).foregroundStyle(Theme.tertiary)
                 }
             }
-            Section("About") {
-                Link(destination: AppConfig.baseURL.appendingPathComponent("support")) {
-                    row("questionmark.circle.fill", Theme.blue, "Help & support", nil)
-                }
-                Link(destination: AppConfig.baseURL.appendingPathComponent("privacy")) {
-                    row("hand.raised.fill", Theme.gray, "Privacy Policy", nil)
-                }
-                Link(destination: AppConfig.baseURL.appendingPathComponent("terms")) {
-                    row("doc.text.fill", Theme.gray, "Terms of Use", nil)
-                }
-            }
-            Section {
-                Button("Delete account", role: .destructive) { deleting = true }
-            } footer: {
-                Text("The Travel Edit \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "") · \(AppConfig.baseURL.host ?? "")")
-            }
+            .padding(.horizontal, 20).padding(.top, 8).padding(.bottom, 40)
         }
-        .tripBackground()
+        .background(Theme.background.ignoresSafeArea())
         .navigationTitle("Profile")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
@@ -177,14 +174,61 @@ struct ProfileView: View {
         return (left == 1 ? "1 video save left" : "\(left) video saves left") + " this month · Upgrade to Plus"
     }
 
-    private func row(_ symbol: String, _ color: Color, _ title: String, _ subtitle: String?, chevron: Bool = false) -> some View {
-        HStack(spacing: 12) {
-            SymbolTile(symbol: symbol, color: color)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title).foregroundStyle(Theme.label)
-                if let subtitle { Text(subtitle).font(Theme.text(.caption)).foregroundStyle(Theme.secondary) }
+    // MARK: Pieces
+
+    /// Your initial, name and email; tap to change your name.
+    private func identity(_ me: Me) -> some View {
+        Button { nameText = me.name; editingName = true } label: {
+            HStack(spacing: 16) {
+                Text(String((me.name.isEmpty ? me.email : me.name).prefix(1)).uppercased())
+                    .font(Theme.serif(28)).foregroundStyle(Theme.accentInk)
+                    .frame(width: 64, height: 64)
+                    .background(Theme.accent, in: Circle())
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(me.name.isEmpty ? "Add your name" : me.name).font(Theme.serif(26)).foregroundStyle(Theme.label)
+                    Text(me.email.isEmpty ? "Signed in with Apple" : me.email).font(Theme.text(.subheadline)).foregroundStyle(Theme.secondary)
+                }
+                Spacer(minLength: 8)
+                Text("Edit").font(Theme.text(.subheadline)).foregroundStyle(Theme.secondary)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(PressStyle())
+        .accessibilityHint("Change your name")
+        .padding(.top, 8)
+    }
+
+    /// A titled card of rows, as elsewhere in the app.
+    private func group<Content: View>(_ title: String, footer: String? = nil, @ViewBuilder _ content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(title).font(Theme.serif(19)).foregroundStyle(Theme.label)
+            VStack(spacing: 0) { content() }
+                .buttonStyle(PressStyle())
+                .background(Theme.cell, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            if let footer {
+                Text(footer).font(Theme.text(.caption)).foregroundStyle(Theme.secondary).fixedSize(horizontal: false, vertical: true)
             }
         }
+    }
+
+    private var divider: some View { Divider().overlay(Theme.border).padding(.leading, 54) }
+
+    private func icon(_ symbol: String) -> some View {
+        Image(systemName: symbol).font(.system(size: 17, weight: .light)).foregroundStyle(Theme.label).frame(width: 24)
+    }
+
+    private func row(_ symbol: String, _ title: String, _ subtitle: String?, chevron: Bool = false) -> some View {
+        HStack(spacing: 14) {
+            icon(symbol)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(Theme.text(.body)).foregroundStyle(Theme.label)
+                if let subtitle { Text(subtitle).font(Theme.text(.caption)).foregroundStyle(Theme.secondary).multilineTextAlignment(.leading) }
+            }
+            Spacer(minLength: 8)
+            if chevron { Image(systemName: "chevron.right").font(.system(size: 12, weight: .regular)).foregroundStyle(Theme.tertiary) }
+        }
+        .padding(.horizontal, 16).padding(.vertical, 13)
+        .contentShape(Rectangle())
     }
 }
 

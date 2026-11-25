@@ -476,6 +476,7 @@ struct PlaceMenu: Codable {
 
 struct TripEdits: Codable {
     var tripId: String
+    var tripName: String?
     var edits: [TripEdit]
     var curatedBy: String?
     var stale: Bool

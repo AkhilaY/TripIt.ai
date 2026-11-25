@@ -46,18 +46,11 @@ struct EditView: View {
     private func content(_ edit: TripEdit) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                let cover = edit.coverURLs(width: 1200)
-                if !cover.isEmpty {
-                    ChainImage(urls: cover) { Theme.raised }
-                        .frame(height: 230)
-                        .frame(maxWidth: .infinity)
-                        .clipped()
-                    if let scene = edit.creditedScene {
-                        Text(scene.credit).font(Theme.text(.caption2)).foregroundStyle(Theme.tertiary)
-                            .frame(maxWidth: .infinity, alignment: .trailing).padding(.horizontal, 20).padding(.top, 6)
-                    }
-                }
                 VStack(alignment: .leading, spacing: 8) {
+                    if let name = edits?.tripName, !name.isEmpty {
+                        Text("Today's edit · \(name)".uppercased()).font(Theme.text(.caption2, weight: .medium)).kerning(1.8)
+                            .foregroundStyle(Theme.secondary)
+                    }
                     Text(edit.title).font(Theme.serif(30)).foregroundStyle(Theme.label)
                     if !edit.dek.isEmpty {
                         Text(edit.dek).font(Theme.text(.body)).foregroundStyle(Theme.secondary).fixedSize(horizontal: false, vertical: true)
@@ -67,9 +60,18 @@ struct EditView: View {
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 18)
-                VStack(spacing: 14) {
+                // Where the places are, numbered as in the list (when at least two are on the map).
+                let stops = edit.entries.enumerated().compactMap { i, item in
+                    item.latitude.flatMap { lat in item.longitude.map { RouteSketch.Stop(number: i + 1, latitude: lat, longitude: $0) } }
+                }
+                if stops.count >= 2 {
+                    RouteSketch(stops: stops).padding(.horizontal, 20).padding(.top, 22)
+                }
+                VStack(spacing: 0) {
+                    Divider().overlay(Theme.divider)
                     ForEach(edit.entries.indices, id: \.self) { index in
                         entry(edit.entries[index], number: index + 1, edit: edit)
+                        Divider().overlay(Theme.divider)
                     }
                 }
                 .padding(.horizontal, 20)
@@ -105,29 +107,25 @@ struct EditView: View {
         }
     }
 
+    /// One place, like a line in a magazine's contents: a big number, the name, where, the note, then its source and
+    /// whether it's saved. No photo, so nothing waits to load.
     private func entry(_ item: EditItem, number: Int, edit: TripEdit) -> some View {
         let saved = item.saved ? item.placeId.flatMap { store.place($0) } : nil
-        return Card {
-            Button { open(item, edit: edit) } label: {
-                VStack(alignment: .leading, spacing: 0) {
-                    if let photo = item.photo {
-                        RemoteImage(url: photo.url(width: 900)) { Theme.raised }
-                            .frame(height: 170)
-                            .frame(maxWidth: .infinity)
-                            .clipped()
-                    }
-                    VStack(alignment: .leading, spacing: 5) {
-                        HStack(alignment: .firstTextBaseline, spacing: 10) {
-                            Text(String(format: "%02d", number)).font(Theme.serif(22)).foregroundStyle(Theme.gold)
-                            Eyebrow(text: [Category(item.category).label, item.neighborhood].compactMap { $0 }.joined(separator: " · "),
-                                    color: Theme.secondary)
-                        }
+        return HStack(alignment: .top, spacing: 16) {
+            Text(String(format: "%02d", number)).font(Theme.serif(30)).foregroundStyle(Theme.tertiary)
+                .frame(width: 40, alignment: .leading)
+            VStack(alignment: .leading, spacing: 0) {
+                Button { open(item, edit: edit) } label: {
+                    VStack(alignment: .leading, spacing: 4) {
                         HStack(spacing: 5) {
-                            Text(item.name).font(Theme.serif(21)).foregroundStyle(Theme.label)
+                            Text(item.name).font(Theme.serif(20)).foregroundStyle(Theme.label).multilineTextAlignment(.leading)
                             if saved?.mustDo == true { Image(systemName: "star.fill").font(Theme.text(.caption)).foregroundStyle(Theme.gold) }
                         }
+                        let meta = [Category(item.category).label, item.neighborhood].compactMap { $0 }.joined(separator: " · ")
+                        if !meta.isEmpty { Text(meta).font(Theme.text(.footnote)).foregroundStyle(Theme.secondary) }
                         if !item.note.isEmpty {
-                            Text(item.note).font(Theme.text(.subheadline)).foregroundStyle(Theme.secondary).fixedSize(horizontal: false, vertical: true)
+                            Text(item.note).font(Theme.text(.subheadline)).foregroundStyle(Theme.label.opacity(0.8))
+                                .fixedSize(horizontal: false, vertical: true).padding(.top, 2)
                         }
                         if !item.saved, let rating = item.rating {
                             Text(String(format: "★ %.1f", rating) + (item.ratingCount.map { " · \(Fmt.count($0)) reviews" } ?? ""))
@@ -135,36 +133,35 @@ struct EditView: View {
                         }
                         if let saved { OpenStatusText(hours: saved.openingHours).font(Theme.text(.footnote)) }
                     }
-                    .padding(14)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(PressStyle())
-            Divider().overlay(Theme.divider)
-            HStack(spacing: 12) {
-                if let source = item.source {
-                    if let link = source.url, let url = URL(string: link) {
-                        Button { Links.open(url) } label: { Text("via \(source.name)").lineLimit(1) }
-                            .font(Theme.text(.footnote)).foregroundStyle(Theme.link)
+                .buttonStyle(PressStyle())
+                HStack(spacing: 12) {
+                    if let source = item.source {
+                        if let link = source.url, let url = URL(string: link) {
+                            Button { Links.open(url) } label: { Text("via \(source.name)").lineLimit(1) }
+                                .font(Theme.text(.footnote)).foregroundStyle(Theme.link)
+                        } else {
+                            Text(item.saved ? source.name : "via \(source.name)").font(Theme.text(.footnote)).foregroundStyle(Theme.secondary).lineLimit(1)
+                        }
+                    }
+                    Spacer(minLength: 8)
+                    if item.saved {
+                        Label("In your library", systemImage: "checkmark").font(Theme.text(.footnote)).foregroundStyle(Theme.ok)
                     } else {
-                        Text(item.saved ? source.name : "via \(source.name)").font(Theme.text(.footnote)).foregroundStyle(Theme.secondary).lineLimit(1)
+                        Button { Task { await save(item, edit: edit) } } label: {
+                            if saving.contains(item.id) { ProgressView().controlSize(.small) } else { Label("Save", systemImage: "bookmark") }
+                        }
+                        .buttonStyle(PrimaryButtonStyle(tinted: true, compact: true)).fixedSize()
+                        .disabled(saving.contains(item.id))
                     }
                 }
-                Spacer(minLength: 8)
-                if item.saved {
-                    Label("In your library", systemImage: "checkmark").font(Theme.text(.footnote)).foregroundStyle(Theme.ok)
-                } else {
-                    Button { Task { await save(item, edit: edit) } } label: {
-                        if saving.contains(item.id) { ProgressView().controlSize(.small) } else { Label("Save", systemImage: "bookmark") }
-                    }
-                    .buttonStyle(PrimaryButtonStyle(tinted: true, compact: true)).fixedSize()
-                    .disabled(saving.contains(item.id))
-                }
+                .buttonStyle(PressStyle())
+                .padding(.top, 10)
             }
-            .buttonStyle(PressStyle())
-            .padding(.horizontal, 14).padding(.vertical, 10)
         }
+        .padding(.vertical, 18)
     }
 
     private func open(_ item: EditItem, edit: TripEdit) {

@@ -13,6 +13,7 @@ struct HomeEdit: Identifiable, Hashable {
     var city = ""  // for the drawn stand-in while (or if) there's no photo
     var fallbacks: [PlacePhoto] = []  // tried in turn if the cover doesn't load
     var urls: [URL]?  // a trip edit's photos in the order to try (see TripEdit.coverURLs)
+    var preview = ""  // its first few places' names, for the card
     var tripId: String?
     var tripEditId: String?
 
@@ -47,7 +48,7 @@ enum HomeEdits {
             let photos = picked.compactMap(\.photos.first)
             out.append(HomeEdit(id: id, caption: "\(caption) · \(Fmt.plural(places.count, "place"))", title: title, note: note,
                                 placeIds: picked.map(\.id), cover: photos.first, city: picked.first?.city ?? caption,
-                                fallbacks: Array(photos.dropFirst().prefix(3))))
+                                fallbacks: Array(photos.dropFirst().prefix(3)), preview: Self.preview(picked.map(\.name))))
         }
 
         // The city most of your saves are in stands in for home until you set one.
@@ -94,9 +95,14 @@ enum HomeEdits {
             picks.insert(HomeEdit(id: "open-now", caption: "Right now · \(Fmt.plural(open.count, "place"))", title: "Open now near you",
                                   note: "Saved places that are open as you read this, the closest first.", placeIds: ids,
                                   cover: open.filter { !$0.photos.isEmpty }.min { $0.id < $1.id }?.photos.first,  // not the nearest: it changes as you move
-                                  city: open.first?.city ?? ""), at: 0)
+                                  city: open.first?.city ?? "", preview: Self.preview(open.map(\.name))), at: 0)
         }
         return picks
+    }
+
+    /// "First Cliff Walk, Lake St. Moritz, Rigi Kulm…"
+    static func preview(_ names: [String]) -> String {
+        names.prefix(3).joined(separator: ", ") + (names.count > 3 ? "…" : "")
     }
 
     /// Starred first, then a daily shuffle of the rest, eight at most.
@@ -114,7 +120,7 @@ enum HomeEdits {
             HomeEdit(id: "trip-\(trip.id)-\(edit.id)", caption: "\(trip.name) · \(Fmt.plural(edit.entries.count, "place"))",
                      title: edit.title, note: edit.dek, placeIds: [], cover: edit.coverCandidates.first, city: trip.city,
                      fallbacks: Array(edit.coverCandidates.dropFirst()), urls: edit.coverURLs(width: 800),
-                     tripId: trip.id, tripEditId: edit.id)
+                     preview: preview(edit.entries.map(\.name)), tripId: trip.id, tripEditId: edit.id)
         }
     }
 }
@@ -124,20 +130,14 @@ struct HomeEditCard: View {
     let edit: HomeEdit
     let fallback: Place?
     var width: CGFloat = 270
-    var height: CGFloat = 330
+    var height: CGFloat = 260
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Color.clear
+            // No photo: Google's links for suggested places stop working, so edits are set in type instead.
+            EditTile(caption: edit.caption, title: edit.title, preview: edit.preview, seed: edit.id)
                 .frame(width: width, height: height)
-                .overlay {
-                    ChainImage(urls: edit.urls ?? ([edit.cover].compactMap { $0 } + edit.fallbacks).compactMap { $0.url(width: 800) }) {
-                        CityScene(city: edit.city.isEmpty ? (fallback?.city ?? "") : edit.city)
-                    }
-                }
                 .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-            Text(edit.caption).font(Theme.text(.subheadline)).foregroundStyle(Theme.secondary).lineLimit(1).padding(.top, 14)
-            Text(edit.title).font(Theme.serif(20)).foregroundStyle(Theme.label).lineLimit(2).padding(.top, 4)
         }
         .frame(width: width, alignment: .leading)
         .contentShape(Rectangle())

@@ -228,20 +228,10 @@ struct EditCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            ZStack(alignment: .topLeading) {
-                ChainImage(urls: edit.coverURLs(width: 600)) {
-                    CityScene(city: edit.entries.first?.city ?? "")
-                }
+            EditTile(caption: Fmt.plural(edit.entries.count, "place") + (edit.newCount > 0 ? " · \(edit.newCount) new" : ""),
+                     title: edit.title, seed: edit.id, titleSize: 20)
                 .frame(width: 220, height: 160)
                 .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                if edit.newCount > 0 {
-                    Text("\(edit.newCount) new").font(Theme.text(.caption)).foregroundStyle(.white)
-                        .padding(.horizontal, 8).padding(.vertical, 4)
-                        .background(.black.opacity(0.45), in: Capsule())
-                        .padding(8)
-                }
-            }
-            Text(edit.title).font(Theme.serif(19)).foregroundStyle(Theme.label).lineLimit(2).padding(.top, 6)
             Text(edit.dek).font(Theme.text(.footnote)).foregroundStyle(Theme.secondary).lineLimit(2)
         }
         .frame(width: 220, alignment: .leading)

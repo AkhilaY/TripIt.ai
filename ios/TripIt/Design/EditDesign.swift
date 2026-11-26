@@ -25,13 +25,25 @@ struct RouteSketch: View {
             guard !stops.isEmpty else { return }
             // Longitude shrinks towards the poles; scale it so distances look right, then fit everything in.
             let lats = stops.map(\.latitude), lons = stops.map(\.longitude)
-            let k = cos(((lats.min()! + lats.max()!) / 2) * .pi / 180)
-            let xs = lons.map { $0 * k }, ys = lats.map { -$0 }
-            let spanX = max(xs.max()! - xs.min()!, 0.002), spanY = max(ys.max()! - ys.min()!, 0.002)
-            let inset: CGFloat = 30
-            let scale = min((size.width - inset * 2) / spanX, (size.height - inset * 2) / spanY)
-            let cx = (xs.max()! + xs.min()!) / 2, cy = (ys.max()! + ys.min()!) / 2
-            let points = zip(xs, ys).map { CGPoint(x: size.width / 2 + ($0 - cx) * scale, y: size.height / 2 + ($1 - cy) * scale) }
+            let midLat: Double = (lats.min()! + lats.max()!) / 2
+            let k: Double = cos(midLat * Double.pi / 180)
+            let xs: [Double] = lons.map { $0 * k }
+            let ys: [Double] = lats.map { -$0 }
+            let spanX: Double = max(xs.max()! - xs.min()!, 0.002)
+            let spanY: Double = max(ys.max()! - ys.min()!, 0.002)
+            let inset = 30.0
+            let fitX: Double = (Double(size.width) - inset * 2) / spanX
+            let fitY: Double = (Double(size.height) - inset * 2) / spanY
+            let scale: Double = min(fitX, fitY)
+            let cx: Double = (xs.max()! + xs.min()!) / 2
+            let cy: Double = (ys.max()! + ys.min()!) / 2
+            let midX = Double(size.width) / 2, midY = Double(size.height) / 2
+            var points: [CGPoint] = []
+            for (x, y) in zip(xs, ys) {
+                let px: Double = midX + (x - cx) * scale
+                let py: Double = midY + (y - cy) * scale
+                points.append(CGPoint(x: px, y: py))
+            }
 
             var route = Path()
             route.addLines(points)

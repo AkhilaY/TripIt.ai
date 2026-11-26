@@ -15,8 +15,7 @@ struct MainTabs: View {
         var items: [BottomBar.Item] = [
             .init(tab: .home, title: "Home", symbol: "house"),
             .init(tab: .library, title: "Library", symbol: "bookmark"),
-            .init(tab: .calendar, title: "Calendar", symbol: "calendar"),
-            .init(tab: .bookings, title: "Bookings", symbol: "ticket"),
+            .init(tab: .calendar, title: "Plans", symbol: "calendar"),  // Calendar and Bookings in one
         ]
         if !store.featuresOff.contains("concierge") { items.append(.init(tab: .concierge, title: "Concierge", symbol: "sparkles")) }
         return items
@@ -27,7 +26,7 @@ struct MainTabs: View {
             ZStack {
                 tabStack(.home) { NavigationStack(path: $router.home) { HomeView().withRoutes() } }
                 tabStack(.library) { NavigationStack(path: $router.library) { LibraryView().withRoutes() } }
-                tabStack(.calendar) { NavigationStack(path: $router.calendar) { CalendarView(isTab: true).withRoutes() } }
+                tabStack(.calendar) { NavigationStack(path: $router.calendar) { PlansView().withRoutes() } }
                 tabStack(.bookings) { NavigationStack(path: $router.bookings) { BookingsView().withRoutes() } }
                 if !store.featuresOff.contains("concierge") {
                     tabStack(.concierge) { NavigationStack(path: $router.concierge) { ConciergeView().withRoutes() } }

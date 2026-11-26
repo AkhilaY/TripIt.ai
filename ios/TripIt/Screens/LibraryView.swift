@@ -21,6 +21,9 @@ struct LibraryView: View {
     @AppStorage("library.visit") private var visit: VisitFilter = .all
     @AppStorage("library.cityLayout") private var cityLayout: CityLayout = .cards
     @AppStorage("library.citySort") private var citySort: CitySort = .places
+    @AppStorage("library.section") private var section: LibrarySection = .places
+    @State private var cityFilter: String?
+    @State private var postFilter = "all"
     @State private var query = ""
     @State private var sheet: LibrarySheet?
     @State private var newFolder = false
@@ -50,10 +53,12 @@ struct LibraryView: View {
                     ForEach(store.jobs.filter(\.isActive)) { job in
                         ImportProgressCard(job: job).padding(.top, 14)
                     }
-                    aroundHome.padding(.top, 20)
-                    trips
-                    cities
-                    lists
+                    sectionPicker.padding(.top, 16)
+                    switch section {
+                    case .places: placesSection
+                    case .lists: listsSection
+                    case .posts: postsSection
+                    }
                 }
             }
             .padding(.horizontal, 20)
@@ -152,6 +157,118 @@ struct LibraryView: View {
                 Divider().overlay(Theme.divider)
             }
         }
+    }
+
+    // MARK: Places, Lists, Posts
+
+    private var sectionPicker: some View {
+        HStack(spacing: 0) {
+            ForEach(LibrarySection.allCases) { option in
+                Button { withAnimation(.easeInOut(duration: 0.2)) { section = option } } label: {
+                    Text(option.rawValue).font(Theme.text(.subheadline, weight: section == option ? .medium : .regular))
+                        .foregroundStyle(section == option ? Theme.label : Theme.secondary)
+                        .frame(maxWidth: .infinity).frame(height: 36)
+                        .background(section == option ? Theme.background : .clear, in: Capsule())
+                        .shadow(color: .black.opacity(section == option ? 0.06 : 0), radius: 2, y: 1)
+                        .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(3)
+        .background(Theme.fill, in: Capsule())
+        .sensoryFeedback(.selection, trigger: section)
+    }
+
+    /// Every saved place, newest first, narrowed by city with a row of chips.
+    @ViewBuilder private var placesSection: some View {
+        let groups = store.cityGroups(shown)
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                FilterChip(label: "All cities", count: shown.count, isOn: cityFilter == nil) { cityFilter = nil }
+                ForEach(groups) { group in
+                    FilterChip(label: group.name, count: group.places.count, isOn: cityFilter == group.id) {
+                        cityFilter = cityFilter == group.id ? nil : group.id
+                    }
+                }
+            }
+        }
+        .padding(.top, 12)
+        .sensoryFeedback(.selection, trigger: cityFilter)
+        let places = shown.filter { cityFilter == nil || Store.cityKey($0.city) == cityFilter }.sorted { $0.createdAt > $1.createdAt }
+        LazyVStack(spacing: 0) {
+            ForEach(places) { place in
+                NavigationLink(value: Route.place(id: place.id, tripId: nil)) {
+                    PlaceRow(place: place).padding(.vertical, 6)
+                }
+                .buttonStyle(PressStyle())
+                .placeActions(place, onDelete: { Task { await store.deleteWithUndo(place) } }, sheet: $sheet)
+                Divider().overlay(Theme.divider)
+            }
+        }
+        .padding(.top, 8)
+    }
+
+    /// Lists as cards, in the same type-only style as the edits.
+    @ViewBuilder private var listsSection: some View {
+        HStack {
+            Text("Your lists · \(store.folders.count)".uppercased()).font(Theme.text(.caption2, weight: .medium)).kerning(1.6)
+                .foregroundStyle(Theme.secondary)
+            Spacer()
+            AccentTextButton(title: "New list") { folderName = ""; newFolder = true }
+        }
+        .padding(.top, 18)
+        if store.folders.isEmpty {
+            Text("Make lists for anything: date night, early risers, best croissants. A place can be on several.")
+                .font(Theme.text(.subheadline)).foregroundStyle(Theme.secondary).padding(.top, 8)
+        }
+        LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], spacing: 10) {
+            ForEach(store.folders) { folder in
+                NavigationLink(value: Route.folder(id: folder.id)) {
+                    EditTile(caption: Fmt.plural(folder.placeCount, "place"), title: folder.name, preview: listCities(folder),
+                             seed: folder.id, titleSize: 19)
+                        .frame(height: 150)
+                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                }
+                .buttonStyle(PressStyle())
+            }
+        }
+        .padding(.top, 10)
+    }
+
+    private func listCities(_ folder: Folder) -> String {
+        let cities = Array(Set(store.saved.filter { $0.folderIds.contains(folder.id) && !$0.city.isEmpty }.map(\.city))).sorted()
+        return cities.count <= 3 ? cities.joined(separator: ", ") : "\(cities.count) cities"
+    }
+
+    /// The posts you've saved from, newest first: each opens the places it gave you.
+    @ViewBuilder private var postsSection: some View {
+        let platforms = [("all", "All"), ("tiktok", "TikTok"), ("instagram", "Instagram"), ("youtu", "YouTube")]
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(platforms.indices, id: \.self) { i in
+                    FilterChip(label: platforms[i].1, isOn: postFilter == platforms[i].0) { postFilter = platforms[i].0 }
+                }
+            }
+        }
+        .padding(.top, 12)
+        let posts = store.jobs.filter { !$0.isActive && (postFilter == "all" || $0.url.contains(postFilter)) }
+            .sorted { $0.createdAt > $1.createdAt }
+        if posts.isEmpty {
+            Text("Posts you share to The Travel Edit appear here, with the places each one gave you.")
+                .font(Theme.text(.subheadline)).foregroundStyle(Theme.secondary).padding(.top, 14)
+        }
+        LazyVStack(spacing: 0) {
+            ForEach(posts) { job in
+                if let reelId = job.reelId, job.status != "failed" {
+                    NavigationLink(value: Route.reel(id: reelId)) { PostRow(job: job) }.buttonStyle(PressStyle())
+                } else {
+                    JobRow(job: job).padding(.vertical, 10)
+                }
+                Divider().overlay(Theme.divider)
+            }
+        }
+        .padding(.top, 8)
     }
 
     // MARK: Around home
@@ -725,6 +842,33 @@ struct JobRow: View {
         if url.contains("instagram") { return "camera" }
         if url.contains("youtu") { return "play.rectangle" }
         return "link"
+    }
+}
+
+enum LibrarySection: String, CaseIterable, Identifiable {
+    case places = "Places", lists = "Lists", posts = "Posts"
+    var id: String { rawValue }
+}
+
+/// A saved post: who posted it, how many places it gave you, and when.
+struct PostRow: View {
+    let job: Job
+
+    var body: some View {
+        HStack(spacing: 12) {
+            SymbolTile(symbol: JobRow.symbol(for: job.url), color: Theme.indigo)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(job.reel?.uploader.map { $0.hasPrefix("@") ? $0 : "@\($0)" } ?? job.reel?.title ?? "A saved post")
+                    .font(Theme.text(.body)).foregroundStyle(Theme.label).lineLimit(1)
+                Text([Fmt.plural(job.addedPlaces, "place"), Fmt.parseISO(job.createdAt)?.formatted(.relative(presentation: .named))]
+                    .compactMap { $0 }.joined(separator: " · "))
+                    .font(Theme.text(.footnote)).foregroundStyle(Theme.secondary)
+            }
+            Spacer(minLength: 8)
+            Image(systemName: "chevron.right").font(Theme.text(.caption)).foregroundStyle(Theme.tertiary)
+        }
+        .padding(.vertical, 10)
+        .contentShape(Rectangle())
     }
 }
 

@@ -6,6 +6,7 @@ import UIKit
 struct CalendarView: View {
     /// The Calendar tab (with your profile button), rather than a screen pushed from elsewhere.
     var isTab = false
+    var embedded = false  // inside Plans, which has its own header
     @Environment(Store.self) private var store
     @Environment(Router.self) private var router
     @State private var result: CalendarResult? = DiskCache.load("calendar")
@@ -44,7 +45,7 @@ struct CalendarView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                if isTab { tabHeader }
+                if isTab && !embedded { tabHeader }
                 if let error, result == nil {
                     EmptyState(symbol: "wifi.slash", title: "Couldn't load your calendar", text: error) {
                         Button("Try again") { Task { await load() } }.buttonStyle(PrimaryButtonStyle(tinted: true)).frame(maxWidth: 200)
@@ -416,7 +417,7 @@ private struct MonthGrid: View {
 
 /// Calendar sync: a private link Apple or Google Calendar subscribes to, so events, bookings and plans keep
 /// flowing in.
-private struct CalendarSyncSheet: View {
+struct CalendarSyncSheet: View {
     @State var feed: CalendarFeed?
     let onChange: (CalendarFeed?) -> Void
     @Environment(Store.self) private var store
@@ -482,7 +483,7 @@ private struct CalendarSyncSheet: View {
 }
 
 /// When a saved event happens: its date, an optional start time, and an end date for something that runs a few days.
-private struct EventDateSheet: View {
+struct EventDateSheet: View {
     let item: CalendarItem
     let onSaved: () -> Void
     @Environment(Store.self) private var store

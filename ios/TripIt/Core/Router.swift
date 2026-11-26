@@ -138,7 +138,7 @@ final class Router {
         case "bookings":
             if let trip = param("trip") { push(.bookings(tripId: trip)); break }
             showProfile = false
-            tab = .bookings
+            tab = .calendar  // bookings live in Plans
         case "concierge":
             showProfile = false
             tab = .concierge

@@ -130,7 +130,7 @@ struct HomeEditCard: View {
     let edit: HomeEdit
     let fallback: Place?
     var width: CGFloat = 270
-    var height: CGFloat = 260
+    var height: CGFloat = 200
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {

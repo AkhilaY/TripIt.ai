@@ -14,6 +14,7 @@ struct MainTabs: View {
     private var tabs: [BottomBar.Item] {
         var items: [BottomBar.Item] = [
             .init(tab: .home, title: "Home", symbol: "house"),
+            .init(tab: .edits, title: "Edits", symbol: "book.pages"),
             .init(tab: .library, title: "Library", symbol: "bookmark"),
             .init(tab: .calendar, title: "Plans", symbol: "calendar"),  // Calendar and Bookings in one
         ]
@@ -25,6 +26,7 @@ struct MainTabs: View {
         VStack(spacing: 0) {
             ZStack {
                 tabStack(.home) { NavigationStack(path: $router.home) { HomeView().withRoutes() } }
+                tabStack(.edits) { NavigationStack(path: $router.edits) { EditsTabView().withRoutes() } }
                 tabStack(.library) { NavigationStack(path: $router.library) { LibraryView().withRoutes() } }
                 tabStack(.calendar) { NavigationStack(path: $router.calendar) { PlansView().withRoutes() } }
                 tabStack(.bookings) { NavigationStack(path: $router.bookings) { BookingsView().withRoutes() } }
@@ -148,6 +150,7 @@ struct MainTabs: View {
             withAnimation {
                 switch tab {
                 case .home: router.home = []
+                case .edits: router.edits = []
                 case .library: router.library = []
                 case .calendar: router.calendar = []
                 case .bookings: router.bookings = []
@@ -271,6 +274,7 @@ struct RouteView: View {
         case .city(let name): CityView(city: name)
         case .cities: AllCitiesView()
         case .map: MapTab()
+        case .backIssue(let issue): BackIssueView(issue: issue)
         case .imports: ImportsView()
         case .reel(let id): ReelPlacesView(reelId: id)
         case .menu(let placeId): MenuView(placeId: placeId)

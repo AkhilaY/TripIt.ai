@@ -2,7 +2,7 @@ import Foundation
 import Observation
 
 enum AppTab: Hashable {
-    case home, library, calendar, bookings, concierge
+    case home, edits, library, calendar, bookings, concierge
 }
 
 /// Screens pushed onto a tab's navigation stack.
@@ -17,6 +17,8 @@ enum Route: Hashable {
     /// Your saved places on a map.
     case map
     case imports
+    /// An earlier day's issue of the Edits magazine.
+    case backIssue(EditIssue)
     /// The places saved from one post.
     case reel(id: String)
     /// A restaurant's menu.
@@ -49,6 +51,7 @@ enum Route: Hashable {
 final class Router {
     var tab: AppTab = .home
     var home: [Route] = []
+    var edits: [Route] = []
     var library: [Route] = []
     var calendar: [Route] = []
     var bookings: [Route] = []
@@ -81,6 +84,7 @@ final class Router {
         if showProfile { profilePath.append(route); return }
         switch tab {
         case .home: home.append(route)
+        case .edits: edits.append(route)
         case .library: library.append(route)
         case .calendar: calendar.append(route)
         case .bookings: bookings.append(route)

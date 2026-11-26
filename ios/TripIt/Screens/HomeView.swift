@@ -13,18 +13,16 @@ struct HomeView: View {
     @State private var tripEdits: [HomeEdit] = []
     @State private var pull: CGFloat = 0  // how far the page is pulled down past the top; the scenery stretches with it
 
+    @State private var sheet: LibrarySheet?
+
     var body: some View {
-        GeometryReader { outer in
-            ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    Color.clear.frame(height: 0)
-                        .onGeometryChange(for: CGFloat.self) { $0.frame(in: .scrollView).minY } action: { pull = max(0, $0) }
-                    headerBox(top: outer.safeAreaInsets.top)
-                    sections.padding(.horizontal, 20)
-                }
-                .padding(.bottom, 40)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                top
+                sections
             }
-            .ignoresSafeArea(edges: .top)
+            .padding(.horizontal, 20)
+            .padding(.bottom, 40)
         }
         .background(Theme.background.ignoresSafeArea())
         // No bar on Home: the date sits just under the clock, and the profile button isn't behind an empty bar.
@@ -36,6 +34,7 @@ struct HomeView: View {
             await loadTripEdits(trip)
         }
         .onAppear { location.request() }
+        .sheet(item: $sheet) { $0.view.environment(store).environment(router) }
         .task { if !store.bookingsLoaded { await store.reloadBookings() } }
         .alert("Your home city", isPresented: $settingHome) {
             TextField("e.g. Atlanta", text: $homeCity)
@@ -46,32 +45,183 @@ struct HomeView: View {
         }
     }
 
-    @ViewBuilder private var sections: some View {
+    // MARK: Board, pass, wallet, your city
+
+    /// The date, the greeting and, when a trip is coming, how many days to go on a departure board.
+    private var top: some View {
         VStack(alignment: .leading, spacing: 0) {
-                if !store.loaded, let error = store.error {
-                    EmptyState(symbol: "wifi.slash", title: "Can't reach The Travel Edit", text: error) {
-                        Button("Try again") { Task { await store.refresh() } }.buttonStyle(PrimaryButtonStyle(tinted: true)).frame(maxWidth: 200)
+            HStack {
+                Text([Self.today.string(from: Date()), headerCity].compactMap { $0 }.joined(separator: " · ").uppercased())
+                    .font(Theme.text(.caption2, weight: .medium)).kerning(1.8).foregroundStyle(Theme.secondary)
+                Spacer()
+                ProfileButton()
+            }
+            HStack(alignment: .bottom) {
+                Text(greeting.replacingOccurrences(of: ", ", with: ",\n")).font(Theme.serif(30)).foregroundStyle(Theme.label)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 12)
+                if let next = store.upcomingTrips.first, let start = next.startDate, store.activeTrip == nil {
+                    let days = BookingTime.days(from: Fmt.iso(Date()), to: start)
+                    if days > 0 {
+                        VStack(alignment: .trailing, spacing: 6) {
+                            Text("\(next.city.isEmpty ? next.name : next.city) in".uppercased())
+                                .font(Theme.text(.caption2, weight: .medium)).kerning(1.6).foregroundStyle(Theme.secondary).lineLimit(1)
+                            CountdownBoard(days: days)
+                        }
                     }
-                } else if !store.loaded {
-                    SkeletonRows().padding(.top, 24)
-                } else {
-                    ForEach(store.jobs.filter(\.isActive)) { job in
-                        ImportProgressCard(job: job).padding(.top, 16)
-                    }
-                    if store.saved.isEmpty && store.realTrips.isEmpty {
-                        GetStartedCard().padding(.top, 20)
-                    }
-                    if let active = store.activeTrip {
-                        TravelHome(trip: active.trip, day: active.day)
-                    }
-                    edits
-                    if store.activeTrip == nil {
-                        comingUp
-                        NextUpCard(includeTrips: false).padding(.top, 28)
-                        weekend.padding(.top, 40)
-                    }
-                    recent
                 }
+            }
+            .padding(.top, 8)
+        }
+        .padding(.top, 8)
+    }
+
+    @ViewBuilder private var sections: some View {
+        if !store.loaded, let error = store.error {
+            EmptyState(symbol: "wifi.slash", title: "Can't reach The Travel Edit", text: error) {
+                Button("Try again") { Task { await store.refresh() } }.buttonStyle(PrimaryButtonStyle(tinted: true)).frame(maxWidth: 200)
+            }
+        } else if !store.loaded {
+            SkeletonRows().padding(.top, 24)
+        } else {
+            ForEach(store.jobs.filter(\.isActive)) { job in
+                ImportProgressCard(job: job).padding(.top, 16)
+            }
+            if store.saved.isEmpty && store.realTrips.isEmpty {
+                GetStartedCard().padding(.top, 20)
+            }
+            pass.padding(.top, 20)
+            if let active = store.activeTrip {
+                TravelHome(trip: active.trip, day: active.day)
+            }
+            wallet.padding(.top, 30)
+            if store.activeTrip == nil { yourCity.padding(.top, 36) }
+        }
+    }
+
+    /// The trip you're on or the next one, as a boarding pass; with none, an invitation to plan one.
+    @ViewBuilder private var pass: some View {
+        if let trip = store.activeTrip?.trip ?? store.upcomingTrips.first {
+            let flight = store.bookings.filter { $0.tripId == trip.id && $0.kind == "flight" }
+                .sorted { ($0.startAt ?? "~") < ($1.startAt ?? "~") }.first
+            BoardingPass(trip: trip, flight: flight, from: store.home?.city ?? "Home") { router.push(.trip(id: trip.id)) }
+        } else if !store.saved.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("WHERE TO NEXT?").font(Theme.text(.caption2, weight: .medium)).kerning(2).foregroundStyle(Theme.secondary)
+                Text("Turn the places you've saved into a trip, day by day.").font(Theme.serif(22)).foregroundStyle(Theme.label)
+                Button { sheet = .newTrip([], nil) } label: { Text("Plan a trip") }
+                    .buttonStyle(PrimaryButtonStyle(compact: true)).fixedSize().padding(.top, 8)
+            }
+            .padding(20)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Theme.fill, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        }
+    }
+
+    /// Your cities as a wallet: ones with a trip coming first, then the most saved.
+    @ViewBuilder private var wallet: some View {
+        let soon = Set(store.upcomingTrips.flatMap(\.cities).map(Store.cityKey))
+        let groups = store.cityGroups().sorted { a, b in
+            let x = soon.contains(a.id), y = soon.contains(b.id)
+            return x != y ? x : a.places.count > b.places.count
+        }
+        if !groups.isEmpty {
+            CityWallet(groups: Array(groups.prefix(6)), tripLine: { city in
+                if let trip = store.trip(forCity: city.name), let range = trip.dateRange { return "\(range) · \(Fmt.plural(city.places.count, "place"))" }
+                return Fmt.plural(city.places.count, "place")
+            }, onOpen: { router.push(.city(name: $0.name)) })
+            if groups.count > 6 {
+                Button("All \(groups.count) cities") { router.push(.cities) }
+                    .font(Theme.text(.footnote, weight: .medium)).foregroundStyle(Theme.link).padding(.top, 8)
+            }
+        }
+    }
+
+    /// Your home city: the weekend's picks from Friday, what's open tonight before then.
+    @ViewBuilder private var yourCity: some View {
+        let weekday = Calendar.current.component(.weekday, from: Date())  // 1 Sunday … 7 Saturday
+        let isWeekend = weekday == 1 || weekday >= 6
+        if let home = store.home {
+            Text("YOUR CITY").font(Theme.text(.caption2, weight: .medium)).kerning(2).foregroundStyle(Theme.secondary)
+            Text(isWeekend ? "The weekend in \(home.city)" : "Tonight in \(home.city)").font(Theme.serif(26)).foregroundStyle(Theme.label)
+                .padding(.top, 4)
+            if isWeekend { weekendNote(home.city) } else { tonight(home.city) }
+        } else {
+            weekend
+        }
+    }
+
+    @ViewBuilder private func weekendNote(_ city: String) -> some View {
+        let picks = WeekendPicks.make(from: store.saved.filter { store.isHome($0) && !$0.visited }, seed: shuffle)
+        if picks.isEmpty {
+            Text("Save places around \(city) and a few will be picked for the weekend.")
+                .font(Theme.text(.subheadline)).foregroundStyle(Theme.secondary).padding(.top, 8)
+        } else {
+            VStack(alignment: .leading, spacing: 0) {
+                Text("CONCIERGE NOTE · \(WeekendPicks.label().uppercased())")
+                    .font(Theme.text(.caption2, weight: .medium)).kerning(1.6).foregroundStyle(Theme.secondary).padding(.bottom, 4)
+                ForEach(picks, id: \.place.id) { pick in
+                    NavigationLink(value: Route.place(id: pick.place.id, tripId: nil)) {
+                        HStack(alignment: .top, spacing: 12) {
+                            Text(pick.slot).font(Theme.text(.footnote)).foregroundStyle(Theme.secondary).frame(width: 70, alignment: .leading)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(pick.place.name).font(Theme.text(.body)).foregroundStyle(Theme.label).lineLimit(1)
+                                meta(pick.place)
+                            }
+                            Spacer(minLength: 0)
+                        }
+                        .padding(.vertical, 12)
+                        .contentShape(Rectangle())
+                        .overlay(alignment: .bottom) { Divider().overlay(Theme.divider) }
+                    }
+                    .buttonStyle(PressStyle())
+                }
+                HStack(spacing: 10) {
+                    Button("Keep this weekend") { Task { await planWeekend(picks.map(\.place)) } }
+                        .buttonStyle(PrimaryButtonStyle(compact: true))
+                    Button("Shuffle") { withAnimation { shuffle += 1 } }
+                        .buttonStyle(PrimaryButtonStyle(tinted: true, compact: true)).fixedSize()
+                }
+                .padding(.top, 14)
+            }
+            .padding(18)
+            .background(Theme.background, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(Theme.border))
+            .padding(.top, 12)
+            .sensoryFeedback(.impact(weight: .light), trigger: shuffle)
+        }
+    }
+
+    @ViewBuilder private func tonight(_ city: String) -> some View {
+        let open = Array(openPlaces.prefix(2))
+        if open.isEmpty {
+            Text("Nothing you've saved nearby is open right now.").font(Theme.text(.subheadline)).foregroundStyle(Theme.secondary).padding(.top, 8)
+        } else {
+            HStack(spacing: 10) {
+                ForEach(Array(open.enumerated()), id: \.element.id) { i, place in
+                    NavigationLink(value: Route.place(id: place.id, tripId: nil)) {
+                        EditTile(caption: "Open now" + (place.neighborhood.map { " · \($0)" } ?? ""), title: place.name,
+                                 preview: Category(place.category).label, seed: i == 0 ? "a" : "c", titleSize: 20)
+                            .frame(height: 150)
+                            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    }
+                    .buttonStyle(PressStyle())
+                }
+            }
+            .padding(.top, 12)
+        }
+        let picks = WeekendPicks.make(from: store.saved.filter { store.isHome($0) && !$0.visited }, seed: shuffle)
+        if !picks.isEmpty {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("This weekend: \(Fmt.plural(picks.count, "pick")) ready").font(Theme.text(.subheadline, weight: .medium)).foregroundStyle(Theme.label)
+                    Text(picks.map(\.place.name).joined(separator: ", ")).font(Theme.text(.footnote)).foregroundStyle(Theme.secondary).lineLimit(1)
+                }
+                Spacer()
+            }
+            .padding(14)
+            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Theme.border))
+            .padding(.top, 12)
         }
     }
 

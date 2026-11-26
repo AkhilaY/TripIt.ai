@@ -23,6 +23,7 @@ struct LibraryView: View {
     @AppStorage("library.citySort") private var citySort: CitySort = .places
     @AppStorage("library.section") private var section: LibrarySection = .places
     @State private var cityFilter: String?
+    @State private var groupFilter: PlaceGroup?
     @State private var postFilter = "all"
     @State private var query = ""
     @State private var sheet: LibrarySheet?
@@ -95,12 +96,7 @@ struct LibraryView: View {
             HStack(alignment: .center) {
                 Text("Library").font(Theme.serif(38)).foregroundStyle(Theme.label)
                 Spacer()
-                Button { router.push(.map) } label: {
-                    Label("Map", systemImage: "map").font(Theme.text(.subheadline)).foregroundStyle(Theme.label)
-                        .padding(.horizontal, 16).frame(height: 40)
-                        .overlay(Capsule().strokeBorder(Theme.chipBorder))
-                }
-                .buttonStyle(PressStyle())
+                Text(Fmt.plural(store.saved.count, "place")).font(Theme.text(.footnote)).foregroundStyle(Theme.secondary)
                 ProfileButton()
             }
             .padding(.top, 12)
@@ -119,7 +115,6 @@ struct LibraryView: View {
             .padding(.horizontal, 18).frame(height: 48)
             .background(Theme.cell, in: Capsule())
             .padding(.top, 18)
-            VisitPicker(visit: $visit, places: store.saved).padding(.top, 12)
         }
     }
 
@@ -195,18 +190,39 @@ struct LibraryView: View {
         }
         .padding(.top, 12)
         .sensoryFeedback(.selection, trigger: cityFilter)
-        let places = shown.filter { cityFilter == nil || Store.cityKey($0.city) == cityFilter }.sorted { $0.createdAt > $1.createdAt }
+        // Kind of place, Want to go / Been, and the map: one quiet line.
+        HStack(spacing: 14) {
+            Menu {
+                Button("All kinds") { groupFilter = nil }
+                ForEach(PlaceGroup.allCases) { g in Button(g.label) { groupFilter = g } }
+            } label: {
+                Label(groupFilter?.label ?? "All kinds", systemImage: "chevron.down").labelStyle(TrailingIcon())
+            }
+            Spacer()
+            Menu {
+                ForEach(VisitFilter.allCases) { v in Button(v.label) { visit = v } }
+            } label: {
+                Label(visit.label, systemImage: "chevron.down").labelStyle(TrailingIcon())
+            }
+            Button { router.push(.map) } label: { Image(systemName: "map") }.accessibilityLabel("Map")
+        }
+        .font(Theme.text(.footnote, weight: .medium)).foregroundStyle(Theme.label)
+        .padding(.top, 12)
+        .sensoryFeedback(.selection, trigger: groupFilter)
+        let places = shown.filter {
+            (cityFilter == nil || Store.cityKey($0.city) == cityFilter) && (groupFilter == nil || PlaceGroup.of($0.category) == groupFilter)
+        }.sorted { $0.createdAt > $1.createdAt }
         LazyVStack(spacing: 0) {
             ForEach(places) { place in
                 NavigationLink(value: Route.place(id: place.id, tripId: nil)) {
-                    PlaceRow(place: place).padding(.vertical, 6)
+                    PlaceRow(place: place, compact: true).padding(.vertical, 4)
                 }
                 .buttonStyle(PressStyle())
                 .placeActions(place, onDelete: { Task { await store.deleteWithUndo(place) } }, sheet: $sheet)
                 Divider().overlay(Theme.divider)
             }
         }
-        .padding(.top, 8)
+        .padding(.top, 4)
     }
 
     /// Lists as cards, in the same type-only style as the edits.
@@ -842,6 +858,13 @@ struct JobRow: View {
         if url.contains("instagram") { return "camera" }
         if url.contains("youtu") { return "play.rectangle" }
         return "link"
+    }
+}
+
+/// "Want to go ⌄": the words first, the icon after.
+struct TrailingIcon: LabelStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(spacing: 4) { configuration.title; configuration.icon.font(.system(size: 10, weight: .semibold)) }
     }
 }
 

@@ -183,6 +183,7 @@ struct PlaceRow: View {
     var showCategory = true
     var showDay = false
     var distance: Double?
+    var compact = false  // the Library: name and one line, no ratings or "Try"
 
     var body: some View {
         HStack(spacing: 14) {
@@ -204,8 +205,8 @@ struct PlaceRow: View {
                     Circle().fill(PlaceGroup.of(place.category).swatch).frame(width: 6, height: 6)
                     Text(subtitle).font(Theme.text(.footnote)).foregroundStyle(Theme.secondary).lineLimit(1)
                 }
-                chips
-                if !place.recommendedItems.isEmpty {
+                if !compact { chips }
+                if !compact && !place.recommendedItems.isEmpty {
                     Text("Try: " + place.recommendedItems.joined(separator: ", "))
                         .font(Theme.text(.footnote)).foregroundStyle(Theme.secondary).lineLimit(1)
                 }

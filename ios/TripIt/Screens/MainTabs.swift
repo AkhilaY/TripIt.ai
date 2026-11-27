@@ -69,7 +69,7 @@ struct MainTabs: View {
                 .environment(router).environment(store)
                 .tint(Theme.accent)
         }
-        .modifier(AddMenu(adding: $adding))
+        .modifier(AddMenu(adding: $adding, store: store, router: router))
         .sheet(item: $router.bookingRequest) { request in
             BookingSheet(request: request)
                 .environment(router).environment(store)
@@ -317,8 +317,9 @@ private struct RootToolbar: ViewModifier {
 /// The + button's menu: add a place, start a trip, or make a list.
 private struct AddMenu: ViewModifier {
     @Binding var adding: Bool
-    @Environment(Store.self) private var store
-    @Environment(Router.self) private var router
+    // Passed in, not read from the environment: this sits outside the views that are given them.
+    let store: Store
+    let router: Router
     @State private var newTrip = false
     @State private var newList = false
     @State private var listName = ""

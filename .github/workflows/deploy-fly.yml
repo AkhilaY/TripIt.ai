@@ -80,24 +80,63 @@ jobs:
           APP_API_KEY: ${{ secrets.APP_API_KEY }}
           GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
           GOOGLE_MAPS_BROWSER_KEY: ${{ secrets.GOOGLE_MAPS_BROWSER_KEY }}
+          TICKETMASTER_API_KEY: ${{ secrets.TICKETMASTER_API_KEY }}
           NOMINATIM_EMAIL: ${{ secrets.NOMINATIM_EMAIL }}
           YTDLP_COOKIES: ${{ secrets.YTDLP_COOKIES }}
+          APNS_KEY: ${{ secrets.APNS_KEY }}
+          APNS_KEY_ID: ${{ secrets.APNS_KEY_ID }}
+          APNS_TEAM_ID: ${{ secrets.APNS_TEAM_ID }}
+          # The app's bundle ID: the topic for iPhone notifications, and who Sign in with Apple tokens must be for.
+          APNS_TOPIC: ${{ secrets.APNS_TOPIC || secrets.TRIPIT_BUNDLE_ID }}
+          APPLE_CLIENT_IDS: ${{ secrets.TRIPIT_BUNDLE_ID }}
+          APPLE_SIGNIN_KEY: ${{ secrets.APPLE_SIGNIN_KEY }}
+          APPLE_SIGNIN_KEY_ID: ${{ secrets.APPLE_SIGNIN_KEY_ID }}
+          BACKUP_BUCKET: ${{ secrets.BACKUP_BUCKET }}
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+          BACKUP_ENDPOINT: ${{ secrets.BACKUP_ENDPOINT }}
+          BACKUP_ACCESS_KEY_ID: ${{ secrets.BACKUP_ACCESS_KEY_ID }}
+          BACKUP_SECRET_ACCESS_KEY: ${{ secrets.BACKUP_SECRET_ACCESS_KEY }}
+          SUPPORT_EMAIL: ${{ secrets.SUPPORT_EMAIL }}
+          UNSPLASH_ACCESS_KEY: ${{ secrets.UNSPLASH_ACCESS_KEY }}
         run: |
           {
             printf 'ANTHROPIC_API_KEY=%s\n' "$ANTHROPIC_API_KEY"
             printf 'APP_API_KEY=%s\n' "$APP_API_KEY"
             [ -z "$GOOGLE_MAPS_API_KEY" ] || printf 'GOOGLE_MAPS_API_KEY=%s\n' "$GOOGLE_MAPS_API_KEY"
             [ -z "$GOOGLE_MAPS_BROWSER_KEY" ] || printf 'GOOGLE_MAPS_BROWSER_KEY=%s\n' "$GOOGLE_MAPS_BROWSER_KEY"
+            [ -z "$TICKETMASTER_API_KEY" ] || printf 'TICKETMASTER_API_KEY=%s\n' "$TICKETMASTER_API_KEY"
             [ -z "$NOMINATIM_EMAIL" ] || printf 'NOMINATIM_EMAIL=%s\n' "$NOMINATIM_EMAIL"
             # cookies.txt is multi-line; store it on one line with \n escapes (the server undoes this).
             [ -z "$YTDLP_COOKIES" ] || printf 'YTDLP_COOKIES=%s\n' "$(printf '%s' "$YTDLP_COOKIES" | awk '{printf "%s\\n", $0}')"
+            # Notifications for the native iOS app; the .p8 key is multi-line too.
+            [ -z "$APNS_KEY" ] || printf 'APNS_KEY=%s\n' "$(printf '%s' "$APNS_KEY" | awk '{printf "%s\\n", $0}')"
+            [ -z "$APNS_KEY_ID" ] || printf 'APNS_KEY_ID=%s\n' "$APNS_KEY_ID"
+            [ -z "$APNS_TEAM_ID" ] || printf 'APNS_TEAM_ID=%s\n' "$APNS_TEAM_ID"
+            [ -z "$APNS_TOPIC" ] || printf 'APNS_TOPIC=%s\n' "$APNS_TOPIC"
+            # Sign in with Apple (optional): lets account deletion revoke the Apple sign-in. Multi-line .p8 like APNS_KEY.
+            [ -z "$APPLE_SIGNIN_KEY" ] || printf 'APPLE_SIGNIN_KEY=%s\n' "$(printf '%s' "$APPLE_SIGNIN_KEY" | awk '{printf "%s\\n", $0}')"
+            [ -z "$APPLE_SIGNIN_KEY_ID" ] || printf 'APPLE_SIGNIN_KEY_ID=%s\n' "$APPLE_SIGNIN_KEY_ID"
+            [ -z "$APPLE_CLIENT_IDS" ] || printf 'APPLE_CLIENT_IDS=%s\n' "$APPLE_CLIENT_IDS"
+            # Error reporting (Sentry), tagged with the commit so errors point at a release.
+            [ -z "$SENTRY_DSN" ] || printf 'SENTRY_DSN=%s\nSENTRY_RELEASE=%s\n' "$SENTRY_DSN" "${GITHUB_SHA:0:12}"
+            # Backups to Cloudflare R2 (start.sh).
+            [ -z "$BACKUP_BUCKET" ] || printf 'BACKUP_BUCKET=%s\n' "$BACKUP_BUCKET"
+            [ -z "$BACKUP_ENDPOINT" ] || printf 'BACKUP_ENDPOINT=%s\n' "$BACKUP_ENDPOINT"
+            [ -z "$BACKUP_ACCESS_KEY_ID" ] || printf 'BACKUP_ACCESS_KEY_ID=%s\n' "$BACKUP_ACCESS_KEY_ID"
+            [ -z "$BACKUP_SECRET_ACCESS_KEY" ] || printf 'BACKUP_SECRET_ACCESS_KEY=%s\n' "$BACKUP_SECRET_ACCESS_KEY"
+            # The contact shown on /privacy, /terms and /support.
+            [ -z "$SUPPORT_EMAIL" ] || printf 'SUPPORT_EMAIL=%s\n' "$SUPPORT_EMAIL"
+            # City photos for the app (unsplash.com/developers).
+            [ -z "$UNSPLASH_ACCESS_KEY" ] || printf 'UNSPLASH_ACCESS_KEY=%s\n' "$UNSPLASH_ACCESS_KEY"
           } | flyctl secrets import --stage --app "$APP"
 
       - name: Deploy
         if: steps.check.outputs.ready == 'true'
         run: |
           sed -i "s/^app = .*/app = \"$APP\"/; s/^primary_region = .*/primary_region = \"$REGION\"/" fly.toml
-          flyctl deploy --remote-only --ha=false --app "$APP" --wait-timeout 10m
+          # Fly's remote builder sometimes drops mid-build ("context canceled", "EOF"); then build here instead.
+          flyctl deploy --remote-only --ha=false --app "$APP" --wait-timeout 10m \
+            || { echo "Remote build failed; building on this runner"; flyctl deploy --local-only --ha=false --app "$APP" --wait-timeout 10m; }
 
       - name: Check it's up
         if: steps.check.outputs.ready == 'true'
@@ -105,6 +144,9 @@ jobs:
           url="https://$APP.fly.dev"
           for i in $(seq 1 20); do
             if curl -fsS "$url/health" >/dev/null; then
+              if ! curl -fsS "$url/v1/auth/status" | grep -q '"apple":true'; then
+                echo "::warning::Sign in with Apple is off on the server: add the TRIPIT_BUNDLE_ID secret (the app's bundle ID)."
+              fi
               echo "### TripIt is live at $url" >> "$GITHUB_STEP_SUMMARY"
               echo "Open it in Safari on your iPhone, enter your APP_API_KEY, then Share → Add to Home Screen." >> "$GITHUB_STEP_SUMMARY"
               echo "Live at $url"

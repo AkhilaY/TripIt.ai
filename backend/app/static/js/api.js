@@ -14,22 +14,47 @@ export function setKey(key) {
 
 let memoryKey = null;
 
+/** Headers for calls to the server: the sign-in cookie goes along by itself; the header tells the server the
+ * request came from the app (it refuses changes without it). A key saved from before accounts still works. */
+export function authHeaders() {
+  const key = memoryKey ?? getKey();
+  return { 'X-TripIt': '1', ...(key ? { 'X-API-Key': key } : {}) };
+}
+
 export class ApiError extends Error {
   constructor(message, status) { super(message); this.status = status; }
 }
+
+/** Tells the iOS app something (it shows some screens of this web app inside native ones). */
+export function toNative(message) {
+  try { window.webkit.messageHandlers.tripit.postMessage(message); } catch { /* not in the app */ }
+}
+
+let offline = false;
+function network(isOffline) {
+  if (isOffline === offline) return;
+  offline = isOffline;
+  window.dispatchEvent(new CustomEvent('tripit:network', { detail: { offline } }));
+}
+export const isOffline = () => offline;
 
 export async function api(path, { method = 'GET', body } = {}) {
   let res;
   try {
     res = await fetch(path, {
       method,
-      headers: { 'Content-Type': 'application/json', 'X-API-Key': memoryKey ?? getKey() },
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
   } catch {
-    throw new ApiError("Can't reach the TripIt server. Check your connection.", 0);
+    network(true);
+    throw new ApiError("You're offline. This needs a connection.", 0);
   }
-  if (res.status === 204) return null;
+  // The service worker marks answers it served from the copy saved on this phone.
+  const saved = res.headers.get('X-TripIt-Offline') === '1';
+  network(saved);
+  if (saved && res.status === 503) throw new ApiError("You're offline, and this hasn't been saved on your phone yet.", 0);
+  if (res.status === 204) { if (method !== 'GET') toNative({ changed: path }); return null; }
   let data = null;
   try { data = await res.json(); } catch { /* empty or non-JSON body */ }
   if (!res.ok) {
@@ -37,5 +62,6 @@ export async function api(path, { method = 'GET', body } = {}) {
     if (Array.isArray(detail)) detail = detail[0] && detail[0].msg;
     throw new ApiError(detail || `Server error (${res.status})`, res.status);
   }
+  if (method !== 'GET') toNative({ changed: path }); // the app refreshes its own copy of your library
   return data;
 }

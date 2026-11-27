@@ -1,39 +1,68 @@
-import SwiftData
 import SwiftUI
 
 @main
 struct TripItApp: App {
-    @Environment(\.scenePhase) private var scenePhase
-    @State private var importer = ImportCoordinator()
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+    @State private var session = Session()
+    @State private var store = Store()
 
-    let container: ModelContainer = {
-        let schema = Schema([Trip.self, Place.self, ReelSource.self])
-        // Syncs through the iCloud container in the entitlements; falls back to local-only storage
-        // (e.g. when signed out of iCloud or running without the iCloud capability).
-        do {
-            return try ModelContainer(for: schema, configurations: ModelConfiguration(cloudKitDatabase: .automatic))
-        } catch {
-            print("CloudKit store unavailable, using local store: \(error)")
-            return try! ModelContainer(for: schema, configurations: ModelConfiguration(cloudKitDatabase: .none))
-        }
-    }()
+    init() {
+        Monitoring.start()
+        Theme.applyAppearance()
+    }
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
-                .environment(importer)
-                .onAppear {
-                    importer.attach(container.mainContext)
-                    importer.start()
-                }
+            RootView()
+                .environment(session)
+                .environment(store)
+                .tint(Theme.accent)
+                .font(Theme.text(.body))
         }
-        .modelContainer(container)
-        .onChange(of: scenePhase) { _, phase in
-            switch phase {
-            case .active: importer.start()
-            case .background: importer.stop()
-            default: break
+    }
+}
+
+/// Light, Dark, or the phone's setting (Profile → Appearance).
+enum Appearance: String, CaseIterable, Identifiable {
+    case system, light, dark
+    static let key = "appearance"
+    var id: String { rawValue }
+    var label: String { self == .system ? "System" : self == .light ? "Light" : "Dark" }
+    var scheme: ColorScheme? { self == .light ? .light : self == .dark ? .dark : nil }
+}
+
+struct RootView: View {
+    @Environment(Session.self) private var session
+    @Environment(Store.self) private var store
+    @AppStorage(Appearance.key) private var appearance: Appearance = .light
+    @AppStorage(RootView.pendingJoinKey) private var pendingJoin = ""
+    static let pendingJoinKey = "pendingJoin"
+
+    var body: some View {
+        Group {
+            switch session.phase {
+            case .checking:
+                ZStack { Theme.background.ignoresSafeArea(); ProgressView() }
+            case .signedOut:
+                WelcomeView()
+            case .signedIn:
+                MainTabs()
             }
+        }
+        // The welcome screen sits on dark scenery, so it (and its sign-in sheet) is always dark.
+        .preferredColorScheme(session.phase == .signedOut ? .dark : appearance.scheme)
+        // An invite link opened in the app (traveledit://join?token=…): joined once you're signed in.
+        .onOpenURL { url in
+            guard url.scheme == "traveledit", url.host == "join",
+                  let token = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "token" })?.value else { return }
+            pendingJoin = token
+        }
+        .task { await session.restore() }
+        .onReceive(NotificationCenter.default.publisher(for: API.signedOut)) { _ in
+            session.signOutLocally()
+        }
+        .onChange(of: session.phase) { _, phase in
+            if phase != .signedIn { store.reset() }
         }
     }
 }

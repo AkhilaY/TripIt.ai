@@ -1,0 +1,54 @@
+name: Check saving
+
+# Re-runs the download step of the most recent links people shared, on the Fly server with today's code, and
+# prints which kinds of posts open fully, fall back to the caption, or fail. Prints no links or account details
+# (this repository's logs are public). Read-only. Runs when this file or the script changes, or from the Actions tab.
+on:
+  workflow_dispatch:
+    inputs:
+      count:
+        description: How many recent links to check
+        default: "40"
+  push:
+    paths:
+      - ".github/workflows/saves-check.yml"
+      - ".github/diagnose/saves_check.py"
+
+jobs:
+  fly:
+    name: Re-run recent saves on the server
+    runs-on: ubuntu-latest
+    # Its own queue: sharing the deploy's would let GitHub cancel a waiting deploy (only one can wait per queue).
+    concurrency:
+      group: saves-check
+      cancel-in-progress: true
+    timeout-minutes: 75
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      APP: ${{ vars.FLY_APP_NAME }}
+      COUNT: ${{ github.event.inputs.count || '40' }}
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Wait for the server deploy to finish, so the new code is checked
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for i in $(seq 1 60); do
+            busy=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow deploy-fly.yml --limit 5 --json status \
+                   --jq '[.[] | select(.status != "completed")] | length')
+            [ "$busy" = "0" ] && exit 0
+            echo "Deploy still running ($i)"; sleep 20
+          done
+      - name: Install flyctl
+        run: |
+          curl -fsSL https://fly.io/install.sh | sh
+          echo "$HOME/.fly/bin" >> "$GITHUB_PATH"
+      - name: Wake the server
+        run: curl -fsS -m 60 "https://$APP.fly.dev/health" || true
+      - name: Re-run the downloads
+        run: |
+          B64=$(base64 -w0 .github/diagnose/saves_check.py)
+          flyctl ssh console --app "$APP" -C "sh -c 'echo $B64 | base64 -d > /tmp/saves_check.py && cd /app && timeout 3600 python /tmp/saves_check.py $COUNT 2>/dev/null'" 2>&1

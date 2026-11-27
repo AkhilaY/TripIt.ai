@@ -1,0 +1,61 @@
+name: Compare models for reading posts
+
+# Runs recent real saves through several models (and frame counts) inside the server and compares the places
+# found and the cost, before changing which model reads posts. Prints only counts and costs. Costs real money
+# (about $7 for 20 posts and the default arms). Run it from the Actions tab only.
+on:
+  workflow_dispatch:
+    inputs:
+      count:
+        description: How many recent posts
+        default: "20"
+      skip:
+        description: Leave out this many of the most recent posts
+        default: "0"
+      arms:
+        description: model:frames:effort to compare (or hybrid:frames:effort), the first is the baseline
+        default: "claude-opus-5-5:24:medium claude-sonnet-5-5:12:medium claude-sonnet-5-5:12:high hybrid:12:high"
+
+jobs:
+  compare:
+    name: Compare on the server
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      actions: read
+      contents: read
+    env:
+      APP: ${{ vars.FLY_APP_NAME }}
+      KEY: ${{ secrets.APP_API_KEY }}
+      COUNT: ${{ github.event.inputs.count || '20' }}
+      SKIP: ${{ github.event.inputs.skip || '0' }}
+      ARMS: ${{ github.event.inputs.arms || 'claude-opus-5-5:24:medium claude-sonnet-5-5:12:medium claude-sonnet-5-5:12:high hybrid:12:high' }}
+    steps:
+      - name: Wait for any server deploy to finish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for i in $(seq 1 60); do
+            busy=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow deploy-fly.yml --limit 5 --json status \
+                   --jq '[.[] | select(.status != "completed")] | length')
+            [ "$busy" = "0" ] && exit 0
+            echo "Deploy still running ($i)"; sleep 20
+          done
+      - name: Start the comparison
+        run: |
+          body=$(jq -n --arg arms "$ARMS" --argjson count "$COUNT" --argjson skip "$SKIP" '{count: $count, skip: $skip, arms: $arms}')
+          code=$(curl -sS -m 60 -o /tmp/start.json -w '%{http_code}' -X POST "https://$APP.fly.dev/v1/admin/model-check" \
+            -H "X-API-Key: $KEY" -H "Content-Type: application/json" -d "$body")
+          if [ "$code" = "409" ]; then echo "A comparison is already running on the server; following it."
+          elif [ "$code" != "202" ]; then echo "Couldn't start it ($code)"; cat /tmp/start.json; exit 1; fi
+      - name: Follow it until it finishes
+        run: |
+          shown=0
+          for i in $(seq 1 170); do
+            [ "$i" = 1 ] || sleep 30
+            got=$(curl -fsS -m 30 "https://$APP.fly.dev/v1/admin/model-check?since=$shown" -H "X-API-Key: $KEY" || echo '{}')
+            printf '%s' "$got" | jq -r '.lines[]?'
+            shown=$(printf '%s' "$got" | jq -r ".total // $shown")
+            [ "$(printf '%s' "$got" | jq -r 'if .running == false then "done" else "running" end')" = "done" ] && exit 0
+          done
+          echo "Still running after 85 minutes"

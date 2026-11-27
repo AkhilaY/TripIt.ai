@@ -1,0 +1,466 @@
+{
+ "places": [
+  {
+   "id": "agra",
+   "place": "Taj Mahal, Agra",
+   "names": [
+    "agra",
+    "taj"
+   ],
+   "photo": "photo-1585506942812-e72b29cef752",
+   "name": "sanin sn",
+   "username": "s_a_n_in"
+  },
+  {
+   "id": "alps",
+   "place": "Lake Lucerne, Switzerland",
+   "names": [
+    "switzerland",
+    "zurich",
+    "lucerne",
+    "luzern",
+    "geneva",
+    "interlaken",
+    "zermatt",
+    "bern",
+    "alps",
+    "chamonix",
+    "lake como",
+    "como",
+    "innsbruck"
+   ],
+   "photo": "photo-1672348480923-63d9c39c0f4f",
+   "name": "Michael Lammli",
+   "username": "michaellammli"
+  },
+  {
+   "id": "amalfi",
+   "place": "Positano, Amalfi Coast",
+   "names": [
+    "amalfi",
+    "positano",
+    "sorrento",
+    "capri",
+    "naples"
+   ],
+   "photo": "photo-1581416271259-abec87515f51",
+   "name": "Reiseuhu",
+   "username": "reiseuhu"
+  },
+  {
+   "id": "amsterdam",
+   "place": "Canal houses, Amsterdam",
+   "names": [
+    "amsterdam",
+    "netherlands",
+    "rotterdam"
+   ],
+   "photo": "photo-1517736996303-4eec4a66bb17",
+   "name": "Robin Benzrihem",
+   "username": "robinoode"
+  },
+  {
+   "id": "bali",
+   "place": "Rice terraces, Bali",
+   "names": [
+    "bali",
+    "ubud",
+    "indonesia",
+    "lombok"
+   ],
+   "photo": "photo-1559628233-eb1b1a45564b",
+   "name": "Silas Baisch",
+   "username": "silasbaisch"
+  },
+  {
+   "id": "bangkok",
+   "place": "Wat Arun, Bangkok",
+   "names": [
+    "bangkok",
+    "thailand",
+    "chiang mai",
+    "phuket"
+   ],
+   "photo": "photo-1612161330631-9186c513de7f",
+   "name": "Joshua Rawson-Harris",
+   "username": "joshrh19"
+  },
+  {
+   "id": "barcelona",
+   "place": "Sagrada Família, Barcelona",
+   "names": [
+    "barcelona",
+    "spain",
+    "madrid"
+   ],
+   "photo": "photo-1579282240050-352db0a14c21",
+   "name": "Theodor Vasile",
+   "username": "theodorrr"
+  },
+  {
+   "id": "cairo",
+   "place": "The Pyramids and the Sphinx, Giza",
+   "names": [
+    "cairo",
+    "giza",
+    "egypt",
+    "luxor"
+   ],
+   "photo": "photo-1568322445389-f64ac2515020",
+   "name": "Alex Azabache",
+   "username": "alexazabache"
+  },
+  {
+   "id": "capetown",
+   "place": "Table Mountain, Cape Town",
+   "names": [
+    "cape town",
+    "south africa",
+    "johannesburg"
+   ],
+   "photo": "photo-1580644906000-67d680c978aa",
+   "name": "Tobias Reich",
+   "username": "electerious"
+  },
+  {
+   "id": "cappadocia",
+   "place": "Göreme, Cappadocia",
+   "names": [
+    "cappadocia",
+    "goreme"
+   ],
+   "photo": "photo-1559783510-c448bd7d686b",
+   "name": "Tony Lee",
+   "username": "tli427"
+  },
+  {
+   "id": "dubai",
+   "place": "Burj Khalifa, Dubai",
+   "names": [
+    "dubai",
+    "abu dhabi",
+    "doha",
+    "uae",
+    "qatar"
+   ],
+   "photo": "photo-1608991156162-3c55b3cf05d3",
+   "name": "Mohammad Amin",
+   "username": "aminjl"
+  },
+  {
+   "id": "hongkong",
+   "place": "Victoria Harbour, Hong Kong",
+   "names": [
+    "hong kong",
+    "macau",
+    "shanghai",
+    "shenzhen"
+   ],
+   "photo": "photo-1576788369575-4ab045b9287e",
+   "name": "Sébastien Goldberg",
+   "username": "sebastiengoldberg"
+  },
+  {
+   "id": "iceland",
+   "place": "Kirkjufell, Iceland",
+   "names": [
+    "iceland",
+    "reykjavik",
+    "norway",
+    "tromso",
+    "lapland",
+    "finland"
+   ],
+   "photo": "photo-1544638627-725124bda50d",
+   "name": "Kamil Kalbarczyk",
+   "username": "kamilkalb"
+  },
+  {
+   "id": "istanbul",
+   "place": "Blue Mosque, Istanbul",
+   "names": [
+    "istanbul",
+    "turkey",
+    "ankara"
+   ],
+   "photo": "photo-1466442929976-97f336a657be",
+   "name": "Daniel Burka",
+   "username": "dburka"
+  },
+  {
+   "id": "jaipur",
+   "place": "Hawa Mahal, Jaipur",
+   "names": [
+    "jaipur",
+    "udaipur",
+    "jodhpur",
+    "rajasthan",
+    "delhi"
+   ],
+   "photo": "photo-1524230507669-5ff97982bb5e",
+   "name": "Annie Spratt",
+   "username": "anniespratt"
+  },
+  {
+   "id": "kyoto",
+   "place": "Yasaka Pagoda, Kyoto",
+   "names": [
+    "kyoto"
+   ],
+   "photo": "photo-1624253321171-1be53e12f5f4",
+   "name": "Roméo A.",
+   "username": "gronemo"
+  },
+  {
+   "id": "lisbon",
+   "place": "Alfama, Lisbon",
+   "names": [
+    "lisbon",
+    "lisboa",
+    "porto",
+    "portugal"
+   ],
+   "photo": "photo-1754995679551-1b9ad336d0d0",
+   "name": "Ana-Maria Stancu",
+   "username": "anastancu"
+  },
+  {
+   "id": "london",
+   "place": "Westminster, London",
+   "names": [
+    "london",
+    "england",
+    "uk"
+   ],
+   "photo": "photo-1454793147212-9e7e57e89a4f",
+   "name": "enrico bet",
+   "username": "henry_be"
+  },
+  {
+   "id": "machupicchu",
+   "place": "Machu Picchu, Peru",
+   "names": [
+    "machu picchu",
+    "cusco",
+    "cuzco",
+    "peru",
+    "lima"
+   ],
+   "photo": "photo-1567597243073-2d274aabecec",
+   "name": "Seiji Seiji",
+   "username": "seijiseiji"
+  },
+  {
+   "id": "maldives",
+   "place": "Overwater villas, Maldives",
+   "names": [
+    "maldives",
+    "male",
+    "bora bora",
+    "fiji",
+    "seychelles",
+    "mauritius"
+   ],
+   "photo": "photo-1514282401047-d79a71a590e8",
+   "name": "Ishan @seefromthesky",
+   "username": "seefromthesky"
+  },
+  {
+   "id": "marrakech",
+   "place": "Jemaa el-Fnaa, Marrakech",
+   "names": [
+    "marrakech",
+    "morocco",
+    "fez",
+    "fes"
+   ],
+   "photo": "photo-1570133435536-7ececf000ef6",
+   "name": "Alex Azabache",
+   "username": "alexazabache"
+  },
+  {
+   "id": "monaco",
+   "place": "The Grand Prix, Monaco",
+   "names": [
+    "monaco",
+    "monte carlo",
+    "monte-carlo",
+    "nice",
+    "cannes",
+    "french riviera",
+    "cote d'azur",
+    "côte d'azur",
+    "antibes"
+   ],
+   "photo": "photo-1774762488100-e84a4e8b77cb",
+   "name": "Bai",
+   "username": "oscarbai"
+  },
+  {
+   "id": "newyork",
+   "place": "Brooklyn Bridge, New York",
+   "names": [
+    "new york",
+    "nyc",
+    "brooklyn",
+    "manhattan",
+    "queens",
+    "chicago",
+    "boston",
+    "atlanta",
+    "philadelphia"
+   ],
+   "photo": "photo-1610879264747-c94eec8f5276",
+   "name": "Ismail Merad",
+   "username": "ismail_fwcr"
+  },
+  {
+   "id": "paris",
+   "place": "The Eiffel Tower, Paris",
+   "names": [
+    "paris",
+    "france"
+   ],
+   "photo": "photo-1549144511-f099e773c147",
+   "name": "cyril mzn",
+   "username": "cyril_mzn"
+  },
+  {
+   "id": "prague",
+   "place": "Charles Bridge, Prague",
+   "names": [
+    "prague",
+    "praha",
+    "czech",
+    "vienna",
+    "budapest"
+   ],
+   "photo": "photo-1658448358148-e5740977244c",
+   "name": "Ilia Bronskiy",
+   "username": "idbronskiy"
+  },
+  {
+   "id": "rio",
+   "place": "Sugarloaf, Rio de Janeiro",
+   "names": [
+    "rio",
+    "brazil",
+    "sao paulo",
+    "buenos aires"
+   ],
+   "photo": "photo-1619101986791-6207d001131e",
+   "name": "Rodrigo Sümmer",
+   "username": "rodsimmer"
+  },
+  {
+   "id": "rome",
+   "place": "The Colosseum, Rome",
+   "names": [
+    "rome",
+    "roma",
+    "vatican",
+    "italy"
+   ],
+   "photo": "photo-1555992828-ca4dbe41d294",
+   "name": "Spencer Davis",
+   "username": "spencerdavis"
+  },
+  {
+   "id": "sanfrancisco",
+   "place": "The Golden Gate, San Francisco",
+   "names": [
+    "san francisco",
+    "sf",
+    "california",
+    "los angeles",
+    "seattle",
+    "portland"
+   ],
+   "photo": "photo-1516473344662-e3a32406ecad",
+   "name": "Gordon Mak",
+   "username": "gcmak"
+  },
+  {
+   "id": "santorini",
+   "place": "Oia, Santorini",
+   "names": [
+    "santorini",
+    "oia",
+    "mykonos",
+    "greece",
+    "athens",
+    "fira"
+   ],
+   "photo": "photo-1533104816931-20fa691ff6ca",
+   "name": "Ryan Spencer",
+   "username": "zombience"
+  },
+  {
+   "id": "singapore",
+   "place": "Marina Bay, Singapore",
+   "names": [
+    "singapore",
+    "kuala lumpur",
+    "malaysia"
+   ],
+   "photo": "photo-1628221680019-f28a2716e727",
+   "name": "Keming Tan",
+   "username": "kemingt"
+  },
+  {
+   "id": "sydney",
+   "place": "Opera House, Sydney",
+   "names": [
+    "sydney",
+    "australia",
+    "melbourne",
+    "auckland",
+    "new zealand"
+   ],
+   "photo": "photo-1549180030-48bf079fb38a",
+   "name": "Kay",
+   "username": "kewal"
+  },
+  {
+   "id": "tokyo",
+   "place": "Mount Fuji from Tokyo",
+   "names": [
+    "tokyo",
+    "osaka",
+    "yokohama",
+    "japan"
+   ],
+   "photo": "photo-1565618754154-c8011e5df2a6",
+   "name": "Ifan Nuriyana",
+   "username": "ifannuriyana"
+  },
+  {
+   "id": "venice",
+   "place": "Grand Canal, Venice",
+   "names": [
+    "venice",
+    "venezia"
+   ],
+   "photo": "photo-1523906921802-b5d2d899e93b",
+   "name": "Damiano Baschiera",
+   "username": "damiano_baschiera"
+  }
+ ],
+ "cities": {
+  "lucerne": {
+   "photo": "photo-1717004271316-2253c536e372",
+   "name": "Alexis Presa",
+   "username": "alexispresa"
+  },
+  "luzern": {
+   "photo": "photo-1717004271316-2253c536e372",
+   "name": "Alexis Presa",
+   "username": "alexispresa"
+  },
+  "zurich": {
+   "photo": "photo-1600532862492-d0eb74ab7b53",
+   "name": "Alex Dudar",
+   "username": "alexdudar"
+  }
+ }
+}

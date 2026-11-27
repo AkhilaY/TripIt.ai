@@ -2,10 +2,16 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>UIAppFonts</key>
+	<array>
+		<string>Jost-Light.ttf</string>
+		<string>Jost-Regular.ttf</string>
+		<string>Jost-Medium.ttf</string>
+	</array>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>TripIt</string>
+	<string>Travel Edit</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -22,32 +28,62 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>Travel Edit links</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>traveledit</string>
+			</array>
+		</dict>
+	</array>
 	<key>UILaunchScreen</key>
-	<dict/>
+	<dict>
+		<key>UIColorName</key>
+		<string>Background</string>
+		<key>UIImageName</key>
+		<string>Wordmark</string>
+		<key>UIImageRespectsSafeAreaInsets</key>
+		<true/>
+	</dict>
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
 	</array>
-	<key>UIBackgroundModes</key>
+	<key>UISupportedInterfaceOrientations~ipad</key>
 	<array>
-		<string>remote-notification</string>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationPortraitUpsideDown</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
 	<key>LSApplicationQueriesSchemes</key>
 	<array>
 		<string>comgooglemaps</string>
 	</array>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>TripIt shows where you are on the map relative to your saved places.</string>
-	<key>NSAppTransportSecurity</key>
-	<dict>
-		<key>NSAllowsLocalNetworking</key>
-		<true/>
-	</dict>
+	<string>Travel Edit uses your location to sort places by distance, find what's near you and show travel times.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Take a photo of a menu, a booking confirmation or a screenshot to add to Travel Edit.</string>
+	<key>NSCalendarsWriteOnlyAccessUsageDescription</key>
+	<string>Events you save from posts, like pop-ups and shows, are added to your calendar.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Choose screenshots or photos of menus and bookings to add to Travel Edit.</string>
+	<key>WKAppBoundDomains</key>
+	<array>
+		<string>$(TRIPIT_HOST)</string>
+	</array>
+	<key>UIStatusBarStyle</key>
+	<string>UIStatusBarStyleDefault</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
+	<key>SentryDSN</key>
+	<string>$(SENTRY_DSN_IOS)</string>
 	<key>AppGroupID</key>
 	<string>$(APP_GROUP_ID)</string>
 	<key>TripItAPIBaseURL</key>
 	<string>$(TRIPIT_API_BASE_URL)</string>
-	<key>TripItAPIKey</key>
-	<string>$(TRIPIT_API_KEY)</string>
 </dict>
 </plist>

@@ -1,5 +1,6 @@
 """Downloading reels and turning them into things Claude can read: caption, audio, frames."""
 
+from datetime import date, datetime, timezone
 import logging
 import os
 import re
@@ -10,7 +11,7 @@ from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse
 
-from . import tiktok
+from . import instagram, tiktok
 from .config import Settings
 from .models import ReelMetadata
 
@@ -63,13 +64,17 @@ def download_reel(url: str, workdir: Path, settings: Settings) -> DownloadedReel
     import yt_dlp
 
     platform = platform_for(url)
+    if platform == "instagram":
+        url = instagram.resolve(url)
     if platform == "tiktok":
         url = tiktok.resolve(url)
         if tiktok.is_photo_post(url):
             return _tiktok_photo_post(url, workdir, settings)
     opts = {
         "outtmpl": str(workdir / "%(id)s.%(ext)s"),
-        "format": "best[height<=720]/best",
+        # YouTube mostly serves video and audio separately now; ffmpeg joins them. TikTok and Instagram send both.
+        "format": ("bv*[height<=720]+ba/b[height<=720]/bv*+ba/b" if platform == "youtube" else "best[height<=720]/best"),
+        "merge_output_format": "mp4",
         "quiet": True,
         "no_warnings": True,
         "noplaylist": False,  # IG carousels come through as playlists
@@ -86,12 +91,20 @@ def download_reel(url: str, workdir: Path, settings: Settings) -> DownloadedReel
             info = ydl.extract_info(url, download=True)
         except yt_dlp.utils.DownloadError as e:
             log.warning("Media download failed, retrying for metadata only: %s", e)
+            if platform == "instagram":  # photo posts always land here; blocked reels sometimes do
+                post = _instagram_photo_post(url, workdir)
+                if post:
+                    return post
             try:
                 info = ydl.extract_info(url, download=False)
             except yt_dlp.utils.DownloadError as e2:
                 log.warning("Metadata fetch failed too: %s", e2)
                 if platform == "tiktok" and "Unsupported URL" in str(e2):
                     return _tiktok_photo_post(url, workdir, settings)
+                if platform == "instagram":
+                    post = _instagram_photo_post(url, workdir)
+                    if post:
+                        return post
                 raise DownloadFailed(clean_error(str(e2))) from e2
             return DownloadedReel(metadata=_metadata(info, url, platform))
 
@@ -106,11 +119,22 @@ def download_reel(url: str, workdir: Path, settings: Settings) -> DownloadedReel
 
 
 def _tiktok_photo_post(url: str, workdir: Path, settings: Settings) -> DownloadedReel:
-    got = tiktok.download_photo_post(url, workdir, settings.frame_width)
+    cookies = tiktok.cookies_for_tiktok(settings.ytdlp_cookies_file or _cookies_from_env(settings.ytdlp_cookies))
+    got = tiktok.download_photo_post(url, workdir, settings.frame_width, cookies)
     if not got or not (got[1] or got[0].caption):
-        raise DownloadFailed("TikTok didn't send this photo post to the server")
+        raise DownloadFailed("TikTok held back this photo post")
     metadata, slides = got
     return DownloadedReel(metadata=metadata, image_paths=slides)
+
+
+def _instagram_photo_post(url: str, workdir: Path) -> Optional[DownloadedReel]:
+    """A picture or carousel post, or a reel yt-dlp couldn't get, read from Instagram's embed page."""
+    got = instagram.download_post(url, workdir)
+    if not got:
+        return None
+    metadata, slides, video = got
+    log.info("Instagram embed: %d slides, %s", len(slides), "a video" if video else "no video")
+    return DownloadedReel(metadata=metadata, image_paths=slides, video_path=video)
 
 
 class DownloadFailed(Exception):
@@ -202,13 +226,26 @@ def _metadata(info: dict, url: str, platform: str) -> ReelMetadata:
         uploader=info.get("uploader") or info.get("channel"),
         thumbnail_url=info.get("thumbnail"),
         duration_seconds=info.get("duration"),
+        posted_on=_posted_on(info),
     )
+
+
+def _posted_on(info: dict):
+    raw = str(info.get("upload_date") or "")
+    try:
+        if len(raw) == 8 and raw.isdigit():
+            return date(int(raw[:4]), int(raw[4:6]), int(raw[6:]))
+        if info.get("timestamp"):
+            return datetime.fromtimestamp(float(info["timestamp"]), tz=timezone.utc).date()
+    except (ValueError, OverflowError, OSError):
+        pass
+    return None
 
 
 def extract_audio(video: Path, workdir: Path) -> Optional[Path]:
     out = workdir / "audio.wav"
     result = subprocess.run(
-        ["ffmpeg", "-y", "-loglevel", "error", "-i", str(video), "-vn", "-ac", "1", "-ar", "16000", str(out)],
+        ["ffmpeg", "-y", "-loglevel", "error", "-i", str(video), "-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", str(out)],
         capture_output=True,
         timeout=180,
     )

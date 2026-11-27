@@ -9,7 +9,6 @@ struct TripView: View {
     @State private var mode = "places"
     @State private var loadError: String?
     @State private var sheet: TripSheet?
-    @State private var scrolled: CGFloat = 0  // how far the places or plan list has scrolled
     @State private var librarySheet: LibrarySheet?
     @State private var confirmDelete = false
     @State private var editMode: EditMode = .inactive
@@ -46,43 +45,25 @@ struct TripView: View {
     }
 
     @ViewBuilder private func content(_ trip: TripDetail) -> some View {
-        VStack(spacing: 0) {
-            if mode != "map" {
-                // The place's photo, edge to edge up under the bar, with the trip's name over it.
-                VStack(alignment: .leading, spacing: 4) {
-                    Spacer(minLength: 0)
-                    Text(trip.name).font(Theme.serif(34)).foregroundStyle(.white).lineLimit(2).minimumScaleFactor(0.7)
-                    Text(Fmt.plural(trip.places.count, "place")).font(Theme.text(.subheadline)).foregroundStyle(.white.opacity(0.85))
-                }
-                .opacity(max(0, 1 - Double(scrolled) / 90))
-                .frame(maxWidth: .infinity, alignment: .bottomLeading)
-                .padding(.horizontal, 20).padding(.bottom, 16)
-                .frame(height: max(0, 182 - scrolled), alignment: .bottom)  // moves up as the list scrolls
-                .clipped()
-                .background {
-                    ZStack {
-                        CityCover(city: trip.city, country: trip.country)
-                        LinearGradient(colors: [.black.opacity(0.35), .clear, .black.opacity(0.6)], startPoint: .top, endPoint: .bottom)
-                    }
-                    .clipped()
-                    .ignoresSafeArea(edges: .top)
-                }
-            }
-            Picker("View", selection: $mode) {
-                ForEach(modes(trip), id: \.self) { Text($0.capitalized).tag($0) }
-            }
-            .pickerStyle(.segmented)
-            .padding(.horizontal, 16).padding(.vertical, 8)
+        let picker = Picker("View", selection: $mode) {
+            ForEach(modes(trip), id: \.self) { Text($0.capitalized).tag($0) }
+        }
+        .pickerStyle(.segmented)
+        let top = AnyView(VStack(spacing: 12) { TripHeaderCard(trip: trip); TripSuggestions(trip: trip); picker })
+        Group {
             switch mode {
-            case "plan": TripPlan(trip: trip, sheet: $sheet, librarySheet: $librarySheet, onScroll: { scrolled = $0 })
+            case "plan": TripPlan(trip: trip, sheet: $sheet, librarySheet: $librarySheet, top: top)
                 .environment(\.editMode, $editMode)
-            case "map": TripMapView(trip: trip)
-            default: TripPlaces(trip: trip, librarySheet: $librarySheet, onScroll: { scrolled = $0 })
+            case "map":
+                VStack(spacing: 0) {
+                    picker.padding(.horizontal, 16).padding(.vertical, 8)
+                    TripMapView(trip: trip)
+                }
+            default: TripPlaces(trip: trip, librarySheet: $librarySheet, top: top)
             }
         }
         .navigationTitle(mode == "map" ? trip.name : "")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbarBackground(mode == "map" ? .automatic : .hidden, for: .navigationBar)
         .toolbar {
             if mode == "plan" && trip.dayCount > 0 {
                 Button(editMode.isEditing ? "Done" : "Edit") {
@@ -111,7 +92,7 @@ struct TripView: View {
                 .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
             }
         }
-        .onChange(of: mode) { _, _ in editMode = .inactive; scrolled = 0 }
+        .onChange(of: mode) { _, _ in editMode = .inactive }
     }
 
     private func menu(_ trip: TripDetail) -> some View {

@@ -524,6 +524,23 @@ struct PackingItem: Codable, Identifiable, Hashable {
     var packed: Bool
     var unused: Bool
     var custom: Bool
+    var cities: [String] = []  // the trip's cities it's for; empty: all
+
+    enum CodingKeys: String, CodingKey { case id, text, group, reason, days, dayBag, packed, unused, custom, cities }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        text = try c.decode(String.self, forKey: .text)
+        group = try c.decode(String.self, forKey: .group)
+        reason = try c.decodeIfPresent(String.self, forKey: .reason)
+        days = try c.decodeIfPresent([Int].self, forKey: .days) ?? []
+        dayBag = try c.decodeIfPresent(Bool.self, forKey: .dayBag) ?? false
+        packed = try c.decodeIfPresent(Bool.self, forKey: .packed) ?? false
+        unused = try c.decodeIfPresent(Bool.self, forKey: .unused) ?? false
+        custom = try c.decodeIfPresent(Bool.self, forKey: .custom) ?? false
+        cities = try c.decodeIfPresent([String].self, forKey: .cities) ?? []
+    }
 }
 
 /// A trip day's weather: a forecast, or the same dates last year when it's too far ahead.
@@ -544,6 +561,20 @@ struct PackingList: Codable, Hashable {
     var notes: String?
     var carryOnOnly: Bool
     var generatedBy: String  // claude, offline or manual
+    var categories: [String] = []  // the groups in your order; empty: the usual order
+
+    enum CodingKeys: String, CodingKey { case tripId, items, weather, notes, carryOnOnly, generatedBy, categories }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        tripId = try c.decode(String.self, forKey: .tripId)
+        items = try c.decode([PackingItem].self, forKey: .items)
+        weather = try c.decodeIfPresent([WeatherDay].self, forKey: .weather) ?? []
+        notes = try c.decodeIfPresent(String.self, forKey: .notes)
+        carryOnOnly = try c.decodeIfPresent(Bool.self, forKey: .carryOnOnly) ?? false
+        generatedBy = try c.decodeIfPresent(String.self, forKey: .generatedBy) ?? "manual"
+        categories = try c.decodeIfPresent([String].self, forKey: .categories) ?? []
+    }
 }
 
 /// An event near where you'll be during a trip (from Ticketmaster).

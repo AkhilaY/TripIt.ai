@@ -83,6 +83,7 @@ from .models import (
     MenuUploadRequest,
     PlaceMenu,
     MoveRequest,
+    PackingCategories,
     PackingItemInput,
     PackingList,
     PackingRequest,
@@ -1345,7 +1346,14 @@ async def add_packing_item(trip_id: str, body: PackingItemInput, request: Reques
     _trip_or_404(request, trip_id)
     if not body.text:
         raise HTTPException(status_code=422, detail="What should be on the list?")
-    return request.app.state.packing.add_item(trip_id, body.text, body.group or "other")
+    return request.app.state.packing.add_item(trip_id, body.text, body.group or "other", body.cities)
+
+
+@app.put("/v1/trips/{trip_id}/packing/categories", response_model=PackingList, dependencies=[Auth])
+async def set_packing_categories(trip_id: str, body: PackingCategories, request: Request) -> PackingList:
+    """The list's categories in your order: renamed, added or removed (their things move to Other)."""
+    _trip_or_404(request, trip_id)
+    return request.app.state.packing.set_categories(trip_id, body.categories, body.renames)
 
 
 @app.patch("/v1/trips/{trip_id}/packing/items/{item_id}", response_model=PackingList, dependencies=[Auth])

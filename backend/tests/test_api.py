@@ -1874,7 +1874,7 @@ def test_packing_item_edits_and_learning(client):
     assert len(deleted["items"]) == len(latest["items"]) - 1
     for bad in ({}, {"text": ""}):
         assert client.post(f"/v1/trips/{trip_id}/packing/items", json=bad, headers=H).status_code == 422
-    assert client.post(f"/v1/trips/{trip_id}/packing/items", json={"text": "x", "group": "boats"}, headers=H).status_code == 422
+    assert client.post(f"/v1/trips/{trip_id}/packing/items", json={"text": "x", "group": "Boats"}, headers=H).status_code == 201  # your own category
     assert client.patch(f"/v1/trips/{trip_id}/packing/items/nope", json={"packed": True}, headers=H).status_code == 404
     assert client.delete(f"/v1/trips/{trip_id}/packing/items/nope", headers=H).status_code == 404
     assert client.get("/v1/trips/nope/packing", headers=H).status_code == 404
@@ -3689,3 +3689,38 @@ def test_trip_with_several_cities_and_sort_by_city(client):
     loose = client.post("/v1/trips", json={"name": "Loose", "days": 2, "place_ids": ids}, headers=H).json()
     spread = client.post(f"/v1/trips/{loose['id']}/sort-by-city", headers=H).json()
     assert all(p["day_number"] in (1, 2) for p in spread["places"] if p["city"])
+    # No route but a stay: its city's places go on the hotel's nights.
+    stay = client.post("/v1/trips", json={"name": "Stay", "days": 4, "start_date": "2027-03-01", "place_ids": ids}, headers=H).json()
+    client.post(f"/v1/trips/{stay['id']}/bookings", json={"kind": "hotel", "title": "The Pod", "start_at": "2027-03-03",
+                                                          "end_at": "2027-03-04", "address": "1 Main St, New York, NY"}, headers=H)
+    stayed = client.post(f"/v1/trips/{stay['id']}/sort-by-city", headers=H).json()
+    assert {p["day_number"] for p in stayed["places"] if p["city"] == "New York"} <= {3, 4}
+
+
+def test_packing_categories_and_cities(client):
+    trip_id = packing_trip(client)
+    client.put(f"/v1/trips/{trip_id}/stops", json={"stops": [{"city": "Zurich", "days": 2}, {"city": "Munich", "days": 2}]}, headers=H)
+    boots = draft("Snow boots", "shoes")
+    boots.cities = ["zurich"]
+    everywhere = draft("Wool coat", "clothes")
+    everywhere.cities = ["Zurich", "Munich"]  # all of them: same as none
+    client.messages.outputs[PackingResult] = PackingResult(items=[boots, everywhere, draft("Charger", "tech")], notes=None)
+    made = client.post(f"/v1/trips/{trip_id}/packing", json={}, headers=H).json()
+    by = {i["text"]: i for i in made["items"]}
+    assert by["Snow boots"]["cities"] == ["Zurich"] and by["Wool coat"]["cities"] == []
+    assert '"cities"' in client.messages.calls[-1]["messages"][0]["content"][0]["text"]
+
+    # Rename Clothes, add Ski day, drop Tech (its things go to Other), reorder.
+    out = client.put(f"/v1/trips/{trip_id}/packing/categories", json={
+        "categories": ["Ski day", "Outfits", "shoes", "documents", "other"], "renames": {"clothes": "Outfits"}}, headers=H).json()
+    by = {i["text"]: i for i in out["items"]}
+    assert by["Wool coat"]["group"] == "Outfits" and by["Charger"]["group"] == "other"
+    assert out["categories"] == ["Ski day", "Outfits", "shoes", "documents", "other"]
+    moved = client.patch(f"/v1/trips/{trip_id}/packing/items/{by['Charger']['id']}", json={"group": "Ski day", "cities": ["Zurich"]}, headers=H).json()
+    assert next(i for i in moved["items"] if i["text"] == "Charger")["cities"] == ["Zurich"]
+
+    # The next trip's list starts with your categories, and the renamed group keeps its new name.
+    other = packing_trip(client)
+    client.messages.outputs[PackingResult] = PackingResult(items=[draft("Jumper", "clothes")], notes=None)
+    fresh = client.post(f"/v1/trips/{other}/packing", json={}, headers=H).json()
+    assert fresh["categories"][:2] == ["Ski day", "Outfits"] and fresh["items"][0]["group"] == "Outfits"

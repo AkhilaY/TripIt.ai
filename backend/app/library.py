@@ -522,6 +522,8 @@ class Library:
                 ranges.append((normalize(st.city), range(day, min(trip.day_count, day + st.days - 1) + 1)))
                 day += st.days
         else:
+            ranges = self._stay_ranges(trip)
+        if not ranges:
             # No route: the cities its places are in share the days in blocks, in proportion to their places
             # (each at least a day), so London and Paris never end up on the same day.
             counts_by_city: dict[str, int] = {}
@@ -562,6 +564,32 @@ class Library:
             counts[target] += 1
             self.db.update_place(p.id, trip_id, day_number=target, day_order=counts[target])
         return self.db.get_trip_detail(trip_id)
+
+    @staticmethod
+    def _stay_ranges(trip) -> list[tuple[str, range]]:
+        """Each hotel's nights as days in the city its places are in (found in the stay's address or name), for
+        trips with dates and stays but no route."""
+        if not trip.start_date or not trip.day_count:
+            return []
+        start = trip.start_date if isinstance(trip.start_date, date) else date.fromisoformat(str(trip.start_date)[:10])
+        cities = {normalize(p.city) for p in trip.places if p.city}
+        out: list[tuple[str, range]] = []
+        for b in sorted(trip.bookings, key=lambda b: b.start_at or ""):
+            if getattr(b.kind, "value", b.kind) != "hotel" or not b.start_at:
+                continue
+            text = normalize(" ".join(x for x in (b.address, b.destination, b.title) if x))
+            city = next((c for c in cities if c and c in text), None)
+            if not city:
+                continue
+            try:
+                first = (date.fromisoformat(b.start_at[:10]) - start).days + 1
+                last = (date.fromisoformat(b.end_at[:10]) - start).days + 1 if b.end_at else first + 1
+            except ValueError:
+                continue
+            days = range(max(1, first), min(trip.day_count, last) + 1)  # check-out day still counts as a day there
+            if len(days):
+                out.append((city, days))
+        return out
 
     async def fill_gaps(self, trip_id: str, claude: Optional[ClaudeService], taste: Optional[str] = None,
                         preferences: Optional[str] = None, per_day: int = 3, limit: int = 8) -> int:

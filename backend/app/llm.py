@@ -106,6 +106,7 @@ For each event given, write one short line (under 16 words) on why it suits THIS
 PACKING_SYSTEM = """You write a packing list for one specific trip, as a thoughtful, well-travelled friend would. You get the destination, the dates, each day's stops, the weather, any bookings, the traveller's taste and notes, and what they usually leave unused.
 
 - Make it specific to THIS trip. Skip generic filler. Every non-obvious item gets a short reason tied to the weather, a stop or a day: 'Light rain on days 2 and 3', 'Temple visit on day 4: cover shoulders and knees', 'Rooftop bar on day 2'. Obvious basics (passport, charger, toothbrush) need no reason.
+- On a trip to several cities (you get them as "cities"), tag an item with the cities it is only needed in (warm boots for the cold one). Leave cities empty for things needed everywhere, which is most things.
 - Use only the weather you are given. If none is given, don't claim a forecast; you may mention the usual climate for the season when the dates are known, and say it is typical.
 - Use the stops: walking-heavy days need comfortable shoes, beaches, hikes and temples need their own gear or dress, fine dining or nightlife needs one smart outfit, markets and shops may need a tote.
 - Give quantities for clothes and base them on the trip length, with laundry in mind for trips over a week. For carry-on only, keep it lean, suggest wearing the bulkiest items on the flight and decant liquids.

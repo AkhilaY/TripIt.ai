@@ -6,7 +6,7 @@ struct TripPlan: View {
     let trip: TripDetail
     @Binding var sheet: TripSheet?
     @Binding var librarySheet: LibrarySheet?
-    var onScroll: ((CGFloat) -> Void)?
+    var top: AnyView?  // the trip header, shown as the list's first row
     @Environment(Store.self) private var store
     @Environment(Router.self) private var router
     @Environment(\.editMode) private var editMode
@@ -16,6 +16,7 @@ struct TripPlan: View {
     var body: some View {
         if trip.dayCount == 0 {
             ScrollView {
+                if let top { top.padding(.horizontal, 16) }
                 EmptyState(symbol: "calendar", color: Theme.indigo, title: "No itinerary yet",
                            text: "Build it from your \(Fmt.plural(trip.places.count, "saved place")): make the days, then put places on them.") {
                     VStack(spacing: 10) {
@@ -34,10 +35,11 @@ struct TripPlan: View {
 
     private var list: some View {
         List {
-            // Reports how far the list has scrolled, so the trip's photo header can move up with it.
-            Color.clear.frame(height: 0)
-                .listRowInsets(EdgeInsets()).listRowBackground(Color.clear).listRowSeparator(.hidden)
-                .onGeometryChange(for: CGFloat.self) { $0.frame(in: .scrollView).minY } action: { onScroll?(max(0, -$0)) }
+            // The trip's header and the Places / Plan / Map switch, which scroll away with the list.
+            if let top {
+                Section { top.listRowInsets(EdgeInsets()).listRowBackground(Color.clear) }
+                    .listSectionSpacing(.compact)
+            }
             Section {
                 HStack {
                     Label(plannedBy, systemImage: trip.plannedBy == "claude" ? "sparkles" : "calendar")
@@ -57,6 +59,7 @@ struct TripPlan: View {
                 }
                 if !trip.route.isEmpty { TripRouteStrip(stops: trip.route) { sheet = .route } }
             }
+            if editMode?.wrappedValue.isEditing != true { tray }
             ForEach(1...trip.dayCount, id: \.self) { day in
                 daySection(day)
             }
@@ -64,29 +67,6 @@ struct TripPlan: View {
                 Section {
                     Button { addToDay(nil) } label: { Label("Add a day", systemImage: "plus") }
                         .disabled(trip.dayCount >= 21)
-                }
-            }
-            let unscheduled = trip.places.filter { $0.dayNumber == nil }
-                .sorted { $0.mustDo != $1.mustDo ? $0.mustDo : $0.mentionCount > $1.mentionCount }
-            if !unscheduled.isEmpty {
-                Section {
-                    ForEach(unscheduled) { place in
-                        NavigationLink(value: Route.place(id: place.id, tripId: trip.id)) {
-                            PlaceRow(place: place)
-                        }
-                        .contextMenu { moveMenu(place) }
-                    }
-                } header: {
-                    HStack {
-                        Text("Not on a day yet · \(unscheduled.count)")
-                        Spacer()
-                        if editMode?.wrappedValue.isEditing != true {
-                            Button { Task { await sortByCity() } } label: { Label("Sort by city", systemImage: "mappin.and.ellipse") }
-                                .font(Theme.text(.footnote)).foregroundStyle(Theme.link).textCase(nil)
-                        }
-                    }
-                } footer: {
-                    Text("Sort by city puts each place on a day in its own city, following your route.")
                 }
             }
             Section {
@@ -100,6 +80,13 @@ struct TripPlan: View {
         .listStyle(.insetGrouped)
         .tripBackground()
         .task(id: legsKey) { await loadLegs() }
+        .confirmationDialog(placing.map { "Which day for \($0.name)?" } ?? "", isPresented: Binding(get: { placing != nil }, set: { if !$0 { placing = nil } }),
+                            titleVisibility: .visible, presenting: placing) { place in
+            ForEach(dayChoices(for: place), id: \.self) { d in
+                Button(dayLabel(d, for: place)) { Task { await move(place, to: d) } }
+            }
+            Button("Remove from trip", role: .destructive) { Task { await store.removeFromTrip(trip.id, place.id) } }
+        }
     }
 
     private var plannedBy: String {
@@ -115,34 +102,28 @@ struct TripPlan: View {
         let located = stops.filter(\.isLocated)
         let stop = trip.stop(on: day)
         let arriving = stop.flatMap { $0.startDay == day && $0.startDay > 1 ? $0 : nil }
+        let editing = editMode?.wrappedValue.isEditing == true
+        let plan = DayBookings(trip: trip, day: day)
+        // Each timed booking sits just above the first stop planned after it.
+        let slots = plan.slots(for: stops)
         Section {
-            if let arriving, editMode?.wrappedValue.isEditing != true {
-                TravelDayRow(from: trip.stop(on: day - 1)?.city, stop: arriving, ticket: dayBookings(day).first { ["flight", "train"].contains($0.kind) }) {
-                    router.push(.bookings(tripId: trip.id))
-                }
+            ForEach(plan.stays, id: \.booking.id) { stay in BookingLine(item: stay) { openBookings() } }
+            if let arriving, !editing, !plan.hasTravel {
+                TravelDayRow(from: trip.stop(on: day - 1)?.city, stop: arriving, ticket: nil) { openBookings() }
             }
-            ForEach(dayBookings(day)) { booking in
-                Button { router.push(.bookings(tripId: trip.id)) } label: {
-                    HStack(spacing: 12) {
-                        SymbolTile(symbol: bookingSymbol(booking.kind), color: Theme.blue)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(booking.title).foregroundStyle(Theme.label)
-                            Text([booking.startAt.flatMap(timePart).map(Fmt.clock), booking.origin, booking.destination]
-                                .compactMap { $0 }.joined(separator: " · "))
-                                .font(Theme.text(.caption)).foregroundStyle(Theme.secondary)
-                        }
-                    }
-                }
-            }
+            if editing { ForEach(plan.timed, id: \.booking.id) { item in BookingLine(item: item) { openBookings() } } }
             ForEach(Array(stops.enumerated()), id: \.element.id) { index, place in
                 VStack(alignment: .leading, spacing: 8) {
+                    if !editing {
+                        ForEach(slots[index] ?? [], id: \.booking.id) { item in BookingLine(item: item) { openBookings() } }
+                    }
                     NavigationLink(value: Route.place(id: place.id, tripId: trip.id)) {
                         StopRow(place: place, number: index + 1)
                     }
-                    if let closure = trip.closure(for: place.id), editMode?.wrappedValue.isEditing != true {
+                    if let closure = trip.closure(for: place.id), !editing {
                         ClosureLine(closure: closure) { day in Task { await move(place, to: day) } }
                     }
-                    if editMode?.wrappedValue.isEditing != true,
+                    if !editing,
                        let next = located.firstIndex(where: { $0.id == place.id }).flatMap({ $0 + 1 < located.count ? located[$0 + 1] : nil }),
                        place.isLocated {
                         legView(day: day, from: place, to: next)
@@ -155,11 +136,14 @@ struct TripPlan: View {
                 }
             }
             .onMove { from, to in reorder(day: day, stops: stops, from: from, to: to) }
-            if stops.isEmpty {
+            if !editing { ForEach(slots[stops.count] ?? [], id: \.booking.id) { item in BookingLine(item: item) { openBookings() } } }
+            if stops.isEmpty && plan.timed.isEmpty {
                 Text("Nothing planned yet.").foregroundStyle(Theme.secondary)
             }
-            if editMode?.wrappedValue.isEditing != true {
-                Button { addToDay(day) } label: { Label("Add places", systemImage: "plus") }
+            if !editing {
+                Button { addToDay(day) } label: {
+                    Label(plan.window.map { "Add places · \($0)" } ?? "Add places", systemImage: "plus")
+                }
             }
         } header: {
             VStack(alignment: .leading, spacing: 2) {
@@ -178,6 +162,74 @@ struct TripPlan: View {
             .padding(.top, 8)
         }
     }
+
+    private func openBookings() { router.push(.bookings(tripId: trip.id)) }
+
+    // MARK: Not in the plan
+
+    @State private var placing: Place?
+
+    /// The places not on a day yet, at the top where they're seen: tap one to pick its day.
+    @ViewBuilder private var tray: some View {
+        let unscheduled = trip.places.filter { $0.dayNumber == nil }
+            .sorted { $0.mustDo != $1.mustDo ? $0.mustDo : $0.mentionCount > $1.mentionCount }
+        if !unscheduled.isEmpty {
+            Section {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(unscheduled) { place in
+                            Button { placing = place } label: {
+                                HStack(spacing: 8) {
+                                    PlaceThumb(place: place, size: 30)
+                                    VStack(alignment: .leading, spacing: 0) {
+                                        Text(place.name).font(Theme.text(.footnote, weight: .medium)).foregroundStyle(Theme.label).lineLimit(1)
+                                        if !place.city.isEmpty { Text(place.city).font(Theme.text(.caption2)).foregroundStyle(Theme.secondary) }
+                                    }
+                                }
+                                .padding(.leading, 4).padding(.trailing, 12).padding(.vertical, 4)
+                                .background(Theme.background, in: Capsule())
+                            }
+                            .buttonStyle(PressStyle())
+                            .contextMenu { moveMenu(place) }
+                        }
+                    }
+                    .padding(.vertical, 2)
+                }
+                .listRowBackground(Theme.dynamic(0xEFE7DD, 0x2B241D))
+            } header: {
+                HStack {
+                    Text("\(Fmt.plural(unscheduled.count, "place")) not in the plan").font(Theme.text(.footnote, weight: .medium))
+                        .foregroundStyle(Theme.label)
+                    Spacer()
+                    Button { Task { await sortByCity() } } label: { Label("Sort by city", systemImage: "mappin.and.ellipse") }
+                        .font(Theme.text(.footnote)).foregroundStyle(Theme.link)
+                }
+                .textCase(nil)
+            } footer: {
+                Text("Tap a place to pick its day. Sort by city puts each on a day in its own city, by your route or where you're staying.")
+            }
+        }
+    }
+
+    /// Days in the place's own city first, then the rest.
+    private func dayChoices(for place: Place) -> [Int] {
+        let key = PlaceFilter.normalize(place.city)
+        let all = Array(1...max(trip.dayCount, 1))
+        guard !key.isEmpty else { return all }
+        let mine = all.filter { d in trip.stop(on: d).map { PlaceFilter.normalize($0.city) == key } ?? false }
+        return mine + all.filter { !mine.contains($0) }
+    }
+
+    private func dayLabel(_ day: Int, for place: Place) -> String {
+        var parts = ["Day \(day)"]
+        if let date = Fmt.isoDay(start: trip.startDate, day: day).flatMap(Fmt.day) {
+            parts.append(date.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated)))
+        }
+        if let city = trip.stop(on: day)?.city, trip.route.count > 1 { parts.append(city) }
+        parts.append(Fmt.plural(trip.dayPlaces(day).count, "stop"))
+        return parts.joined(separator: " · ")
+    }
+
 
     @ViewBuilder private func moveMenu(_ place: Place) -> some View {
         Menu {
@@ -287,23 +339,6 @@ struct TripPlan: View {
 
     private var modeSymbol: String {
         ["walk": "figure.walk", "transit": "tram.fill", "drive": "car.fill", "bike": "bicycle"][travelMode] ?? "figure.walk"
-    }
-
-    // MARK: Bookings on a day
-
-    private func dayBookings(_ day: Int) -> [Booking] {
-        guard let start = trip.startDate.flatMap(Fmt.day),
-              let date = Calendar.current.date(byAdding: .day, value: day - 1, to: start) else { return [] }
-        let iso = Fmt.iso(date)
-        return trip.bookings.filter { ($0.startAt ?? "").hasPrefix(iso) }.sorted { ($0.startAt ?? "") < ($1.startAt ?? "") }
-    }
-
-    private func timePart(_ value: String) -> String? {
-        value.count > 11 ? String(value.suffix(5)) : nil
-    }
-
-    private func bookingSymbol(_ kind: String) -> String {
-        ["flight": "airplane", "hotel": "bed.double.fill", "reservation": "fork.knife", "car": "car.fill"][kind] ?? "ticket.fill"
     }
 }
 

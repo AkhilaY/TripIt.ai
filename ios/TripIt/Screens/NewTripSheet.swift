@@ -1,7 +1,8 @@
 import SwiftUI
 
-/// New trip: its cities (any number, each with its days, or none yet), a name and dates, then the saved places to take.
-/// You build the days yourself; "Put places on their city's days" on the plan sorts them by the route.
+/// New trip, however it starts (from nothing, from saved places, a list or a city): a name, its cities (any number,
+/// or none yet) and dates; then the saved places to take, when there are any; then anything already booked.
+/// Every step but the name can be left for later.
 struct NewTripSheet: View {
     let placeIds: [String]
     let folderId: String?
@@ -40,23 +41,27 @@ struct NewTripSheet: View {
     var body: some View {
         NavigationStack {
             Group {
-                if step == 1 { whereStep } else { placesStep }
+                switch step {
+                case 1: whereStep
+                case 2: placesStep
+                default: bookedStep
+                }
             }
             .tripBackground()
             .navigationTitle("New trip")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    if step > 1 { Button { withAnimation { step = 1 } } label: { Label("Back", systemImage: "chevron.left") } }
+                    if step > 1 { Button { back() } label: { Label("Back", systemImage: "chevron.left") } }
                     else { Button("Cancel") { dismiss() } }
                 }
                 ToolbarItem(placement: .principal) {
                     HStack(spacing: 5) {
-                        ForEach(1...2, id: \.self) { i in
+                        ForEach(1...3, id: \.self) { i in
                             Capsule().fill(i <= step ? Theme.accent : Theme.fill).frame(width: 22, height: 4)
                         }
                     }
-                    .accessibilityLabel("Step \(step) of 2")
+                    .accessibilityLabel("Step \(step) of 3")
                 }
             }
             .overlay { if busy { busyOverlay } }
@@ -103,6 +108,10 @@ struct NewTripSheet: View {
         let cities = Dictionary(grouping: store.places.filter { !$0.city.isEmpty }, by: \.city).mapValues(\.count)
             .sorted { $0.value > $1.value }.prefix(10)
         return Form {
+            Section("Name") {
+                TextField(stops.first.map { "\($0.city) trip" } ?? "e.g. Swiss Germany trip", text: $name)
+                    .textInputAutocapitalization(.words)
+            }
             Section {
                 ForEach($stops) { $stop in
                     Stepper(value: $stop.days, in: 1...21) {
@@ -145,7 +154,6 @@ struct NewTripSheet: View {
             }
             .sensoryFeedback(.selection, trigger: stops.count)
             Section {
-                TextField(stops.first.map { "\($0.city) trip" } ?? "Trip name (optional)", text: $name)
                 Button { pickingDates = true } label: {
                     HStack {
                         Text("Dates").foregroundStyle(Theme.label)
@@ -179,7 +187,18 @@ struct NewTripSheet: View {
             for place in store.places where keys.contains(PlaceFilter.normalize(place.city)) { picked.insert(place.id) }
             touched = true
         }
-        withAnimation { step = 2 }
+        withAnimation { step = choosable ? 2 : 3 }
+    }
+
+    private func back() {
+        withAnimation { step = step == 3 && choosable ? 2 : 1 }
+    }
+
+    /// Whether there are saved places worth offering: ones already picked, or saved in the trip's cities.
+    private var choosable: Bool {
+        if !picked.isEmpty { return true }
+        let keys = Set(stops.map { PlaceFilter.normalize($0.city) })
+        return !keys.isEmpty && store.places.contains { keys.contains(PlaceFilter.normalize($0.city)) }
     }
 
     // MARK: Step 2
@@ -192,16 +211,59 @@ struct NewTripSheet: View {
         .safeAreaInset(edge: .bottom) {
             VStack(spacing: 6) {
                 if let error { Text(error).font(Theme.text(.footnote)).foregroundStyle(Theme.danger) }
-                Button(action: create) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "calendar.badge.plus")
-                        Text("Create trip" + (picked.isEmpty ? "" : " · \(Fmt.plural(picked.count, "place"))"))
-                    }
+                Button { withAnimation { step = 3 } } label: {
+                    Text(picked.isEmpty ? "Next" : "Next · \(Fmt.plural(picked.count, "place"))")
                 }
                 .buttonStyle(PrimaryButtonStyle())
             }
             .padding(.horizontal, 20).padding(.vertical, 10)
             .background(.bar)
+        }
+    }
+
+    // MARK: Step 3
+
+    private var bookedStep: some View {
+        Form {
+            Section {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Already booked anything?").font(Theme.serif(26)).foregroundStyle(Theme.label)
+                    Text("Add it and it goes on your plan, on its day. Its cities and dates can fill in what you left out.")
+                        .font(Theme.text(.subheadline)).foregroundStyle(Theme.secondary)
+                }
+                .listRowBackground(Color.clear)
+                .listRowInsets(EdgeInsets(top: 4, leading: 4, bottom: 4, trailing: 4))
+            }
+            Section {
+                bookedRow("airplane", "Add a flight", "Flight number and times, every leg") { create(then: .flight) }
+                bookedRow("bed.double.fill", "Add a stay", "Hotel, apartment or house") { create(then: .hotel) }
+                bookedRow("doc.text.viewfinder", "From a screenshot", "Of a confirmation email or app") { create(then: .other) }
+            } footer: {
+                Text("Nothing yet? Create the trip; you can add bookings any time from the trip.")
+            }
+            Section {
+                if let error { Text(error).font(Theme.text(.footnote)).foregroundStyle(Theme.danger) }
+                Button { create(then: nil) } label: {
+                    Text("Create trip" + (picked.isEmpty ? "" : " · \(Fmt.plural(picked.count, "place"))"))
+                }
+                .buttonStyle(PrimaryButtonStyle())
+                .listRowBackground(Color.clear)
+                .listRowInsets(EdgeInsets())
+            }
+        }
+    }
+
+    private func bookedRow(_ symbol: String, _ title: String, _ detail: String, _ action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                SymbolTile(symbol: symbol, color: Theme.blue)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title).foregroundStyle(Theme.label)
+                    Text(detail).font(Theme.text(.caption)).foregroundStyle(Theme.secondary)
+                }
+                Spacer()
+                Image(systemName: "chevron.right").font(Theme.text(.caption)).foregroundStyle(Theme.tertiary)
+            }
         }
     }
 
@@ -217,7 +279,8 @@ struct NewTripSheet: View {
         }
     }
 
-    private func create() {
+    /// Makes the trip and opens it; with a kind, the booking form opens on it next.
+    private func create(then booking: BookingKind?) {
         error = nil
         busy = true
         Task {
@@ -233,10 +296,16 @@ struct NewTripSheet: View {
                 store.apply(trip)
                 await store.reloadTrips()
                 await store.reloadPlaces()
-                store.show("Your days are ready to fill")
+                store.show(booking == nil ? "Your trip is ready" : "Trip made. Now your booking")
                 Haptics.success()
                 dismiss()
                 router.push(.trip(id: trip.id))
+                if let booking {
+                    try? await Task.sleep(for: .milliseconds(600))  // let this sheet finish closing first
+                    var fields = BookingFields()
+                    fields.kind = booking
+                    router.bookingRequest = .init(tripId: trip.id, fields: booking == .other ? nil : fields)
+                }
             } catch {
                 self.error = error.localizedDescription
             }

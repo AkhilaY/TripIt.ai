@@ -449,6 +449,7 @@ class PackingDraftItem(BaseModel):
     reason: Optional[str] = Field(description="Why it's on this trip's list, under 14 words, tied to the weather, a stop or a day. Null for obvious basics.")
     days: list[int] = Field(description="Trip days (from 1) when it matters, for rain gear or an outfit for one evening. Empty when it applies to the whole trip.")
     day_bag: bool = Field(description="True when it goes in the bag carried out each day (umbrella, sunscreen, scarf for a temple, charger).")
+    cities: list[str] = Field(default=[], description="On a trip to several cities: the ones it's only needed in (snow boots for the mountain town), named as in the trip's cities. Empty when it's for the whole trip.")
 
 
 class PackingResult(BaseModel):
@@ -459,13 +460,14 @@ class PackingResult(BaseModel):
 class PackingItem(BaseModel):
     id: str
     text: str
-    group: PackingGroup = "other"
+    group: str = "other"  # one of PackingGroup, or a category the person made or renamed
     reason: Optional[str] = None
     days: list[int] = []
     day_bag: bool = False
     packed: bool = False
     unused: bool = False  # marked after the trip: left out of future lists
     custom: bool = False  # added by the person, kept when the list is made again
+    cities: list[str] = []  # the trip's cities it's for; empty: all of them
 
 
 class PackingList(BaseModel):
@@ -476,12 +478,20 @@ class PackingList(BaseModel):
     carry_on_only: bool = False
     generated_by: Literal["claude", "offline", "manual"] = "offline"
     generated_at: datetime
+    categories: list[str] = []  # the groups in the person's order, theirs included; empty: the usual order
 
 
 class PackingStart(BaseModel):
     """Start a list without AI: empty, from pasted text (one item per line), or copied from another trip."""
     text: Optional[str] = Field(default=None, max_length=20000)
     copy_from: Optional[str] = None  # another trip's id
+
+
+class PackingCategories(BaseModel):
+    """The list's categories in order. Renames move their items; a category left out sends its items to Other.
+    Kept as your categories for the next trip's list too."""
+    categories: list[str] = Field(max_length=30)
+    renames: dict[str, str] = {}
 
 
 class PackingRequest(BaseModel):
@@ -491,7 +501,8 @@ class PackingRequest(BaseModel):
 
 class PackingItemInput(BaseModel):
     text: Optional[str] = Field(default=None, min_length=1, max_length=120)
-    group: Optional[PackingGroup] = None
+    group: Optional[str] = Field(default=None, min_length=1, max_length=40)
+    cities: Optional[list[str]] = Field(default=None, max_length=12)
     packed: Optional[bool] = None
     unused: Optional[bool] = None
 

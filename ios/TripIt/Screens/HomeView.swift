@@ -97,9 +97,9 @@ struct HomeView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(spacing: 12) {
                     ForEach(trips) { trip in
-                        let flight = store.bookings.filter { $0.tripId == trip.id && $0.kind == "flight" }
-                            .sorted { ($0.startAt ?? "~") < ($1.startAt ?? "~") }.first
-                        BoardingPass(trip: trip, flight: flight, from: store.home?.city ?? "Home") { router.push(.trip(id: trip.id)) }
+                        let info = TicketInfo(name: trip.name, city: trip.city, startDate: trip.startDate, dayCount: trip.dayCount,
+                                              stops: trip.stops, bookings: store.bookings.filter { $0.tripId == trip.id })
+                        BoardingPass(info: info) { router.push(.trip(id: trip.id)) }
                             .containerRelativeFrame(.horizontal) { width, _ in width - (trips.count > 1 ? 56 : 40) }
                             .padding(.vertical, 12)
                     }

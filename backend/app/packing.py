@@ -20,6 +20,8 @@ log = logging.getLogger(__name__)
 
 MAX_ITEMS = 80
 UNUSED_KEY = "packing_unused"
+CATEGORIES_KEY = "packing_categories"  # {"order": [...], "renames": {"clothes": "Outfits"}}
+DEFAULT_GROUPS = ["clothes", "shoes", "toiletries", "tech", "documents", "daybag", "other"]
 
 
 def item_key(text: str) -> str:
@@ -27,7 +29,7 @@ def item_key(text: str) -> str:
     return normalize(re.sub(r"^\d+\s*[x×]?\s*", "", text))
 
 
-def clean_items(drafts: list[PackingDraftItem], days: int) -> list[PackingItem]:
+def clean_items(drafts: list[PackingDraftItem], days: int, cities: Optional[list[str]] = None) -> list[PackingItem]:
     out: list[PackingItem] = []
     seen: set[str] = set()
     for d in drafts:
@@ -37,8 +39,11 @@ def clean_items(drafts: list[PackingDraftItem], days: int) -> list[PackingItem]:
             continue
         seen.add(key)
         reason = " ".join((d.reason or "").split())[:140] or None
+        known = {normalize(c): c for c in (cities or [])}
+        mine = [known[normalize(c)] for c in (d.cities or []) if normalize(c) in known]
         out.append(PackingItem(id=new_id(), text=text, group=d.group, reason=reason,
-                               days=sorted({n for n in d.days if 1 <= n <= max(days, 1)})[:21], day_bag=bool(d.day_bag)))
+                               days=sorted({n for n in d.days if 1 <= n <= max(days, 1)})[:21], day_bag=bool(d.day_bag),
+                               cities=mine if len(mine) < len(known) else []))
         if len(out) >= MAX_ITEMS:
             break
     return out
@@ -128,6 +133,8 @@ class PackingService:
             "trip": {k: v for k, v in {"name": trip.name, "city": trip.city, "country": trip.country,
                                        "start_date": trip.start_date.isoformat() if trip.start_date else None,
                                        "days": trip.day_count or None}.items() if v},
+            "cities": [{"city": st.city, "days": f"{st.start_day}-{st.end_day}"} for st in trip.stops]
+            if trip.stops and len(trip.stops) > 1 else None,
             "itinerary": days or None, "saved_places_not_scheduled": loose or None,
             "weather": [w.model_dump(exclude_none=True) for w in weather] or None,
             "bookings": [{"type": b.kind, "title": b.title, "starts": b.start_at} for b in trip.bookings[:12]] or None,
@@ -161,7 +168,11 @@ class PackingService:
         if result is None:
             result = offline_list(trip, weather, carry, {k for k, v in counts.items() if v >= 2})
 
-        items = clean_items(result.items, trip.day_count)
+        route = [st.city for st in trip.stops] if trip.stops and len(trip.stops) > 1 else []
+        items = clean_items(result.items, trip.day_count, route)
+        prefs = self.category_prefs()
+        for item in items:
+            item.group = prefs["renames"].get(item.group, item.group)
         if previous:
             old = {item_key(i.text): i for i in previous.items}
             for item in items:
@@ -173,6 +184,7 @@ class PackingService:
         fresh = PackingList(
             trip_id=trip.id, items=items, weather=weather, notes=" ".join((result.notes or "").split())[:200] or None,
             carry_on_only=carry, generated_by=by, generated_at=datetime.now(timezone.utc),
+            categories=previous.categories if previous and previous.categories else prefs["order"],
         )
         with self._lock:
             return self._save(trip.id, fresh)
@@ -180,7 +192,39 @@ class PackingService:
     # ---------- Editing ----------
 
     def _empty(self, trip_id: str) -> PackingList:
-        return PackingList(trip_id=trip_id, items=[], generated_by="manual", generated_at=datetime.now(timezone.utc))
+        return PackingList(trip_id=trip_id, items=[], generated_by="manual", generated_at=datetime.now(timezone.utc),
+                           categories=self.category_prefs()["order"])
+
+    def category_prefs(self) -> dict:
+        saved = self.db.get_setting(CATEGORIES_KEY) or {}
+        return {"order": list(saved.get("order") or []), "renames": dict(saved.get("renames") or {})}
+
+    def set_categories(self, trip_id: str, categories: list[str], renames: dict[str, str]) -> PackingList:
+        """Renames, reorders, adds and removes the list's categories, and keeps them for your next list."""
+        with self._lock:
+            current = self.get(trip_id) or self._empty(trip_id)
+            clean = lambda t: " ".join((t or "").split())[:40]
+            renames = {k: clean(v) for k, v in renames.items() if clean(v)}
+            order: list[str] = []
+            for c in categories:
+                c = clean(c)
+                if c and c not in order:
+                    order.append(c)
+            if "other" not in order and "Other" not in order:
+                order.append("other")
+            for item in current.items:
+                item.group = renames.get(item.group, item.group)
+                if item.group not in order:
+                    item.group = "other" if "other" in order else "Other"
+            current.categories = order
+            prefs = self.category_prefs()
+            # A built-in group's new name is remembered, so the next list made for you uses it too.
+            for old, new in renames.items():
+                base = next((k for k, v in prefs["renames"].items() if v == old), old)
+                if base in DEFAULT_GROUPS:
+                    prefs["renames"][base] = new
+            self.db.set_setting(CATEGORIES_KEY, {"order": order, "renames": prefs["renames"]})
+            return self._save(trip_id, current)
 
     def start(self, trip_id: str, lines: list[str], copy_from: Optional[PackingList] = None) -> PackingList:
         """A list you make yourself: pasted lines (grouped by what they are) and/or another trip's items, unticked.
@@ -197,12 +241,15 @@ class PackingService:
                     current.items.append(PackingItem(id=new_id(), text=text, group=group, custom=True))
             return self._save(trip_id, current)
 
-    def add_item(self, trip_id: str, text: str, group: str) -> Optional[PackingList]:
+    def add_item(self, trip_id: str, text: str, group: str, cities: Optional[list[str]] = None) -> Optional[PackingList]:
         with self._lock:
             current = self.get(trip_id) or self._empty(trip_id)  # the first item starts your own list
             if len(current.items) >= MAX_ITEMS + 40:
                 return current
-            current.items.append(PackingItem(id=new_id(), text=" ".join(text.split())[:120], group=group, custom=True))
+            current.items.append(PackingItem(id=new_id(), text=" ".join(text.split())[:120], group=" ".join(group.split())[:40] or "other",
+                                             custom=True, cities=[c.strip()[:120] for c in (cities or []) if c.strip()][:12]))
+            if current.categories and current.items[-1].group not in current.categories:
+                current.categories.insert(max(0, len(current.categories) - 1), current.items[-1].group)
             return self._save(trip_id, current)
 
     def update_item(self, trip_id: str, item_id: str, changes: dict) -> Optional[PackingList]:
@@ -214,7 +261,11 @@ class PackingService:
             if changes.get("text") is not None:
                 item.text = " ".join(changes["text"].split())[:120] or item.text
             if changes.get("group") is not None:
-                item.group = changes["group"]
+                item.group = " ".join(changes["group"].split())[:40] or item.group
+                if current.categories and item.group not in current.categories:
+                    current.categories.insert(max(0, len(current.categories) - 1), item.group)
+            if changes.get("cities") is not None:
+                item.cities = [c.strip()[:120] for c in changes["cities"] if c.strip()][:12]
             if changes.get("packed") is not None:
                 item.packed = changes["packed"]
             if changes.get("unused") is not None and changes["unused"] != item.unused:

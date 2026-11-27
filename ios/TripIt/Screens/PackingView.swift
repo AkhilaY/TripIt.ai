@@ -12,9 +12,10 @@ struct PackingView: View {
     @State private var error: String?
     @State private var making = false
     @State private var sheet: Sheet?
+    @State private var city: String?  // show only what's for this city; nil: everything
 
     enum Sheet: String, Identifiable {
-        case add, importList
+        case add, importList, categories
         var id: String { rawValue }
     }
 
@@ -30,6 +31,17 @@ struct PackingView: View {
     ]
 
     private var trip: Trip? { store.trips.first { $0.id == tripId } }
+    /// The trip's cities, when it has more than one.
+    private var cities: [TripStop] { store.tripDetails[tripId]?.route ?? ((trip?.stops ?? []).count > 1 ? trip?.stops ?? [] : []) }
+
+    static func label(_ group: String) -> String { groups.first { $0.id == group }?.label ?? group }
+
+    /// The list's categories in order: yours if you've arranged them, then any others its things are in.
+    static func order(_ list: PackingList) -> [String] {
+        var out = list.categories.isEmpty ? groups.map(\.id) : list.categories
+        for item in list.items where !out.contains(item.group) { out.insert(item.group, at: max(0, out.count - 1)) }
+        return out
+    }
 
     var body: some View {
         List {
@@ -62,8 +74,10 @@ struct PackingView: View {
         .refreshable { await load() }
         .sheet(item: $sheet) { which in
             switch which {
-            case .add: AddPackingItem(tripId: tripId) { list = $0 }
+            case .add: AddPackingItem(tripId: tripId, categories: list.map(Self.order) ?? Self.groups.map(\.id),
+                                      cities: cities.map(\.city), city: city) { list = $0 }
             case .importList: ImportPackingList(tripId: tripId) { list = $0 }
+            case .categories: if let list { PackingCategoriesEditor(tripId: tripId, list: list) { self.list = $0 } }
             }
         }
     }
@@ -110,9 +124,16 @@ struct PackingView: View {
 
     // MARK: The list
 
+    private func shown(_ list: PackingList) -> [PackingItem] {
+        guard let city else { return list.items }
+        let key = PlaceFilter.normalize(city)
+        return list.items.filter { $0.cities.isEmpty || $0.cities.contains { PlaceFilter.normalize($0) == key } }
+    }
+
     @ViewBuilder private func content(_ list: PackingList) -> some View {
-        let packed = list.items.filter(\.packed).count
-        let total = list.items.count
+        let items = shown(list)
+        let packed = items.filter(\.packed).count
+        let total = items.count
         Section {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(alignment: .firstTextBaseline) {
@@ -121,6 +142,7 @@ struct PackingView: View {
                     Menu {
                         Button { sheet = .add } label: { Label("Add an item", systemImage: "plus") }
                         Button { sheet = .importList } label: { Label("Import a list", systemImage: "doc.on.doc") }
+                        Button { sheet = .categories } label: { Label("Edit categories", systemImage: "list.bullet.indent") }
                         Button { Task { await make([:]) } } label: {
                             Label(list.generatedBy == "manual" ? "Add suggestions" : "Make it again", systemImage: "sparkles")
                         }
@@ -152,14 +174,16 @@ struct PackingView: View {
             .listRowInsets(EdgeInsets(top: 8, leading: 20, bottom: 8, trailing: 12))
             .listRowSeparator(.hidden)
             .listRowBackground(Color.clear)
-            if !list.weather.isEmpty { weather(list.weather) }
+            if !cities.isEmpty { cityChips(list) }
+            if !list.weather.isEmpty { weather(city.map { c in weatherIn(c, list.weather) } ?? list.weather) }
         }
         .listSectionSeparator(.hidden)
-        ForEach(Self.groups) { group in
-            let items = list.items.filter { $0.group == group.id }
-            if !items.isEmpty {
+        ForEach(Self.order(list), id: \.self) { id in
+            let group = PackGroup(id: id, label: Self.label(id))
+            let inGroup = items.filter { $0.group == group.id }
+            if !inGroup.isEmpty {
                 Section {
-                    ForEach(items) { item in
+                    ForEach(inGroup) { item in
                         row(item)
                             .listRowInsets(EdgeInsets(top: 12, leading: 20, bottom: 12, trailing: 20))
                             .listRowBackground(Color.clear)
@@ -168,7 +192,7 @@ struct PackingView: View {
                 } header: {
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
                         Text(group.label).font(Theme.serif(22)).foregroundStyle(Theme.label)
-                        Text("\(items.filter(\.packed).count) of \(items.count)").font(Theme.text(.footnote)).foregroundStyle(Theme.secondary)
+                        Text("\(inGroup.filter(\.packed).count) of \(inGroup.count)").font(Theme.text(.footnote)).foregroundStyle(Theme.secondary)
                         Spacer()
                     }
                     .textCase(nil)
@@ -179,14 +203,39 @@ struct PackingView: View {
             }
         }
         Section {
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 14) {
                 AccentTextButton(title: "Add an item", symbol: "plus") { sheet = .add }
+                AccentTextButton(title: "New category", symbol: "folder.badge.plus") { sheet = .categories }
             }
             .padding(.top, 12)
             .listRowInsets(EdgeInsets(top: 8, leading: 20, bottom: 24, trailing: 20))
             .listRowSeparator(.hidden)
             .listRowBackground(Color.clear)
         }
+    }
+
+    /// Everything, or one city's things (with its highs and lows on your days there).
+    private func cityChips(_ list: PackingList) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                FilterChip(label: "Everything", isOn: city == nil) { city = nil }
+                ForEach(cities, id: \.city) { stop in
+                    let w = weatherIn(stop.city, list.weather)
+                    let temp = w.map(\.tempMax).max().map { " · \(TravelHome.temperature($0))°" } ?? ""
+                    FilterChip(label: stop.city + temp, isOn: city == stop.city) { city = city == stop.city ? nil : stop.city }
+                }
+            }
+            .padding(.horizontal, 20)
+        }
+        .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 8, trailing: 0))
+        .listRowSeparator(.hidden)
+        .listRowBackground(Color.clear)
+        .sensoryFeedback(.selection, trigger: city)
+    }
+
+    private func weatherIn(_ city: String, _ days: [WeatherDay]) -> [WeatherDay] {
+        guard let stop = cities.first(where: { $0.city == city }) else { return days }
+        return days.filter { $0.day >= stop.startDay && $0.day <= stop.endDay }
     }
 
     /// "Made for Switzerland · 3 days · Carry-on only"
@@ -257,6 +306,26 @@ struct PackingView: View {
             Button { Task { await change(item, ["unused": !item.unused], message: item.unused ? "Noted" : "Noted. It's left off next time") } } label: {
                 Label(item.unused ? "I did use this" : "I didn't use this", systemImage: "arrow.uturn.backward")
             }
+            if let list {
+                Menu {
+                    ForEach(Self.order(list).filter { $0 != item.group }, id: \.self) { g in
+                        Button(Self.label(g)) { Task { await change(item, ["group": g]) } }
+                    }
+                } label: { Label("Move to…", systemImage: "folder") }
+            }
+            if !cities.isEmpty {
+                Menu {
+                    Button { Task { await change(item, ["cities": [String]()]) } } label: {
+                        if item.cities.isEmpty { Label("Every city", systemImage: "checkmark") } else { Text("Every city") }
+                    }
+                    ForEach(cities, id: \.city) { stop in
+                        let on = item.cities.contains(stop.city)
+                        Button { Task { await change(item, ["cities": on ? item.cities.filter { $0 != stop.city } : item.cities + [stop.city]]) } } label: {
+                            if on { Label(stop.city, systemImage: "checkmark") } else { Text(stop.city) }
+                        }
+                    }
+                } label: { Label("Which cities", systemImage: "mappin.and.ellipse") }
+            }
             Button(role: .destructive) { Task { await remove(item) } } label: { Label("Delete", systemImage: "trash") }
         }
         .swipeActions(edge: .trailing) {
@@ -270,7 +339,8 @@ struct PackingView: View {
 
     /// Why it's on the list, and the day it's for in words: "Evening at Rosengarten in Bern · For day 2, Thu 18 Dec".
     private func detail(_ item: PackingItem) -> String? {
-        let parts = [item.reason, item.days.isEmpty ? nil : dayText(item.days)].compactMap { $0 }.filter { !$0.isEmpty }
+        let places = city == nil && !item.cities.isEmpty ? item.cities.joined(separator: ", ") : nil
+        let parts = [places, item.reason, item.days.isEmpty ? nil : dayText(item.days)].compactMap { $0 }.filter { !$0.isEmpty }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
@@ -321,44 +391,146 @@ struct PackingView: View {
     }
 }
 
-/// One more thing for the list, and which group it goes in.
+/// One more thing for the list: which category it goes in (or a new one), and on a multi-city trip, which cities.
 private struct AddPackingItem: View {
     let tripId: String
+    let categories: [String]
+    let cities: [String]
+    let city: String?
     let onDone: (PackingList) -> Void
     @Environment(Store.self) private var store
     @Environment(\.dismiss) private var dismiss
     @State private var text = ""
     @State private var group = "other"
+    @State private var newGroup = ""
+    @State private var only: Set<String> = []
 
     var body: some View {
         NavigationStack {
             Form {
                 TextField("e.g. Camera charger", text: $text)
-                Picker("Group", selection: $group) {
-                    ForEach(PackingView.groups) { Text($0.label).tag($0.id) }
+                Section("Category") {
+                    Picker("Category", selection: $group) {
+                        ForEach(categories, id: \.self) { Text(PackingView.label($0)).tag($0) }
+                        Text("New category…").tag("+")
+                    }
+                    if group == "+" {
+                        TextField("e.g. Ski day", text: $newGroup).textInputAutocapitalization(.sentences)
+                    }
+                }
+                if !cities.isEmpty {
+                    Section {
+                        ForEach(cities, id: \.self) { c in
+                            Toggle(c, isOn: Binding(get: { only.contains(c) }, set: { if $0 { only.insert(c) } else { only.remove(c) } }))
+                        }
+                    } header: { Text("Only for") } footer: { Text("Leave them all off when it's for the whole trip.") }
                 }
             }
             .tripBackground()
             .navigationTitle("Add an item")
             .navigationBarTitleDisplayMode(.inline)
+            .onAppear { if let city { only = [city] } }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Add") {
                         Task {
+                            let g = group == "+" ? newGroup.trimmingCharacters(in: .whitespaces) : group
+                            let picked = only.count == cities.count ? [] : cities.filter { only.contains($0) }
                             do {
                                 let list: PackingList = try await API.shared.post("/v1/trips/\(tripId)/packing/items",
-                                                                                ["text": text.trimmingCharacters(in: .whitespaces), "group": group])
+                                                                                ["text": text.trimmingCharacters(in: .whitespaces), "group": g.isEmpty ? "other" : g,
+                                                                                 "cities": picked])
                                 onDone(list)
                                 dismiss()
                             } catch { store.fail(error) }
                         }
                     }
-                    .disabled(text.trimmingCharacters(in: .whitespaces).isEmpty)
+                    .disabled(text.trimmingCharacters(in: .whitespaces).isEmpty || (group == "+" && newGroup.trimmingCharacters(in: .whitespaces).isEmpty))
                 }
             }
         }
-        .presentationDetents([.medium])
+        .presentationDetents([.medium, .large])
+    }
+}
+
+/// The list's categories: rename, add, drag to reorder, swipe to delete (its things go to Other). Kept for your next
+/// trip's list too.
+private struct PackingCategoriesEditor: View {
+    let tripId: String
+    let list: PackingList
+    let onDone: (PackingList) -> Void
+    @Environment(Store.self) private var store
+    @Environment(\.dismiss) private var dismiss
+
+    struct Row: Identifiable {
+        let id = UUID()
+        let original: String?  // nil: new
+        var name: String
+    }
+
+    @State private var rows: [Row] = []
+    @State private var busy = false
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    ForEach($rows) { $row in
+                        HStack {
+                            TextField("Category", text: $row.name)
+                            let n = list.items.filter { $0.group == row.original }.count
+                            if n > 0 { Text("\(n)").foregroundStyle(Theme.secondary) }
+                        }
+                        .deleteDisabled(row.original == "other")
+                    }
+                    .onMove { rows.move(fromOffsets: $0, toOffset: $1) }
+                    .onDelete { rows.remove(atOffsets: $0) }
+                    Button { rows.insert(Row(original: nil, name: ""), at: max(0, rows.count - 1)) } label: {
+                        Label("Add a category", systemImage: "plus")
+                    }
+                } footer: {
+                    Text("Drag to reorder. Swipe to delete: its things move to Other. Your categories are used for your next trip too.")
+                }
+            }
+            .environment(\.editMode, .constant(.active))
+            .tripBackground()
+            .navigationTitle("Categories")
+            .navigationBarTitleDisplayMode(.inline)
+            .onAppear {
+                if rows.isEmpty { rows = PackingView.order(list).map { Row(original: $0, name: PackingView.label($0)) } }
+            }
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) { Button("Done") { Task { await save() } }.disabled(busy) }
+            }
+        }
+    }
+
+    private func save() async {
+        busy = true
+        defer { busy = false }
+        var categories: [String] = []
+        var renames: [String: String] = [:]
+        for row in rows {
+            let name = row.name.trimmingCharacters(in: .whitespaces)
+            if let original = row.original {
+                if name.isEmpty || name == PackingView.label(original) {
+                    categories.append(original)
+                } else {
+                    renames[original] = name
+                    categories.append(name)
+                }
+            } else if !name.isEmpty {
+                categories.append(name)
+            }
+        }
+        do {
+            let fresh: PackingList = try await API.shared.put("/v1/trips/\(tripId)/packing/categories",
+                                                             ["categories": categories, "renames": renames])
+            onDone(fresh)
+            dismiss()
+        } catch { store.fail(error) }
     }
 }
 

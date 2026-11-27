@@ -22,7 +22,6 @@ struct TripPlaces: View {
                         shortcut("music.mic", Category.event.color, "What's on", "Events while you're there", .events(tripId: trip.id))
                     }
                 }
-                EditsRail(trip: trip)
             }
             Section {
                 Button { router.addRequest = Router.AddRequest(tripId: trip.id) } label: { Label("Search for a place to add", systemImage: "magnifyingglass") }
@@ -63,7 +62,7 @@ struct TripPlaces: View {
                         }
                     }
                 } header: {
-                    Label("Suggested for quiet days · \(suggested.count)", systemImage: "sparkles")
+                    Text("Suggested for quiet days · \(suggested.count)")
                 } footer: {
                     EmptyView()
                 }

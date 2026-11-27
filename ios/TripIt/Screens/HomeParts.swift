@@ -27,19 +27,35 @@ struct CountdownBoard: View {
     }
 }
 
-/// The next trip as a boarding pass: the city's photo, from and to, then a stub with the date and flight. Tap it, or
-/// slide the stub across to tear it off, to open the trip.
+/// A trip as a boarding pass: the city's photo with the days to go, from and to, then a stub with the date and flight.
 struct BoardingPass: View {
     let trip: Trip
     let flight: Booking?
     let from: String
     let onOpen: () -> Void
-    @State private var tear: CGFloat = 0
+
+    /// Days until it starts; 0 or less while it's on; nil without dates.
+    private var daysToGo: Int? {
+        trip.startDate.map { BookingTime.days(from: Fmt.iso(Date()), to: $0) }
+    }
 
     var body: some View {
         VStack(spacing: 0) {
             Color.clear.frame(height: 118)
                 .overlay { CityCover(city: trip.city, country: trip.country) }
+                .overlay(alignment: .topTrailing) {
+                    if let days = daysToGo, days > 0 {
+                        VStack(alignment: .trailing, spacing: 4) {
+                            Text("IN").font(Theme.text(.caption2, weight: .medium)).kerning(1.6).foregroundStyle(.white)
+                                .shadow(color: .black.opacity(0.4), radius: 3)
+                            CountdownBoard(days: days)
+                        }
+                        .padding(12)
+                    } else if daysToGo != nil {
+                        Text("ON NOW").font(Theme.text(.caption2, weight: .medium)).kerning(1.6).foregroundStyle(.white)
+                            .padding(.horizontal, 10).padding(.vertical, 6).background(.black.opacity(0.45), in: Capsule()).padding(12)
+                    }
+                }
                 .clipped()
             HStack(alignment: .bottom) {
                 end("From", code(flight?.origin) ?? from)
@@ -53,28 +69,15 @@ struct BoardingPass: View {
             HStack {
                 Text(stub).font(Theme.text(.footnote)).foregroundStyle(Theme.secondary).lineLimit(1)
                 Spacer(minLength: 8)
-                Text("Slide to open →").font(Theme.text(.footnote, weight: .medium)).foregroundStyle(Theme.label)
+                Image(systemName: "chevron.right").font(Theme.text(.caption, weight: .medium)).foregroundStyle(Theme.tertiary)
             }
             .padding(.horizontal, 18).padding(.vertical, 12)
-            .offset(x: tear)
-            .rotationEffect(.degrees(Double(tear) / 40), anchor: .leading)
         }
         .background(Theme.background)
         .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
         .shadow(color: .black.opacity(0.08), radius: 16, y: 8)
         .contentShape(Rectangle())
-        .onTapGesture { onOpen() }
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 12)
-                .onChanged { drag in
-                    guard abs(drag.translation.width) > abs(drag.translation.height) else { return }
-                    tear = max(0, min(140, drag.translation.width))
-                }
-                .onEnded { drag in
-                    if tear > 100 { Haptics.success(); onOpen() }
-                    withAnimation(.spring(duration: 0.35)) { tear = 0 }
-                }
-        )
+        .onTapGesture { Haptics.tap(); onOpen() }
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isButton)
     }
@@ -123,12 +126,14 @@ struct CityWallet: View {
         let height: CGFloat = 220 + gap * CGFloat(max(0, groups.count - 1))
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text("YOUR CITIES · \(groups.count)").font(Theme.text(.caption2, weight: .medium)).kerning(2).foregroundStyle(Theme.secondary)
+                Text("Your cities").font(Theme.serif(25)).foregroundStyle(Theme.label)
                 Spacer()
-                Button(fanned ? "Stack" : "Fan out") {
-                    withAnimation(.spring(duration: 0.5, bounce: 0.2)) { fanned.toggle() }
+                Button { withAnimation(.spring(duration: 0.5, bounce: 0.2)) { fanned.toggle() } } label: {
+                    Image(systemName: "chevron.down").font(.system(size: 15, weight: .medium)).foregroundStyle(Theme.label)
+                        .rotationEffect(.degrees(fanned ? 180 : 0))
+                        .frame(width: 40, height: 40).background(Theme.fill, in: Circle())
                 }
-                .font(Theme.text(.footnote, weight: .medium)).foregroundStyle(Theme.label)
+                .accessibilityLabel(fanned ? "Stack the cities" : "Spread out the cities")
             }
             ZStack(alignment: .top) {
                 ForEach(Array(groups.enumerated()), id: \.element.id) { i, city in

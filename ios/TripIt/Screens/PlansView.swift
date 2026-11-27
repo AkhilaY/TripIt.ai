@@ -154,8 +154,8 @@ struct PlansView: View {
     }
 
     private func weekStrip(_ items: [CalendarItem], jump: @escaping (String) -> Void) -> some View {
-        let week = (0..<7).map { BookingTime.addDays(today, $0) }
-        return HStack(spacing: 0) {
+        let week = (0..<60).map { BookingTime.addDays(today, $0) }  // two months: swipe along for later dates
+        return ScrollView(.horizontal, showsIndicators: false) { LazyHStack(spacing: 2) {
             ForEach(week, id: \.self) { day in
                 let date = Fmt.day(day) ?? Date()
                 let kinds = Set(items.filter { item in
@@ -172,13 +172,13 @@ struct PlansView: View {
                         .frame(height: 6)
                     }
                     .foregroundStyle(day == (focused ?? today) ? Theme.accentInk : Theme.label)
-                    .frame(maxWidth: .infinity).padding(.vertical, 8)
+                    .frame(width: 46).padding(.vertical, 8)
                     .background(day == (focused ?? today) ? Theme.accent : .clear, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
             }
-        }
+        } }
         .padding(.top, 6)
     }
 

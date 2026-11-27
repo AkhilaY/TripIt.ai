@@ -13,14 +13,9 @@ struct EditsTabView: View {
 
     var body: some View {
         GeometryReader { outer in
-            ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    cover(height: max(560, outer.size.height * 0.86), top: outer.safeAreaInsets.top)
-                    backIssues.padding(.horizontal, 20)
-                }
-                .padding(.bottom, 40)
-            }
-            .ignoresSafeArea(edges: .top)
+            // The cover fills the screen, down to the tab bar.
+            cover(height: outer.size.height + outer.safeAreaInsets.top, top: outer.safeAreaInsets.top)
+                .ignoresSafeArea(edges: .top)
         }
         .background(Theme.background.ignoresSafeArea())
         .toolbar(.hidden, for: .navigationBar)
@@ -28,8 +23,6 @@ struct EditsTabView: View {
         .task(id: store.upcomingTrips.first?.id) {
             if let trip = store.upcomingTrips.first { await loadTripEdits(trip) }
         }
-        .onChange(of: today.map(\.id)) { _, _ in keepIssue() }
-        .onAppear { keepIssue() }
     }
 
     // MARK: Today's issue

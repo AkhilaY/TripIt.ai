@@ -24,6 +24,7 @@ struct LibraryView: View {
     @AppStorage("library.section") private var section: LibrarySection = .places
     @State private var cityFilter: String?
     @State private var groupFilter: PlaceGroup?
+    @State private var cuisineFilter: String?
     @State private var postFilter = "all"
     @State private var query = ""
     @State private var sheet: LibrarySheet?
@@ -193,10 +194,12 @@ struct LibraryView: View {
         // Kind of place, Want to go / Been, and the map: one quiet line.
         HStack(spacing: 14) {
             Menu {
-                Button("All kinds") { groupFilter = nil }
-                ForEach(PlaceGroup.allCases) { g in Button(g.label) { groupFilter = g } }
+                Button { groupFilter = nil; cuisineFilter = nil } label: { Label("All", systemImage: "square.grid.2x2") }
+                ForEach(PlaceGroup.allCases) { g in
+                    Button { groupFilter = g; cuisineFilter = nil } label: { Label(g.label, systemImage: g.symbol) }
+                }
             } label: {
-                Label(groupFilter?.label ?? "All kinds", systemImage: "chevron.down").labelStyle(TrailingIcon())
+                Label(groupFilter?.label ?? "All", systemImage: "chevron.down").labelStyle(TrailingIcon())
             }
             Spacer()
             Menu {
@@ -209,9 +212,28 @@ struct LibraryView: View {
         .font(Theme.text(.footnote, weight: .medium)).foregroundStyle(Theme.label)
         .padding(.top, 12)
         .sensoryFeedback(.selection, trigger: groupFilter)
-        let places = shown.filter {
+        let inGroup = shown.filter {
             (cityFilter == nil || Store.cityKey($0.city) == cityFilter) && (groupFilter == nil || PlaceGroup.of($0.category) == groupFilter)
-        }.sorted { $0.createdAt > $1.createdAt }
+        }
+        // Food: the cuisines among these places, as chips.
+        if groupFilter == .food {
+            let cuisines = Dictionary(grouping: inGroup.compactMap(\.cuisine), by: { $0 }).mapValues(\.count)
+                .sorted { $0.value > $1.value }.map(\.key)
+            if !cuisines.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(cuisines, id: \.self) { c in
+                            FilterChip(label: Cuisine(rawValue: c)?.label ?? c.capitalized, isOn: cuisineFilter == c) {
+                                cuisineFilter = cuisineFilter == c ? nil : c
+                            }
+                        }
+                    }
+                }
+                .padding(.top, 10)
+                .sensoryFeedback(.selection, trigger: cuisineFilter)
+            }
+        }
+        let places = inGroup.filter { cuisineFilter == nil || $0.cuisine == cuisineFilter }.sorted { $0.createdAt > $1.createdAt }
         LazyVStack(spacing: 0) {
             ForEach(places) { place in
                 NavigationLink(value: Route.place(id: place.id, tripId: nil)) {

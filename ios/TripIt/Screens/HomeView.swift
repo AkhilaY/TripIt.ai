@@ -60,16 +60,6 @@ struct HomeView: View {
                 Text(greeting.replacingOccurrences(of: ", ", with: ",\n")).font(Theme.serif(30)).foregroundStyle(Theme.label)
                     .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 12)
-                if let next = store.upcomingTrips.first, let start = next.startDate, store.activeTrip == nil {
-                    let days = BookingTime.days(from: Fmt.iso(Date()), to: start)
-                    if days > 0 {
-                        VStack(alignment: .trailing, spacing: 6) {
-                            Text("\(next.city.isEmpty ? next.name : next.city) in".uppercased())
-                                .font(Theme.text(.caption2, weight: .medium)).kerning(1.6).foregroundStyle(Theme.secondary).lineLimit(1)
-                            CountdownBoard(days: days)
-                        }
-                    }
-                }
             }
             .padding(.top, 8)
         }
@@ -90,21 +80,36 @@ struct HomeView: View {
             if store.saved.isEmpty && store.realTrips.isEmpty {
                 GetStartedCard().padding(.top, 20)
             }
-            pass.padding(.top, 20)
+            pass.padding(.top, 8)
             if let active = store.activeTrip {
                 TravelHome(trip: active.trip, day: active.day)
             }
-            wallet.padding(.top, 30)
-            if store.activeTrip == nil { yourCity.padding(.top, 36) }
+            wallet.padding(.top, 20)
+            if store.activeTrip == nil { yourCity.padding(.top, 28) }
         }
     }
 
     /// The trip you're on or the next one, as a boarding pass; with none, an invitation to plan one.
     @ViewBuilder private var pass: some View {
-        if let trip = store.activeTrip?.trip ?? store.upcomingTrips.first {
-            let flight = store.bookings.filter { $0.tripId == trip.id && $0.kind == "flight" }
-                .sorted { ($0.startAt ?? "~") < ($1.startAt ?? "~") }.first
-            BoardingPass(trip: trip, flight: flight, from: store.home?.city ?? "Home") { router.push(.trip(id: trip.id)) }
+        let trips = (store.activeTrip.map { [$0.trip] } ?? []) + store.upcomingTrips.filter { $0.id != store.activeTrip?.trip.id }
+        if !trips.isEmpty {
+            // Every trip ahead, soonest first: swipe across them.
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(spacing: 12) {
+                    ForEach(trips) { trip in
+                        let flight = store.bookings.filter { $0.tripId == trip.id && $0.kind == "flight" }
+                            .sorted { ($0.startAt ?? "~") < ($1.startAt ?? "~") }.first
+                        BoardingPass(trip: trip, flight: flight, from: store.home?.city ?? "Home") { router.push(.trip(id: trip.id)) }
+                            .containerRelativeFrame(.horizontal) { width, _ in width - (trips.count > 1 ? 56 : 40) }
+                            .padding(.vertical, 12)
+                    }
+                }
+                .scrollTargetLayout()
+                .padding(.horizontal, 20)
+            }
+            .scrollTargetBehavior(.viewAligned)
+            .padding(.horizontal, -20)
+            .sensoryFeedback(.selection, trigger: trips.count)
         } else if !store.saved.isEmpty {
             VStack(alignment: .leading, spacing: 6) {
                 Text("WHERE TO NEXT?").font(Theme.text(.caption2, weight: .medium)).kerning(2).foregroundStyle(Theme.secondary)
@@ -131,8 +136,8 @@ struct HomeView: View {
                 return Fmt.plural(city.places.count, "place")
             }, onOpen: { router.push(.city(name: $0.name)) })
             if groups.count > 6 {
-                Button("All \(groups.count) cities") { router.push(.cities) }
-                    .font(Theme.text(.footnote, weight: .medium)).foregroundStyle(Theme.link).padding(.top, 8)
+                Button("View all \(groups.count) cities") { router.push(.cities) }
+                    .font(Theme.text(.subheadline, weight: .medium)).foregroundStyle(Theme.link).padding(.top, 2)
             }
         }
     }
@@ -142,9 +147,9 @@ struct HomeView: View {
         let weekday = Calendar.current.component(.weekday, from: Date())  // 1 Sunday … 7 Saturday
         let isWeekend = weekday == 1 || weekday >= 6
         if let home = store.home {
-            Text("YOUR CITY").font(Theme.text(.caption2, weight: .medium)).kerning(2).foregroundStyle(Theme.secondary)
-            Text(isWeekend ? "The weekend in \(home.city)" : "Tonight in \(home.city)").font(Theme.serif(26)).foregroundStyle(Theme.label)
-                .padding(.top, 4)
+            Text("Your city").font(Theme.serif(25)).foregroundStyle(Theme.label)
+            Text(isWeekend ? "The weekend in \(home.city)" : "Tonight in \(home.city)").font(Theme.text(.subheadline)).foregroundStyle(Theme.secondary)
+                .padding(.top, 2)
             if isWeekend { weekendNote(home.city) } else { tonight(home.city) }
         } else {
             weekend

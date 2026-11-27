@@ -10,6 +10,10 @@ struct MainTabs: View {
     @State private var opened: Set<AppTab> = [.home]  // tabs are built the first time they're opened, then kept
     @State private var keyboardUp = false
     @State private var searching = false
+    @State private var adding = false  // the + menu
+    @State private var newTrip = false
+    @State private var newList = false
+    @State private var listName = ""
 
     private var tabs: [BottomBar.Item] {
         var items: [BottomBar.Item] = [
@@ -42,7 +46,7 @@ struct MainTabs: View {
             .modifier(ToastOverlay())
             if !keyboardUp {
                 BottomBar(items: tabs, selected: router.tab, onSelect: select, onSearch: { searching = true },
-                          onAdd: { router.addRequest = Router.AddRequest() })
+                          onAdd: { adding = true })
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
@@ -67,6 +71,21 @@ struct MainTabs: View {
             AddPlaceSheet(request: request)
                 .environment(router).environment(store)
                 .tint(Theme.accent)
+        }
+        .confirmationDialog("Add", isPresented: $adding) {
+            Button("Add a place") { router.addRequest = Router.AddRequest() }
+            Button("New trip") { newTrip = true }
+            Button("New list") { listName = ""; newList = true }
+        }
+        .sheet(isPresented: $newTrip) { NewTripSheet(placeIds: [], folderId: nil).environment(store).environment(router) }
+        .alert("New list", isPresented: $newList) {
+            TextField("e.g. Date night", text: $listName)
+            Button("Cancel", role: .cancel) {}
+            Button("Create") {
+                let name = listName.trimmingCharacters(in: .whitespaces)
+                guard !name.isEmpty else { return }
+                Task { if let folder = await store.createFolder(name) { router.tab = .library; router.push(.folder(id: folder.id)) } }
+            }
         }
         .sheet(item: $router.bookingRequest) { request in
             BookingSheet(request: request)

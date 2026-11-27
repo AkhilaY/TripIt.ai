@@ -761,8 +761,10 @@ class PlaceIds(BaseModel):
 
 
 class NewTripRequest(BaseModel):
-    """A trip made on purpose: a city, a length, the saved places to go to, and who plans it."""
-    city: str = Field(min_length=1, max_length=120)
+    """A trip made on purpose: its cities (any number, or none yet), a length, the saved places to go to, and who plans
+    it. With stops, the first is the trip's city and each gets its days, in order."""
+    city: str = Field(default="", max_length=120)
+    stops: list["TripStopIn"] = Field(default=[], max_length=12)
     name: Optional[str] = Field(default=None, max_length=120)
     country: Optional[str] = Field(default=None, max_length=80)
     days: int = Field(default=3, ge=1, le=21)

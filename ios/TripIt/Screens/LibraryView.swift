@@ -176,75 +176,20 @@ struct LibraryView: View {
         .sensoryFeedback(.selection, trigger: section)
     }
 
-    /// Every saved place, newest first, narrowed by city with a row of chips.
+    /// Your cities as photo cards (or a list); each opens its places with the kind and cuisine filters.
     @ViewBuilder private var placesSection: some View {
-        let groups = store.cityGroups(shown)
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                FilterChip(label: "All cities", count: shown.count, isOn: cityFilter == nil) { cityFilter = nil }
-                ForEach(groups) { group in
-                    FilterChip(label: group.name, count: group.places.count, isOn: cityFilter == group.id) {
-                        cityFilter = cityFilter == group.id ? nil : group.id
-                    }
-                }
-            }
-        }
-        .padding(.top, 12)
-        .sensoryFeedback(.selection, trigger: cityFilter)
-        // Kind of place, Want to go / Been, and the map: one quiet line.
         HStack(spacing: 14) {
-            Menu {
-                Button { groupFilter = nil; cuisineFilter = nil } label: { Label("All", systemImage: "square.grid.2x2") }
-                ForEach(PlaceGroup.allCases) { g in
-                    Button { groupFilter = g; cuisineFilter = nil } label: { Label(g.label, systemImage: g.symbol) }
-                }
-            } label: {
-                Label(groupFilter?.label ?? "All", systemImage: "chevron.down").labelStyle(TrailingIcon())
-            }
-            Spacer()
             Menu {
                 ForEach(VisitFilter.allCases) { v in Button(v.label) { visit = v } }
             } label: {
                 Label(visit.label, systemImage: "chevron.down").labelStyle(TrailingIcon())
             }
-            Button { router.push(.map) } label: { Image(systemName: "map") }.accessibilityLabel("Map")
+            Spacer()
+            Button { router.push(.map) } label: { Label("Map", systemImage: "map") }
         }
         .font(Theme.text(.footnote, weight: .medium)).foregroundStyle(Theme.label)
-        .padding(.top, 12)
-        .sensoryFeedback(.selection, trigger: groupFilter)
-        let inGroup = shown.filter {
-            (cityFilter == nil || Store.cityKey($0.city) == cityFilter) && (groupFilter == nil || PlaceGroup.of($0.category) == groupFilter)
-        }
-        // Food: the cuisines among these places, as chips.
-        if groupFilter == .food {
-            let cuisines = Dictionary(grouping: inGroup.compactMap(\.cuisine), by: { $0 }).mapValues(\.count)
-                .sorted { $0.value > $1.value }.map(\.key)
-            if !cuisines.isEmpty {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        ForEach(cuisines, id: \.self) { c in
-                            FilterChip(label: Cuisine(rawValue: c)?.label ?? c.capitalized, isOn: cuisineFilter == c) {
-                                cuisineFilter = cuisineFilter == c ? nil : c
-                            }
-                        }
-                    }
-                }
-                .padding(.top, 10)
-                .sensoryFeedback(.selection, trigger: cuisineFilter)
-            }
-        }
-        let places = inGroup.filter { cuisineFilter == nil || $0.cuisine == cuisineFilter }.sorted { $0.createdAt > $1.createdAt }
-        LazyVStack(spacing: 0) {
-            ForEach(places) { place in
-                NavigationLink(value: Route.place(id: place.id, tripId: nil)) {
-                    PlaceRow(place: place, compact: true).padding(.vertical, 4)
-                }
-                .buttonStyle(PressStyle())
-                .placeActions(place, onDelete: { Task { await store.deleteWithUndo(place) } }, sheet: $sheet)
-                Divider().overlay(Theme.divider)
-            }
-        }
-        .padding(.top, 4)
+        .padding(.top, 14)
+        CityBrowser(places: shown).padding(.top, 10)
     }
 
     /// Lists as cards, in the same type-only style as the edits.
@@ -260,15 +205,10 @@ struct LibraryView: View {
             Text("Make lists for anything: date night, early risers, best croissants. A place can be on several.")
                 .font(Theme.text(.subheadline)).foregroundStyle(Theme.secondary).padding(.top, 8)
         }
-        LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], spacing: 10) {
+        LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], alignment: .leading, spacing: 18) {
             ForEach(store.folders) { folder in
-                NavigationLink(value: Route.folder(id: folder.id)) {
-                    EditTile(caption: Fmt.plural(folder.placeCount, "place"), title: folder.name, preview: listCities(folder),
-                             seed: folder.id, titleSize: 19)
-                        .frame(height: 150)
-                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                }
-                .buttonStyle(PressStyle())
+                NavigationLink(value: Route.folder(id: folder.id)) { ListCollage(folder: folder, cities: listCities(folder)) }
+                    .buttonStyle(PressStyle())
             }
         }
         .padding(.top, 10)
@@ -917,35 +857,21 @@ struct PostRow: View {
     }
 }
 
-/// Library → Cities → See all: every city you've saved places in, as cards or a list, sorted how you like.
+/// Library → Cities → See all: every city you've saved places in, with Want to go / Been on top.
 struct AllCitiesView: View {
     @Environment(Store.self) private var store
     @AppStorage("library.visit") private var visit: VisitFilter = .all
-    @AppStorage("library.cityLayout") private var layout: CityLayout = .cards
-    @AppStorage("library.citySort") private var sort: CitySort = .places
 
     var body: some View {
-        let groups = sort.apply(store.cityGroups(visit.apply(store.saved)))
+        let places = visit.apply(store.saved)
+        let groups = store.cityGroups(places)
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text("Cities").font(Theme.serif(34)).foregroundStyle(Theme.label)
-                    Spacer()
-                    LayoutToggle(layout: $layout)
-                }
+                Text("Cities").font(Theme.serif(34)).foregroundStyle(Theme.label)
                 Text((groups.count == 1 ? "1 city" : "\(groups.count) cities") + " · " + Fmt.plural(groups.reduce(0) { $0 + $1.places.count }, "place"))
-                    .font(Theme.text(.subheadline)).foregroundStyle(Theme.secondary).padding(.top, 2)
+                    .font(Theme.text(.subheadline)).foregroundStyle(Theme.secondary).padding(.top, 4)
                 VisitPicker(visit: $visit, places: store.saved).padding(.top, 16)
-                sortChips.padding(.top, 10)
-                if sort == .country {
-                    let countries = Dictionary(grouping: groups) { $0.country.isEmpty ? "Elsewhere" : $0.country }
-                    ForEach(countries.keys.sorted(), id: \.self) { country in
-                        Text(country).font(Theme.serif(22)).foregroundStyle(Theme.label).padding(.top, 26)
-                        cities(countries[country] ?? [])
-                    }
-                } else {
-                    cities(groups).padding(.top, 8)
-                }
+                CityBrowser(places: places).padding(.top, 10)
             }
             .padding(.horizontal, 20).padding(.bottom, 40)
         }
@@ -953,19 +879,40 @@ struct AllCitiesView: View {
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
     }
+}
 
-    private var sortChips: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ForEach(CitySort.allCases) { option in
-                    Button { withAnimation(.easeOut(duration: 0.2)) { sort = option } } label: {
-                        Text(option.label).font(Theme.text(.footnote, weight: sort == option ? .medium : .regular))
-                            .foregroundStyle(sort == option ? Theme.accentInk : Theme.label)
-                            .padding(.horizontal, 14).frame(height: 32)
-                            .background(sort == option ? Theme.accent : Theme.fill, in: Capsule())
+/// Cities as photo cards (or a list), sorted how you like; each opens its places, where kind and cuisine filters live.
+/// Used by Library → Places and the Cities page.
+struct CityBrowser: View {
+    let places: [Place]
+    @Environment(Store.self) private var store
+    @AppStorage("library.cityLayout") private var layout: CityLayout = .cards
+    @AppStorage("library.citySort") private var sort: CitySort = .places
+
+    var body: some View {
+        let groups = sort.apply(store.cityGroups(places))
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 10) {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(CitySort.allCases) { option in
+                            FilterChip(label: option.label, isOn: sort == option) { withAnimation(.easeOut(duration: 0.2)) { sort = option } }
+                        }
                     }
-                    .buttonStyle(.plain)
                 }
+                LayoutToggle(layout: $layout)
+            }
+            .sensoryFeedback(.selection, trigger: sort)
+            if groups.isEmpty {
+                Text("Nothing here yet.").font(Theme.text(.subheadline)).foregroundStyle(Theme.secondary).padding(.top, 16)
+            } else if sort == .country {
+                let countries = Dictionary(grouping: groups) { $0.country.isEmpty ? "Elsewhere" : $0.country }
+                ForEach(countries.keys.sorted(), id: \.self) { country in
+                    Text(country).font(Theme.serif(22)).foregroundStyle(Theme.label).padding(.top, 24)
+                    cities(countries[country] ?? [])
+                }
+            } else {
+                cities(groups).padding(.top, 6)
             }
         }
     }
@@ -992,5 +939,41 @@ struct AllCitiesView: View {
                 }
             }
         }
+    }
+}
+
+/// A list as a small photo collage (up to four of its places), with its name and count under it.
+struct ListCollage: View {
+    let folder: Folder
+    let cities: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            let photos = Array(folder.covers.prefix(4))
+            Grid(horizontalSpacing: 2, verticalSpacing: 2) {
+                GridRow { cell(photos, 0); cell(photos, 1) }
+                GridRow { cell(photos, 2); cell(photos, 3) }
+            }
+            .frame(height: 150)
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            Text(folder.name).font(Theme.serif(18)).foregroundStyle(Theme.label).lineLimit(1).padding(.top, 6)
+            Text([Fmt.plural(folder.placeCount, "place"), cities.isEmpty ? nil : cities].compactMap { $0 }.joined(separator: " · "))
+                .font(Theme.text(.footnote)).foregroundStyle(Theme.secondary).lineLimit(1)
+        }
+        .contentShape(Rectangle())
+    }
+
+    @ViewBuilder private func cell(_ photos: [PlacePhoto], _ i: Int) -> some View {
+        Color.clear
+            .overlay {
+                if i < photos.count {
+                    RemoteImage(url: photos[i].url(width: 300)) { Theme.fill }
+                } else if i == 0 {
+                    ZStack { Theme.fill; Image(systemName: "list.bullet").foregroundStyle(Theme.tertiary) }
+                } else {
+                    Theme.fill
+                }
+            }
+            .clipped()
     }
 }

@@ -487,9 +487,10 @@ class Library:
         """A trip made on purpose: links the chosen saved places, then plans it with AI or sets up empty days
         for the person to fill. With fill_gaps, AI adds a few clearly marked suggestions to quiet days."""
         picked = [p for p in (self.db.get_place(pid) for pid in dict.fromkeys(req.place_ids)) if p is not None]
-        country = req.country or next((p.country for p in picked if p.country and normalize(p.city) == normalize(req.city)), "")
-        city = " ".join(req.city.split())
-        trip = self.db.create_trip(name=(req.name or "").strip() or city, city=city, country=country)
+        city = " ".join((req.stops[0].city if req.stops else req.city).split())
+        country = req.country or (req.stops[0].country if req.stops else None) or next(
+            (p.country for p in picked if p.country and city and normalize(p.city) == normalize(city)), "")
+        trip = self.db.create_trip(name=(req.name or "").strip() or city or "New trip", city=city, country=country or "")
         for p in picked:
             self.db.add_to_trip(trip.id, p.id)
         if req.plan == "ai" and picked:
@@ -499,7 +500,68 @@ class Library:
                                 start_date=req.start_date, planned_by="you" if req.plan == "manual" else None)
         if req.plan == "ai" and req.fill_gaps:
             await self.fill_gaps(trip.id, claude, taste, req.preferences)
+        if req.stops:  # the route: each city's days, in order; the trip is at least that long
+            stops = [{"city": " ".join(st.city.split()), "country": (st.country or "").strip(), "days": st.days} for st in req.stops]
+            total = sum(st["days"] for st in stops)
+            days = max(req.days, total)
+            self.db.update_trip(trip.id, stops=stops, day_count=days, day_titles=[f"Day {n}" for n in range(1, days + 1)])
         return self.db.get_trip_detail(trip.id)
+
+    def sort_by_city(self, trip_id: str) -> TripDetail:
+        """Puts each place on a day in its own city (a London place on a London day, by the route), on the day there
+        with the fewest stops. Places already on one of their city's days stay put; places in a city that isn't on
+        the route are left as they are. No AI: it only follows the route."""
+        trip = self.db.get_trip_detail(trip_id)
+        if not trip.day_count:
+            return trip
+        ranges: list[tuple[str, range]] = []
+        # A one-city trip reports its own city as its route, so only a real route (two cities or more) is followed.
+        if trip.stops and len(trip.stops) > 1:
+            day = 1
+            for st in trip.stops:
+                ranges.append((normalize(st.city), range(day, min(trip.day_count, day + st.days - 1) + 1)))
+                day += st.days
+        else:
+            # No route: the cities its places are in share the days in blocks, in proportion to their places
+            # (each at least a day), so London and Paris never end up on the same day.
+            counts_by_city: dict[str, int] = {}
+            for p in trip.places:
+                if p.city:
+                    counts_by_city[normalize(p.city)] = counts_by_city.get(normalize(p.city), 0) + 1
+            cities = sorted(counts_by_city, key=lambda c: -counts_by_city[c])[: trip.day_count] or [normalize(trip.city)]
+            total = sum(counts_by_city.get(c, 1) for c in cities)
+            day = 1
+            for i, c in enumerate(cities):
+                left = len(cities) - i - 1
+                share = max(1, round(trip.day_count * counts_by_city.get(c, 1) / total))
+                share = min(share, trip.day_count - day + 1 - left)
+                ranges.append((c, range(day, day + share)))
+                day += share
+            if day <= trip.day_count:  # rounding: the last city keeps the rest
+                last_city, last = ranges[-1]
+                ranges[-1] = (last_city, range(last.start, trip.day_count + 1))
+        counts = {d: 0 for d in range(1, trip.day_count + 1)}
+        for p in trip.places:
+            if p.day_number in counts:
+                counts[p.day_number] += 1
+
+        def days_for(place) -> Optional[range]:
+            key = normalize(place.city or "")
+            for city, days in ranges:
+                if key and city and (key == city or key in city or city in key):
+                    return days
+            return None
+
+        for p in sorted(trip.places, key=lambda p: p.name):
+            days = days_for(p)
+            if not days or p.day_number in days:
+                continue
+            target = min(days, key=lambda d: (counts[d], d))
+            if p.day_number in counts:
+                counts[p.day_number] -= 1
+            counts[target] += 1
+            self.db.update_place(p.id, trip_id, day_number=target, day_order=counts[target])
+        return self.db.get_trip_detail(trip_id)
 
     async def fill_gaps(self, trip_id: str, claude: Optional[ClaudeService], taste: Optional[str] = None,
                         preferences: Optional[str] = None, per_day: int = 3, limit: int = 8) -> int:

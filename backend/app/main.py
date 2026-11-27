@@ -1076,6 +1076,14 @@ async def weather_today(request: Request, lat: float = Query(ge=-90, le=90), lon
     return result
 
 
+@app.post("/v1/trips/{trip_id}/sort-by-city", response_model=TripDetail, dependencies=[Auth])
+async def sort_trip_by_city(trip_id: str, request: Request) -> TripDetail:
+    """Puts each place on one of its own city's days, following the route (no AI)."""
+    _trip_or_404(request, trip_id)
+    _library(request).sort_by_city(trip_id)
+    return _trip_or_404(request, trip_id)
+
+
 @app.put("/v1/trips/{trip_id}/stops", response_model=TripDetail, dependencies=[Auth])
 async def set_trip_stops(trip_id: str, body: TripStopsRequest, request: Request) -> TripDetail:
     """Sets the trip's route: its cities in order, how many days in each and how you travel between them.

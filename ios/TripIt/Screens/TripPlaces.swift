@@ -4,6 +4,7 @@ import SwiftUI
 struct TripPlaces: View {
     let trip: TripDetail
     @Binding var librarySheet: LibrarySheet?
+    var onScroll: ((CGFloat) -> Void)?
     @Environment(Store.self) private var store
     @Environment(Router.self) private var router
 
@@ -11,6 +12,10 @@ struct TripPlaces: View {
         let suggested = trip.places.filter(\.suggested)
         let mine = trip.places.filter { !$0.suggested }
         List {
+            // Reports how far the list has scrolled, so the trip's photo header can move up with it.
+            Color.clear.frame(height: 0)
+                .listRowInsets(EdgeInsets()).listRowBackground(Color.clear).listRowSeparator(.hidden)
+                .onGeometryChange(for: CGFloat.self) { $0.frame(in: .scrollView).minY } action: { onScroll?(max(0, -$0)) }
             if !trip.isLocal {
                 Section { PeopleRow(trip: trip) }
                 Section {

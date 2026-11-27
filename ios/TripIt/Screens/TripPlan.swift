@@ -6,6 +6,7 @@ struct TripPlan: View {
     let trip: TripDetail
     @Binding var sheet: TripSheet?
     @Binding var librarySheet: LibrarySheet?
+    var onScroll: ((CGFloat) -> Void)?
     @Environment(Store.self) private var store
     @Environment(Router.self) private var router
     @Environment(\.editMode) private var editMode
@@ -16,12 +17,10 @@ struct TripPlan: View {
         if trip.dayCount == 0 {
             ScrollView {
                 EmptyState(symbol: "calendar", color: Theme.indigo, title: "No itinerary yet",
-                           text: "Build it yourself from your \(Fmt.plural(trip.places.count, "saved place")), or have them grouped into days by neighbourhood and time. You can fix the order of your own plan later.") {
+                           text: "Build it from your \(Fmt.plural(trip.places.count, "saved place")): make the days, then put places on them.") {
                     VStack(spacing: 10) {
                         Button { addToDay(nil) } label: { Label("Build it myself", systemImage: "calendar.badge.plus") }
                             .buttonStyle(PrimaryButtonStyle())
-                        Button { sheet = .plan } label: { Label("Plan my days", systemImage: "sparkles") }
-                            .buttonStyle(PrimaryButtonStyle(tinted: true))
                     }
                     .frame(maxWidth: 260)
                     .disabled(trip.places.isEmpty)
@@ -35,6 +34,10 @@ struct TripPlan: View {
 
     private var list: some View {
         List {
+            // Reports how far the list has scrolled, so the trip's photo header can move up with it.
+            Color.clear.frame(height: 0)
+                .listRowInsets(EdgeInsets()).listRowBackground(Color.clear).listRowSeparator(.hidden)
+                .onGeometryChange(for: CGFloat.self) { $0.frame(in: .scrollView).minY } action: { onScroll?(max(0, -$0)) }
             Section {
                 HStack {
                     Label(plannedBy, systemImage: trip.plannedBy == "claude" ? "sparkles" : "calendar")
@@ -78,12 +81,12 @@ struct TripPlan: View {
                         Text("Not on a day yet · \(unscheduled.count)")
                         Spacer()
                         if editMode?.wrappedValue.isEditing != true {
-                            Button { Task { await fitThemIn() } } label: { Label("Fit them in", systemImage: "wand.and.rays") }
+                            Button { Task { await sortByCity() } } label: { Label("Sort by city", systemImage: "mappin.and.ellipse") }
                                 .font(Theme.text(.footnote)).foregroundStyle(Theme.link).textCase(nil)
                         }
                     }
                 } footer: {
-                    if !trip.route.isEmpty { Text("Each goes on the lightest day in its own city, on a day it's open.") }
+                    Text("Sort by city puts each place on a day in its own city, following your route.")
                 }
             }
             Section {
@@ -195,11 +198,11 @@ struct TripPlan: View {
 
     // MARK: Changes
 
-    private func fitThemIn() async {
-        let before = trip.places.filter { $0.dayNumber == nil }.count
-        if let fresh = await store.tripCall("POST", "/v1/trips/\(trip.id)/fit") {
-            let left = fresh.places.filter { $0.dayNumber == nil }.count
-            store.show("Fitted in \(Fmt.plural(before - left, "place"))")
+    /// Each place onto a day in its own city (by the route, or the cities' places sharing the days). No AI.
+    private func sortByCity() async {
+        if await store.tripCall("POST", "/v1/trips/\(trip.id)/sort-by-city") != nil {
+            Haptics.success()
+            store.show("Sorted by city")
         }
     }
 

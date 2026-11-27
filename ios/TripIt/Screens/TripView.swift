@@ -9,6 +9,7 @@ struct TripView: View {
     @State private var mode = "places"
     @State private var loadError: String?
     @State private var sheet: TripSheet?
+    @State private var scrolled: CGFloat = 0  // how far the places or plan list has scrolled
     @State private var librarySheet: LibrarySheet?
     @State private var confirmDelete = false
     @State private var editMode: EditMode = .inactive
@@ -53,8 +54,11 @@ struct TripView: View {
                     Text(trip.name).font(Theme.serif(34)).foregroundStyle(.white).lineLimit(2).minimumScaleFactor(0.7)
                     Text(Fmt.plural(trip.places.count, "place")).font(Theme.text(.subheadline)).foregroundStyle(.white.opacity(0.85))
                 }
-                .frame(maxWidth: .infinity, minHeight: 150, maxHeight: 150, alignment: .bottomLeading)
+                .opacity(max(0, 1 - Double(scrolled) / 90))
+                .frame(maxWidth: .infinity, alignment: .bottomLeading)
                 .padding(.horizontal, 20).padding(.bottom, 16)
+                .frame(height: max(0, 182 - scrolled), alignment: .bottom)  // moves up as the list scrolls
+                .clipped()
                 .background {
                     ZStack {
                         CityCover(city: trip.city, country: trip.country)
@@ -70,9 +74,10 @@ struct TripView: View {
             .pickerStyle(.segmented)
             .padding(.horizontal, 16).padding(.vertical, 8)
             switch mode {
-            case "plan": TripPlan(trip: trip, sheet: $sheet, librarySheet: $librarySheet).environment(\.editMode, $editMode)
+            case "plan": TripPlan(trip: trip, sheet: $sheet, librarySheet: $librarySheet, onScroll: { scrolled = $0 })
+                .environment(\.editMode, $editMode)
             case "map": TripMapView(trip: trip)
-            default: TripPlaces(trip: trip, librarySheet: $librarySheet)
+            default: TripPlaces(trip: trip, librarySheet: $librarySheet, onScroll: { scrolled = $0 })
             }
         }
         .navigationTitle(mode == "map" ? trip.name : "")
@@ -106,7 +111,7 @@ struct TripView: View {
                 .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
             }
         }
-        .onChange(of: mode) { _, _ in editMode = .inactive }
+        .onChange(of: mode) { _, _ in editMode = .inactive; scrolled = 0 }
     }
 
     private func menu(_ trip: TripDetail) -> some View {
@@ -119,10 +124,8 @@ struct TripView: View {
             }
             if !trip.isLocal {
                 Section {
-                    Button { sheet = .plan } label: { Label(trip.dayCount > 0 ? "Re-plan my days" : "Plan my days", systemImage: "sparkles") }
                     if trip.dayCount > 0 {
-                        Button { sheet = .tidy } label: { Label("Fix the order", systemImage: "wand.and.stars") }
-                        Button { Task { await suggest(trip) } } label: { Label("Suggest places for quiet days", systemImage: "lightbulb") }
+                        Button { Task { await sortByCity(trip) } } label: { Label("Put places on their city's days", systemImage: "mappin.and.ellipse") }
                     }
                 }
                 Section {
@@ -175,6 +178,13 @@ struct TripView: View {
             sheet = .export
         } else {
             store.paywall = PaywallRequest(link: nil, message: "Export your trips to a PDF, Notes, Notion or your calendar with Plus.")
+        }
+    }
+
+    private func sortByCity(_ trip: TripDetail) async {
+        if await store.tripCall("POST", "/v1/trips/\(trip.id)/sort-by-city") != nil {
+            Haptics.success()
+            store.show("Sorted by city")
         }
     }
 

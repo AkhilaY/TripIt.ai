@@ -3671,3 +3671,21 @@ async def test_place_photos_are_searched_once(tmp_path, monkeypatch):
     for _ in range(2):
         assert (await photos.place("Rigi Kulm", "Lucerne"))["photo"] == "photo-2"
     assert calls == ["Rigi Kulm Lucerne"]
+
+
+def test_trip_with_several_cities_and_sort_by_city(client):
+    job = import_reel(client, trip=False)
+    ids = [p["id"] for p in client.get("/v1/places", headers=H).json()]
+    trip = client.post("/v1/trips", json={"stops": [{"city": "Boston", "days": 1}, {"city": "New York", "days": 2}],
+                                          "place_ids": ids}, headers=H).json()
+    assert trip["name"] == "Boston" and trip["day_count"] == 3 and [s["city"] for s in trip["stops"]] == ["Boston", "New York"]
+    sorted_trip = client.post(f"/v1/trips/{trip['id']}/sort-by-city", headers=H).json()
+    days = {p["day_number"] for p in sorted_trip["places"] if p["city"] == "New York"}
+    assert days and days <= {2, 3}  # New York's days, never Boston's
+    blank = client.post("/v1/trips", json={"name": "Somewhere", "days": 2}, headers=H)
+    assert blank.status_code == 201 and blank.json()["city"] == "" and blank.json()["day_count"] == 2
+    assert job
+    # No route: places in one city share all the days
+    loose = client.post("/v1/trips", json={"name": "Loose", "days": 2, "place_ids": ids}, headers=H).json()
+    spread = client.post(f"/v1/trips/{loose['id']}/sort-by-city", headers=H).json()
+    assert all(p["day_number"] in (1, 2) for p in spread["places"] if p["city"])

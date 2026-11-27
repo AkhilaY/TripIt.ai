@@ -1,6 +1,7 @@
 import SwiftUI
 
-/// New trip: where and how long, then AI or by hand, then the saved places to take.
+/// New trip: its cities (any number, each with its days, or none yet), a name and dates, then the saved places to take.
+/// You build the days yourself; "Put places on their city's days" on the plan sorts them by the route.
 struct NewTripSheet: View {
     let placeIds: [String]
     let folderId: String?
@@ -8,8 +9,15 @@ struct NewTripSheet: View {
     @Environment(Router.self) private var router
     @Environment(\.dismiss) private var dismiss
 
+    struct Stop: Identifiable, Equatable {
+        let id = UUID()
+        var city: String
+        var days: Int
+    }
+
     @State private var step = 1
-    @State private var city = ""
+    @State private var stops: [Stop] = []
+    @State private var typed = ""
     @State private var name = ""
     @State private var days = 3
     @State private var startDate: Date?
@@ -17,39 +25,38 @@ struct NewTripSheet: View {
     @State private var pickingDates = false
     private var hasStart: Bool { startDate != nil }
     private var start: Date { startDate ?? Date() }
-    @State private var aiPlans = true
-    @State private var fillGaps = true
-    @State private var preferences = ""
     @State private var picked = Set<String>()
     @State private var touched = false
     @State private var filter = PlaceFilter()
     @State private var busy = false
     @State private var error: String?
 
+    /// The trip's length: its dates, else its cities' days added up, else what you set.
+    private var totalDays: Int {
+        if let s = startDate, let e = endDate { return min(21, max(1, (Calendar.current.dateComponents([.day], from: s, to: e).day ?? 0) + 1)) }
+        return stops.isEmpty ? days : min(21, stops.reduce(0) { $0 + $1.days })
+    }
+
     var body: some View {
         NavigationStack {
             Group {
-                switch step {
-                case 1: whereStep
-                case 2: howStep
-                default: placesStep
-                }
+                if step == 1 { whereStep } else { placesStep }
             }
             .tripBackground()
             .navigationTitle("New trip")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    if step > 1 { Button { withAnimation { step -= 1 } } label: { Label("Back", systemImage: "chevron.left") } }
+                    if step > 1 { Button { withAnimation { step = 1 } } label: { Label("Back", systemImage: "chevron.left") } }
                     else { Button("Cancel") { dismiss() } }
                 }
                 ToolbarItem(placement: .principal) {
                     HStack(spacing: 5) {
-                        ForEach(1...3, id: \.self) { i in
+                        ForEach(1...2, id: \.self) { i in
                             Capsule().fill(i <= step ? Theme.accent : Theme.fill).frame(width: 22, height: 4)
                         }
                     }
-                    .accessibilityLabel("Step \(step) of 3")
+                    .accessibilityLabel("Step \(step) of 2")
                 }
             }
             .overlay { if busy { busyOverlay } }
@@ -57,12 +64,6 @@ struct NewTripSheet: View {
             .sheet(isPresented: $pickingDates) {
                 DateRangeSheet(start: $startDate, end: $endDate)
                     .presentationDragIndicator(.visible)
-            }
-            .onChange(of: [startDate, endDate]) { _, _ in
-                // The number of days follows the dates you picked.
-                if let s = startDate, let e = endDate {
-                    days = min(21, max(1, (Calendar.current.dateComponents([.day], from: s, to: e).day ?? 0) + 1))
-                }
             }
         }
         .onAppear(perform: setUp)
@@ -72,25 +73,64 @@ struct NewTripSheet: View {
         let fromFolder = folderId.map { id in store.places.filter { $0.folderIds.contains(id) }.map(\.id) } ?? []
         picked = Set(placeIds + fromFolder)
         touched = !picked.isEmpty
-        city = picked.compactMap { store.place($0)?.city }.first { !$0.isEmpty } ?? ""
+        let cities = picked.compactMap { store.place($0)?.city }.filter { !$0.isEmpty }
+        for city in cities where !stops.contains(where: { PlaceFilter.normalize($0.city) == PlaceFilter.normalize(city) }) {
+            stops.append(Stop(city: city, days: 2))
+        }
     }
 
     // MARK: Step 1
 
+    private func toggle(_ city: String) {
+        let key = PlaceFilter.normalize(city)
+        if let i = stops.firstIndex(where: { PlaceFilter.normalize($0.city) == key }) {
+            stops.remove(at: i)
+        } else {
+            stops.append(Stop(city: city, days: 2))
+        }
+    }
+
+    private func addTyped() {
+        let city = typed.trimmingCharacters(in: .whitespaces)
+        guard !city.isEmpty else { return }
+        if !stops.contains(where: { PlaceFilter.normalize($0.city) == PlaceFilter.normalize(city) }) {
+            stops.append(Stop(city: city, days: 2))
+        }
+        typed = ""
+    }
+
     private var whereStep: some View {
         let cities = Dictionary(grouping: store.places.filter { !$0.city.isEmpty }, by: \.city).mapValues(\.count)
-            .sorted { $0.value > $1.value }.prefix(6)
+            .sorted { $0.value > $1.value }.prefix(10)
         return Form {
             Section {
-                TextField("City, e.g. Lisbon", text: $city)
-                    .textInputAutocapitalization(.words)
-                    .font(Theme.text(.title3))
+                ForEach($stops) { $stop in
+                    Stepper(value: $stop.days, in: 1...21) {
+                        HStack {
+                            Text(stop.city).font(Theme.text(.body))
+                            Spacer()
+                            Text(Fmt.plural(stop.days, "day")).foregroundStyle(Theme.secondary)
+                        }
+                    }
+                }
+                .onDelete { stops.remove(atOffsets: $0) }
+                .onMove { stops.move(fromOffsets: $0, toOffset: $1) }
+                HStack {
+                    TextField(stops.isEmpty ? "A city, e.g. Lisbon" : "Add another city", text: $typed)
+                        .textInputAutocapitalization(.words)
+                        .submitLabel(.done)
+                        .onSubmit(addTyped)
+                    if !typed.isEmpty {
+                        Button("Add", action: addTyped).font(Theme.text(.subheadline, weight: .medium))
+                    }
+                }
                 if !cities.isEmpty {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 8) {
                             ForEach(Array(cities), id: \.key) { item in
-                                FilterChip(label: item.key, count: item.value, isOn: PlaceFilter.normalize(item.key) == PlaceFilter.normalize(city)) {
-                                    city = item.key
+                                FilterChip(label: item.key, count: item.value,
+                                           isOn: stops.contains { PlaceFilter.normalize($0.city) == PlaceFilter.normalize(item.key) }) {
+                                    toggle(item.key)
                                 }
                             }
                         }
@@ -98,12 +138,14 @@ struct NewTripSheet: View {
                     .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
                 }
             } header: {
-                Text("Where to?")
+                Text("Cities, in order (optional)")
             } footer: {
-                EmptyView()
+                Text(stops.count > 1 ? "Swipe to remove a city; each gets its own days, in this order."
+                     : "Pick one or more, or none: you can add places from anywhere later.")
             }
+            .sensoryFeedback(.selection, trigger: stops.count)
             Section {
-                TextField(city.isEmpty ? "Trip name (optional)" : "\(city) trip", text: $name)
+                TextField(stops.first.map { "\($0.city) trip" } ?? "Trip name (optional)", text: $name)
                 Button { pickingDates = true } label: {
                     HStack {
                         Text("Dates").foregroundStyle(Theme.label)
@@ -113,20 +155,17 @@ struct NewTripSheet: View {
                         Image(systemName: "calendar").foregroundStyle(Theme.secondary)
                     }
                 }
-                if startDate == nil {
+                if startDate == nil && stops.isEmpty {
                     Stepper(value: $days, in: 1...21) {
                         HStack { Text("Days"); Spacer(); Text("\(days)").fontWeight(.semibold) }
                     }
                 } else {
-                    HStack { Text("Days"); Spacer(); Text("\(days)").fontWeight(.semibold) }
+                    HStack { Text("Days"); Spacer(); Text("\(totalDays)").fontWeight(.semibold) }
                 }
-            } footer: {
-                EmptyView()
             }
             Section {
                 Button("Next") { next() }
                     .buttonStyle(PrimaryButtonStyle())
-                    .disabled(city.trimmingCharacters(in: .whitespaces).isEmpty)
                     .listRowBackground(Color.clear)
                     .listRowInsets(EdgeInsets())
             }
@@ -134,11 +173,10 @@ struct NewTripSheet: View {
     }
 
     private func next() {
-        city = city.trimmingCharacters(in: .whitespaces)
-        guard !city.isEmpty else { error = "Where are you going?"; return }
-        if !touched {  // start with everything saved in that city ticked
-            let key = PlaceFilter.normalize(city)
-            for place in store.places where PlaceFilter.normalize(place.city) == key { picked.insert(place.id) }
+        addTyped()
+        if !touched {  // start with everything saved in those cities ticked
+            let keys = Set(stops.map { PlaceFilter.normalize($0.city) })
+            for place in store.places where keys.contains(PlaceFilter.normalize(place.city)) { picked.insert(place.id) }
             touched = true
         }
         withAnimation { step = 2 }
@@ -146,52 +184,8 @@ struct NewTripSheet: View {
 
     // MARK: Step 2
 
-    private var howStep: some View {
-        List {
-            Section {
-                choice(ai: true, symbol: "sparkles", color: Theme.gold, title: "Plan it for me",
-                       text: "Your places, arranged into \(Fmt.plural(days, "day")), grouped by area with sensible times. It can suggest a few extras for quiet days.")
-                choice(ai: false, symbol: "calendar", color: Theme.indigo, title: "I'll build it myself",
-                       text: "\(Fmt.plural(days, "empty day")) for you to fill from your saved places. You can fix the order later.")
-            } header: {
-                Text("How would you like to plan it?")
-            }
-        }
-    }
-
-    private func choice(ai: Bool, symbol: String, color: Color, title: String, text: String) -> some View {
-        Button {
-            aiPlans = ai
-            withAnimation { step = 3 }
-        } label: {
-            HStack(spacing: 14) {
-                SymbolTile(symbol: symbol, color: color, size: 44)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(title).font(Theme.text(.headline)).foregroundStyle(Theme.label)
-                    Text(text).font(Theme.text(.subheadline)).foregroundStyle(Theme.secondary)
-                }
-                Spacer()
-                Image(systemName: "chevron.right").foregroundStyle(Theme.tertiary)
-            }
-            .padding(.vertical, 6)
-        }
-    }
-
-    // MARK: Step 3
-
     private var placesStep: some View {
         List {
-            if aiPlans {
-                Section {
-                    Toggle(isOn: $fillGaps) {
-                        VStack(alignment: .leading) {
-                            Text("Suggest places for quiet days")
-                            Text("Marked “Suggested”, easy to keep or remove").font(Theme.text(.caption)).foregroundStyle(Theme.secondary)
-                        }
-                    }
-                    TextField("Anything to keep in mind? e.g. slow mornings", text: $preferences, axis: .vertical)
-                }
-            }
             PlaceChecklist(places: store.places, picked: $picked, filter: $filter)
         }
         .searchable(text: $filter.query, prompt: "Search your saved places")
@@ -200,8 +194,8 @@ struct NewTripSheet: View {
                 if let error { Text(error).font(Theme.text(.footnote)).foregroundStyle(Theme.danger) }
                 Button(action: create) {
                     HStack(spacing: 6) {
-                        Image(systemName: aiPlans ? "sparkles" : "calendar.badge.plus")
-                        Text((aiPlans ? "Plan my trip" : "Create trip") + (picked.isEmpty ? "" : " · \(Fmt.plural(picked.count, "place"))"))
+                        Image(systemName: "calendar.badge.plus")
+                        Text("Create trip" + (picked.isEmpty ? "" : " · \(Fmt.plural(picked.count, "place"))"))
                     }
                 }
                 .buttonStyle(PrimaryButtonStyle())
@@ -216,8 +210,7 @@ struct NewTripSheet: View {
             Color.black.opacity(0.25).ignoresSafeArea()
             VStack(spacing: 12) {
                 ProgressView().controlSize(.large)
-                Text(aiPlans ? "Planning your trip…" : "Creating your trip…").font(Theme.text(.headline))
-                if aiPlans { Text("This can take up to a minute.").font(Theme.text(.subheadline)).foregroundStyle(Theme.secondary) }
+                Text("Creating your trip…").font(Theme.text(.headline))
             }
             .padding(28)
             .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
@@ -225,23 +218,23 @@ struct NewTripSheet: View {
     }
 
     private func create() {
-        if aiPlans && picked.isEmpty && !fillGaps { error = "Pick some places, or turn on suggestions."; return }
         error = nil
         busy = true
         Task {
-            let body: [String: Any?] = [
-                "city": city, "name": name.trimmingCharacters(in: .whitespaces).isEmpty ? nil : name,
-                "days": days, "start_date": hasStart ? Fmt.iso(start) : nil, "place_ids": Array(picked),
-                "plan": aiPlans ? "ai" : "manual", "fill_gaps": aiPlans && fillGaps,
-                "preferences": preferences.trimmingCharacters(in: .whitespaces).isEmpty ? nil : preferences,
+            var body: [String: Any?] = [
+                "name": name.trimmingCharacters(in: .whitespaces).isEmpty ? nil : name,
+                "days": totalDays, "start_date": hasStart ? Fmt.iso(start) : nil, "place_ids": Array(picked), "plan": "manual",
             ]
+            if !stops.isEmpty {
+                body["stops"] = stops.map { ["city": $0.city, "days": $0.days] as [String: Any] }
+            }
             do {
                 let trip: TripDetail = try await API.shared.post("/v1/trips", body)
                 store.apply(trip)
                 await store.reloadTrips()
                 await store.reloadPlaces()
-                store.show(aiPlans ? (trip.plannedBy == "claude" ? "Your trip is planned" : "Planned by neighbourhood")
-                                   : "Your days are ready to fill")
+                store.show("Your days are ready to fill")
+                Haptics.success()
                 dismiss()
                 router.push(.trip(id: trip.id))
             } catch {

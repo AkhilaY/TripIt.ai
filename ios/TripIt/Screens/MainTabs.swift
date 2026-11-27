@@ -11,9 +11,6 @@ struct MainTabs: View {
     @State private var keyboardUp = false
     @State private var searching = false
     @State private var adding = false  // the + menu
-    @State private var newTrip = false
-    @State private var newList = false
-    @State private var listName = ""
 
     private var tabs: [BottomBar.Item] {
         var items: [BottomBar.Item] = [
@@ -72,21 +69,7 @@ struct MainTabs: View {
                 .environment(router).environment(store)
                 .tint(Theme.accent)
         }
-        .confirmationDialog("Add", isPresented: $adding) {
-            Button("Add a place") { router.addRequest = Router.AddRequest() }
-            Button("New trip") { newTrip = true }
-            Button("New list") { listName = ""; newList = true }
-        }
-        .sheet(isPresented: $newTrip) { NewTripSheet(placeIds: [], folderId: nil).environment(store).environment(router) }
-        .alert("New list", isPresented: $newList) {
-            TextField("e.g. Date night", text: $listName)
-            Button("Cancel", role: .cancel) {}
-            Button("Create") {
-                let name = listName.trimmingCharacters(in: .whitespaces)
-                guard !name.isEmpty else { return }
-                Task { if let folder = await store.createFolder(name) { router.tab = .library; router.push(.folder(id: folder.id)) } }
-            }
-        }
+        .modifier(AddMenu(adding: $adding))
         .sheet(item: $router.bookingRequest) { request in
             BookingSheet(request: request)
                 .environment(router).environment(store)
@@ -325,6 +308,43 @@ private struct RootToolbar: ViewModifier {
                 }
                 Button { router.showProfile = true } label: { Image(systemName: "person.crop.circle") }
                     .accessibilityLabel("Profile and settings")
+            }
+        }
+    }
+}
+
+
+/// The + button's menu: add a place, start a trip, or make a list.
+private struct AddMenu: ViewModifier {
+    @Binding var adding: Bool
+    @Environment(Store.self) private var store
+    @Environment(Router.self) private var router
+    @State private var newTrip = false
+    @State private var newList = false
+    @State private var listName = ""
+
+    func body(content: Content) -> some View {
+        content
+            .confirmationDialog("Add", isPresented: $adding) {
+                Button("Add a place") { router.addRequest = Router.AddRequest() }
+                Button("New trip") { newTrip = true }
+                Button("New list") { listName = ""; newList = true }
+            }
+            .sheet(isPresented: $newTrip) { NewTripSheet(placeIds: [], folderId: nil).environment(store).environment(router) }
+            .alert("New list", isPresented: $newList) {
+                TextField("e.g. Date night", text: $listName)
+                Button("Cancel", role: .cancel) {}
+                Button("Create") { create() }
+            }
+    }
+
+    private func create() {
+        let name = listName.trimmingCharacters(in: .whitespaces)
+        guard !name.isEmpty else { return }
+        Task {
+            if let folder = await store.createFolder(name) {
+                router.tab = .library
+                router.push(.folder(id: folder.id))
             }
         }
     }
